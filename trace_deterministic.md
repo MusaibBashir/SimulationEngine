@@ -6,7 +6,7 @@
 
 ```
 arrivals ~ Deterministic(5 values, repeating)
-  Server [c=1, FIFO, Deterministic(5 values, repeating), next=exit]
+  Server [c=1, FIFO, service Deterministic(5 values, repeating), next=exit]
   entry: Server
 ```
 

@@ -62,7 +62,7 @@ Experiment e("my study", [](SimulationSystem& s){ /* build the model */ });
 e.replications(10).baseSeed(9000u).observeEvery(5.0);
 e.run();
 e.writeWelchSeries("welch.csv", 20);        // plot it, find the transient
-SimTime w = e.suggestWarmUp(20);            // heuristic starting point
+SimTime w = e.suggestWarmUp();              // MSER; a starting point
 
 e.replications(10).warmUp(w);
 e.run();
@@ -113,6 +113,12 @@ line by line against a worked example from your notes:
 Traces also `diff`. A refactor that changes behaviour shows up as a diff rather
 than as a slightly-off average — which is a far stronger statement.
 
+## New here?
+
+**Start with [`examples/`](examples/README.md)** — ten runnable programs and a
+guide written for someone who knows C++ but not this codebase. You should not
+need to read the engine's source to build a model with it.
+
 ## Documents
 
 | File | What it is |
@@ -121,6 +127,7 @@ than as a slightly-off average — which is a far stronger statement.
 | `V2_READLOG.md` | Review of v2 and v2.1: every bug found and why it mattered |
 | `V3_READLOG.md` | What each v3 abstraction bought, what it cost, what was skipped |
 | `V4_READLOG.md` | Warm-up removal, Welch's method, confidence intervals |
+| `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
 ## Layout
 

@@ -465,6 +465,33 @@ void testExperiment() {
     check(identical, "same base seed reproduces the whole experiment");
 }
 
+void testWarmUpSuggestion() {
+    section("MSER warm-up suggestion");
+    // A BUSY queue (rho = 0.9) has a real transient: it takes hundreds of
+    // minutes to fill from empty toward steady state.
+    Experiment busy("busy", [](SimulationSystem& s) {
+        Model& m = s.model();
+        m.setInterarrival(std::make_unique<Exponential>(1.0));
+        m.addStation("S", 1, QueueDiscipline::FIFO, std::make_unique<Exponential>(0.9));
+        m.setEntry("S");
+        s.setTermination(std::make_unique<TimeLimit>(20000.0));
+    });
+    busy.replications(20).baseSeed(500u).observeEvery(20.0);
+    busy.run();
+    const SimTime w = busy.suggestWarmUp();
+    check(w > 0.0, "a busy queue has a transient worth discarding");
+    check(w < 20000.0 * 0.5, "and MSER never discards more than half the run");
+
+    // The averaged series must actually rise from its empty start toward the
+    // steady-state level -- that rise IS the transient the rule is finding.
+    const std::vector<double> s = busy.welchAverages(0);
+    check(s.size() > 100, "series collected");
+    double head = 0.0, tail = 0.0;
+    for (std::size_t k = 0; k < 5; ++k) head += s[k];
+    for (std::size_t k = s.size() - 100; k < s.size(); ++k) tail += s[k];
+    check(head / 5.0 < tail / 100.0, "the run starts emptier than it ends");
+}
+
 void testTheoryInsideInterval() {
     section("M/M/1 theory falls inside the interval");
     // The question open since v2, as an automated check.
@@ -475,7 +502,12 @@ void testTheoryInsideInterval() {
         m.setEntry("Server");
         s.setTermination(std::make_unique<TimeLimit>(20000.0));
     });
-    e.replications(10).baseSeed(9000u).warmUp(4000.0);
+    // 20 replications. At 10 the half-width is wide enough that coverage
+    // depends on the seed -- and a test that fails 1 run in 20 is not a test.
+    // (The warm-up here is small on purpose: MSER says this model's transient
+    // is only tens of minutes, so discarding thousands would just throw away
+    // data and widen the interval. See examples/07.)
+    e.replications(20).baseSeed(9000u).warmUp(500.0);
     e.run();
 
     struct Case { const char* name; double ReplicationResult::* field; double theory; };
@@ -514,6 +546,7 @@ int main() {
     testWarmUpRemoval();
     testObservations();
     testExperiment();
+    testWarmUpSuggestion();
     testTheoryInsideInterval();
 
     std::cout << "\n" << (g_checks - g_failures) << " / " << g_checks << " checks passed\n";

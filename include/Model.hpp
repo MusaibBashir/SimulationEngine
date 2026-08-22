@@ -20,8 +20,21 @@
 #include "Distribution.hpp"
 
 class Model {
+public:
+    // v4.1: an attribute every arriving entity is given, drawn from its own
+    // distribution. This is how a model says "customers have a priority",
+    // "jobs have a due date", "parts have a processing time" -- and it is what
+    // makes the Priority, SPT and EDD disciplines do anything at all. Without
+    // it every entity reads 0.0 for those attributes and all three degenerate
+    // to FIFO, silently.
+    struct ArrivalAttribute {
+        std::string name;
+        std::unique_ptr<IDistribution> distribution;
+    };
+
 private:
     std::vector<std::unique_ptr<Station>> m_stations;   // the Model OWNS them
+    std::vector<ArrivalAttribute> m_arrivalAttributes;
     std::unique_ptr<IDistribution> m_interarrival;
     Station* m_entry{nullptr};                          // where arrivals land
 
@@ -44,6 +57,10 @@ public:
     void connect(const std::string& from, const std::string& to);
 
     void setInterarrival(std::unique_ptr<IDistribution> d);
+
+    // Give every arriving entity an attribute drawn from `d`.
+    void assignOnArrival(const std::string& name, std::unique_ptr<IDistribution> d);
+    const std::vector<ArrivalAttribute>& arrivalAttributes() const { return m_arrivalAttributes; }
     void setEntry(const std::string& name);
 
     // --- access ---

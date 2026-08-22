@@ -20,6 +20,9 @@
 #include "Statistics.hpp"
 #include "Distribution.hpp"
 
+class Entity;
+class RandomStream;
+
 class Station {
 private:
     std::string m_name;
@@ -31,6 +34,12 @@ private:
     // system". A raw pointer because the Model owns every Station -- same
     // owner/observer rule as everywhere else in this project.
     Station* m_next{nullptr};
+
+    // v4.1: if non-empty, service duration is READ FROM THE ENTITY'S ATTRIBUTE
+    // of this name instead of drawn from m_service. Job-shop models need this:
+    // a job carries its own processing time, and SPT sequences on the same
+    // number that is actually used, rather than on an unrelated estimate.
+    std::string m_serviceAttribute;
 
     // Per-station statistics. Utilisation and queue length are properties of a
     // station, not of the system: a restaurant can have an idle host and a
@@ -55,6 +64,13 @@ public:
 
     IDistribution& serviceDistribution() { return *m_service; }
     const IDistribution& serviceDistribution() const { return *m_service; }
+
+    // v4.1. Pass an empty string to go back to drawing from the distribution.
+    void setServiceFromAttribute(const std::string& attributeName);
+    bool usesServiceAttribute() const { return !m_serviceAttribute.empty(); }
+
+    // The one place a service duration comes from, whichever source is in use.
+    SimTime drawService(const Entity& e, RandomStream& rng);
 
     Station* next() const { return m_next; }
     void setNext(Station* next) { m_next = next; }

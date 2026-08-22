@@ -5,6 +5,65 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [4.1.0] — 2026-08-22 — "A folder your friend can learn from"
+
+An `examples/` folder of ten runnable programs covering every feature, plus two
+engine additions they needed and one real bug they exposed.
+
+### Added
+
+- **`examples/`** — ten self-contained programs and a `README.md` written for
+  someone who knows C++ and has never seen this codebase: build instructions, a
+  full API reference, the reserved attribute names, a list of mistakes to avoid
+  and a coursework checklist. Every example is built by CMake into
+  `build/examples/`.
+- **`Model::assignOnArrival(name, distribution)`** — gives every arriving entity
+  an attribute drawn from its own distribution. **Without this the Priority, SPT
+  and EDD disciplines did nothing**: every entity read `0.0`, every comparison
+  tied, and all three silently behaved as FIFO. Half the shipped queue
+  disciplines were unusable and no test caught it, because every test used FIFO.
+- **`Station::setServiceFromAttribute(name)`** — service duration read from the
+  entity's attribute instead of drawn. Job-shop models need it: SPT must sequence
+  on the number that is actually used, not an unrelated estimate.
+
+### Fixed
+
+- **`Experiment::suggestWarmUp()` was broken.** The tolerance-band heuristic
+  returned about two thirds of the run length regardless of the run length —
+  13230 for a 20000-minute run, 26660 for a 40000-minute one. On a noisy series
+  some late point always falls outside the band, so the answer collapsed to the
+  search cap. Replaced with **MSER**: pick the truncation minimising the standard
+  error of the remaining mean, which trades bias against discarded data instead
+  of guessing. Caught only because an example printed it at two run lengths.
+- **The v4 headline demo was passing on luck.** `main` and the "theory inside the
+  interval" test used 10 replications, where the half-width is marginal enough
+  that coverage depends on the seed. Both now use 20. At 20 replications theory
+  is inside at every run length tried (20000 / 50000 / 200000), with or without
+  a warm-up — so the v4 claim stands, but it now stands for a reason.
+
+### Changed
+
+- Example 03's stated conclusion was **backwards** and the data said so. For
+  fixed total capacity, more slower servers gives *lower* waiting time (Wq 3.20
+  → 2.84 → 2.59) but *higher* time in system (W 4.00 → 4.44 → 4.99), matching
+  Erlang-C. The example now shows both columns and makes the disagreement the
+  lesson: which arrangement is "better" depends on the metric you chose.
+- Example 07 rebuilt around a ρ = 0.9 queue. The original used ρ = 0.8, whose
+  transient turns out to last only tens of minutes — so it could not demonstrate
+  warm-up removal at all. The example now also shows that warm-up removal *widens*
+  the confidence interval, and that a short run stays biased no matter how you
+  truncate it.
+- `CMakeLists.txt` builds every example. This is the one place `file(GLOB)` is
+  used, and the file says why.
+
+### Verified
+
+- Clean under `-Wall -Wextra -Wpedantic`; `ctest` passes; **128/128 checks**.
+- All ten examples build and run, and each one's stated conclusion was checked
+  against its actual output — which is how three of the errors above were found.
+
+---
+
 ## [4.0.0] — 2026-08-22 — "How confident are we?"
 
 Since v2 every version has reported `Wq = 3.2864` against a theoretical 3.2000

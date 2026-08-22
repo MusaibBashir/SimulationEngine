@@ -52,3 +52,10 @@ Thumbs.db
 welch_series.csv
 *.trace
 results/
+
+# ---- example artefacts --------------------------------------------------
+examples/trace_*.md
+examples/welch_*.csv
+ex[0-9]*
+libdes.a
+obj/

@@ -148,25 +148,37 @@ std::vector<double> Experiment::welchAverages(int window) const {
     return smooth;
 }
 
-SimTime Experiment::suggestWarmUp(int window, double tolerance) const {
-    const std::vector<double> s = welchAverages(window);
-    if (s.size() < 10) return 0.0;
+SimTime Experiment::suggestWarmUp(int window, double maxFraction) const {
+    // MSER is applied to the cross-replication average, NOT to a smoothed copy.
+    // Smoothing is for the human reading the plot; smoothing before MSER would
+    // blur the very transient the rule is trying to locate. window defaults to 0
+    // for that reason -- pass a window only if you want to experiment.
+    const std::vector<double> y = welchAverages(window);
+    const std::size_t n = y.size();
+    if (n < 20) return 0.0;
 
-    // Compare against the mean of the last third, taken as "settled".
-    const std::size_t tailStart = s.size() * 2 / 3;
-    double tail = 0.0;
-    for (std::size_t k = tailStart; k < s.size(); ++k) tail += s[k];
-    tail /= static_cast<double>(s.size() - tailStart);
-    if (tail <= 0.0) return 0.0;
+    const std::size_t maxD = static_cast<std::size_t>(n * maxFraction);
+    double bestScore = -1.0;
+    std::size_t bestD = 0;
 
-    // Walk forward to the first index from which the series STAYS inside the
-    // band. "Stays" matters: the transient crosses the steady-state level on its
-    // way up, so the first touch is far too early an answer.
-    std::size_t settled = 0;
-    for (std::size_t k = 0; k < tailStart; ++k) {
-        if (std::fabs(s[k] - tail) / tail > tolerance) settled = k + 1;
+    for (std::size_t d = 0; d < maxD; ++d) {
+        const std::size_t m = n - d;
+        double sum = 0.0;
+        for (std::size_t i = d; i < n; ++i) sum += y[i];
+        const double mean = sum / static_cast<double>(m);
+
+        double ss = 0.0;
+        for (std::size_t i = d; i < n; ++i) { const double e = y[i] - mean; ss += e * e; }
+
+        // Divide by m SQUARED, not m. m gives the variance of the retained data,
+        // which is minimised by keeping almost nothing. m^2 gives the squared
+        // standard error OF THE MEAN, which is what you actually want small --
+        // and it is what stops the rule from discarding the entire run.
+        const double score = ss / (static_cast<double>(m) * static_cast<double>(m));
+        if (bestScore < 0.0 || score < bestScore) { bestScore = score; bestD = d; }
     }
-    return static_cast<SimTime>(settled) * m_observeInterval;
+
+    return static_cast<SimTime>(bestD) * m_observeInterval;
 }
 
 bool Experiment::writeWelchSeries(const std::string& path, int window) const {

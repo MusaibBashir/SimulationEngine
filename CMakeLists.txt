@@ -45,6 +45,23 @@ foreach(target des des_tests)
     endif()
 endforeach()
 
+# One executable per example, all in build/examples/.
+file(GLOB EXAMPLE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/examples/*.cpp)
+foreach(example ${EXAMPLE_SOURCES})
+    get_filename_component(name ${example} NAME_WE)
+    add_executable(${name} ${example} ${DES_SOURCES})
+    set_target_properties(${name} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/examples)
+    if(MSVC)
+        target_compile_options(${name} PRIVATE /W4)
+    else()
+        target_compile_options(${name} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endforeach()
+# GLOB is used HERE and nowhere else: examples are standalone demos, so a newly
+# added one silently missing from the build is a nuisance rather than a phantom
+# linker error. The engine's own sources are still listed explicitly above.
+
 # `ctest` runs the suite.
 enable_testing()
 add_test(NAME unit_tests COMMAND des_tests)

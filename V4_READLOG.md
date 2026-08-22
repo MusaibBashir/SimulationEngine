@@ -105,12 +105,16 @@ time,smoothed_number_in_system
 2000.000000,4.078049
 ```
 
-`suggestWarmUp()` returns 3920.0 for this model. It is a **heuristic** and it is
-labelled as one: it walks forward to the last index from which the series stays
-inside a tolerance band of its tail mean. "Stays" rather than "first enters"
-matters — the transient crosses the steady-state level on its way up, so the
-first touch is far too early an answer. Welch's method is properly finished by
-eye on a plot, which is why the CSV is written.
+> **CORRECTED IN v4.1.** The tolerance-band heuristic originally shipped here was
+> wrong. It returned roughly two thirds of the run length *whatever the run
+> length* — 13230 for a 20000-minute run, 26660 for a 40000-minute one — because
+> on a noisy series some late point always falls outside the band, so the answer
+> collapsed to the cap. It is now **MSER**: choose the truncation that minimises
+> the standard error of the remaining mean, trading bias against the data given
+> up. See the v4.1 entry in `CHANGELOG.md`.
+
+Welch's method is properly finished by eye on a plot, which is why the CSV is
+written; `suggestWarmUp()` is a starting point, not an answer.
 
 ## 3. Replications and confidence intervals
 

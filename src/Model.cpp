@@ -39,6 +39,13 @@ void Model::setInterarrival(std::unique_ptr<IDistribution> d) {
     m_interarrival = std::move(d);
 }
 
+void Model::assignOnArrival(const std::string& name, std::unique_ptr<IDistribution> d) {
+    assert(d != nullptr);
+    assert(name != "waitTime" && name != "stationEntry" && name != "waitHere" &&
+           "that attribute name is reserved by the engine");
+    m_arrivalAttributes.push_back(ArrivalAttribute{name, std::move(d)});
+}
+
 void Model::setEntry(const std::string& name) {
     Station* s = station(name);
     assert(s != nullptr && "setEntry(): unknown station");
@@ -62,6 +69,7 @@ const Station* Model::station(const std::string& name) const {
 void Model::reset() {
     for (auto& s : m_stations) s->reset();
     if (m_interarrival) m_interarrival->reset();
+    for (auto& a : m_arrivalAttributes) a.distribution->reset();
 }
 
 void Model::validate() const {
@@ -87,6 +95,8 @@ std::string Model::describe() const {
     std::ostringstream os;
     os << "arrivals ~ " << (m_interarrival ? m_interarrival->describe() : "<none>") << "\n";
     for (const auto& s : m_stations) os << "  " << s->describe() << "\n";
+    for (const auto& a : m_arrivalAttributes)
+        os << "  attribute " << a.name << " ~ " << a.distribution->describe() << "\n";
     os << "  entry: " << (m_entry ? m_entry->name() : "<none>");
     return os.str();
 }

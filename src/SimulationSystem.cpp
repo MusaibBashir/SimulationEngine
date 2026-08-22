@@ -182,7 +182,7 @@ void SimulationSystem::admit(Entity* e, Station* station) {
         // NOW. That is exactly what distinguishes an activity from a delay.
         const Activity service(station->name(),
                                m_clock.now(),
-                               station->serviceDistribution().draw(m_rng));
+                               station->drawService(*e, m_rng));
         scheduleEvent(EventType::Departure, service.endTime(), e, station);
 
         if (m_trace.isOn()) {
@@ -229,7 +229,7 @@ void SimulationSystem::startNextService(Station* station) {
 
     station->resource().seize();
     const Activity service(station->name(), m_clock.now(),
-                           station->serviceDistribution().draw(m_rng));
+                           station->drawService(*next, m_rng));
     scheduleEvent(EventType::Departure, service.endTime(), next, station);
 
     if (m_trace.isOn()) {
@@ -279,6 +279,10 @@ void SimulationSystem::handleArrival(const EventNotice& /*notice*/) {
     // creationTime before it actually arrived, inflating every time-in-system.
     Entity* arriving = createEntity();
     arriving->setAttribute("waitTime", 0.0);
+    // v4.1: stamp the model's arrival attributes -- priority, due date,
+    // processing time, whatever this model says an entity carries.
+    for (const auto& a : m_model.arrivalAttributes())
+        arriving->setAttribute(a.name, a.distribution->draw(m_rng));
     m_stats.recordArrival(m_clock.now());
 
     if (m_trace.isOn()) {

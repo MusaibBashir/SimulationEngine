@@ -108,13 +108,28 @@ public:
     // kills the noise; smoothing second is what makes the trend visible.
     std::vector<double> welchAverages(int window) const;
 
-    // Where the smoothed series first settles within `tolerance` (relative) of
-    // its own tail mean, expressed as a TIME.
+    // Suggest a truncation point automatically, by MSER (Marginal Standard
+    // Error Rule): choose the d that minimises
     //
-    // This is a HEURISTIC, and Welch's method is genuinely meant to be finished
-    // by eye on a plot. Treat the number as a starting suggestion, then look at
-    // the series -- writeWelchSeries() dumps it as CSV for exactly that.
-    SimTime suggestWarmUp(int window, double tolerance = 0.05) const;
+    //     MSER(d) = (1 / (n-d)^2) * SUM_{i=d..n-1} (Y_i - Ybar_d)^2
+    //
+    // i.e. the truncation that gives the most precise estimate of the remaining
+    // mean. Discarding more data shrinks the numerator but also shrinks (n-d),
+    // so the rule trades bias against variance rather than guessing.
+    //
+    // WHY NOT A TOLERANCE BAND: the obvious heuristic -- "the first point after
+    // which the curve stays within 5% of its tail mean" -- fails on a noisy
+    // series, because *some* late point always falls outside the band, and the
+    // answer collapses to whatever cap you imposed. It returned two thirds of
+    // the run length regardless of the run length, which is how it was caught.
+    //
+    // `maxFraction` refuses to discard more than that share of the data: an
+    // answer near the end of the series means the run was too short to have
+    // reached steady state, and should be treated as a warning, not an answer.
+    //
+    // Still a HEURISTIC. Welch's method is meant to be finished by eye on a
+    // plot; writeWelchSeries() dumps the CSV for exactly that.
+    SimTime suggestWarmUp(int window = 0, double maxFraction = 0.5) const;
 
     bool writeWelchSeries(const std::string& path, int window) const;
 

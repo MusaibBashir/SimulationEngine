@@ -6,9 +6,9 @@
 
 ```
 arrivals ~ Exponential(mean=15)
-  Host [c=1, FIFO, Exponential(mean=2), next=Waiters]
-  Waiters [c=3, FIFO, Triangular(20, 35, 60), next=Cashier]
-  Cashier [c=1, Highest(priority), Uniform(1, 4), next=exit]
+  Host [c=1, FIFO, service Exponential(mean=2), next=Waiters]
+  Waiters [c=3, FIFO, service Triangular(20, 35, 60), next=Cashier]
+  Cashier [c=1, Highest(priority), service Uniform(1, 4), next=exit]
   entry: Host
 ```
 

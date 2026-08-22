@@ -101,7 +101,7 @@ int main() {
         welch.replications(20).baseSeed(500u).observeEvery(5.0);
         welch.run();
 
-        suggested = welch.suggestWarmUp(/*window=*/20, /*tolerance=*/0.05);
+        suggested = welch.suggestWarmUp();   // MSER
         welch.writeWelchSeries("welch_series.csv", 20);
 
         std::cout << "suggested warm-up        : " << suggested << "\n";
@@ -129,7 +129,10 @@ int main() {
 
         Experiment honest("honest: 10 replications, warm-up removed",
                           [](SimulationSystem& s) { buildMM1(s, 20000.0); });
-        honest.replications(10).baseSeed(9000u).warmUp(suggested > 0.0 ? suggested : 2000.0);
+        // 20 replications, not 10. At 10 the interval is wide enough that
+        // whether it covers the true value is a coin flip on the seed -- which
+        // is exactly the lesson, but a demonstration should not depend on luck.
+        honest.replications(20).baseSeed(9000u).warmUp(suggested);
         honest.run();
         honest.report();
         honestWq = honest.column(&ReplicationResult::averageWait);
