@@ -78,6 +78,8 @@ directory. Run them from a directory you don't mind cluttering.
 | 10 | `10_stopping_and_tracing.cpp` | Termination rules, trace files, priorities, seeds. |
 | 11 | `11_flowchart_line.cpp` | **The full block set**: Assign, Delay, Decide, Batch, Separate, Record, Dispose. Branching and batching. |
 | 12 | `12_shared_resources.cpp` | **Shared resources**, balking, reneging, N-way Decide. |
+| 13 | `13_random_numbers.cpp` | Where the random numbers come from, all twelve distributions, and testing a generator. |
+| 14 | `14_variance_reduction.cpp` | Antithetic variates and common random numbers — a narrower answer for the same compute. |
 
 If you are short of time: **01, 02, 08**. Those three are the difference between
 using the tool correctly and producing confident nonsense. Then **11** if your
@@ -249,6 +251,13 @@ leave the system.
 | `uniform(low, high)` | Equally likely across a range. |
 | `triangular(low, mode, high)` | Min / most-likely / max. **Best when you have no data but do have an opinion** — which is most coursework. |
 | `fixedTimes({a, b, c})` | A fixed list, in order. For hand-checking. |
+| `normal(mean, sd)` | Symmetric. Truncated at zero by default — a negative duration is nonsense. |
+| `lognormalFrom(mean, sd)` | Right-skewed, never negative. Use this, not `lognormal()`, unless you really do have the *log* parameters. |
+| `weibull(scale, shape)` | Time to failure. shape < 1 infant mortality, 1 exponential, > 1 wear-out. |
+| `erlang(mean, k)` | k sequential phases. Between constant (k→∞) and exponential (k=1) — where most real service lives. |
+| `discrete({v...}, {p...})` | Part types, batch sizes. |
+| `empirical({observations})` | Sample straight from data you measured. |
+| `poisson(mean)` | Counts, not durations. |
 
 > **`Exponential` takes the MEAN, not the rate.** `Exponential(4.0)` means "4
 > minutes on average". Passing `0.25` because "the rate is 0.25/min" gives a
@@ -382,6 +391,9 @@ same range.
    usually worth more marks than the simulation.
 7. Draw the flowchart on paper before you write it. `describe()` prints back
    what the engine thinks you built — compare the two.
-8. Report the **maximum** as well as the mean whenever you use a priority or
+8. When **comparing** designs rather than measuring one, use
+   `separateStreams()` and `Experiment::compare()`. A paired comparison can be
+   an order of magnitude tighter than two separate intervals, for the same runs.
+9. Report the **maximum** as well as the mean whenever you use a priority or
    shortest-job rule — those rules buy a good average by treating somebody
    badly, and the average hides it.

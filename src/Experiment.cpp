@@ -69,6 +69,8 @@ Experiment& Experiment::replications(int n) { assert(n > 0); m_replications = n;
 Experiment& Experiment::baseSeed(unsigned s) { m_baseSeed = s; return *this; }
 Experiment& Experiment::warmUp(SimTime t) { assert(t >= 0.0); m_warmUp = t; return *this; }
 Experiment& Experiment::observeEvery(SimTime dt) { assert(dt > 0.0); m_observeInterval = dt; return *this; }
+Experiment& Experiment::separateStreams(bool on) { m_separateStreams = on; return *this; }
+Experiment& Experiment::antitheticPairs(bool on) { m_antithetic = on; return *this; }
 
 void Experiment::run() {
     m_results.clear();
@@ -82,29 +84,50 @@ void Experiment::run() {
         // a single number.
         const unsigned seed = m_baseSeed + static_cast<unsigned>(r);
 
-        SimulationSystem sim(seed);
-        m_build(sim);                       // caller builds the model
-        if (m_warmUp > 0.0)          sim.setWarmUp(m_warmUp);
-        if (m_observeInterval > 0.0) sim.setObservationInterval(m_observeInterval);
+        // One run, or -- with antithetic pairing -- the same seed run twice,
+        // the second time with every uniform mirrored, averaged into one result.
+        auto oneRun = [&](bool antithetic) {
+            SimulationSystem sim(seed);
+            m_build(sim);                       // caller builds the model
+            if (m_separateStreams) sim.useSeparateStreams();
+            if (antithetic)        sim.useAntithetic();
+            if (m_warmUp > 0.0)          sim.setWarmUp(m_warmUp);
+            if (m_observeInterval > 0.0) sim.setObservationInterval(m_observeInterval);
 
-        sim.initialise();
-        sim.run();
+            sim.initialise();
+            sim.run();
 
-        const Station& entry = sim.model().stationAt(0);
-        const SimTime measured = sim.measuredTime();
+            const Station& entry = sim.model().stationAt(0);
+            const SimTime measured = sim.measuredTime();
 
-        ReplicationResult res;
-        res.seed                = seed;
-        res.served              = sim.statistics().numberServed();
-        res.averageWait         = sim.statistics().averageWaitingTime();
-        res.averageTimeInSystem = sim.statistics().averageTimeInSystem();
-        res.Lq                  = sim.statistics().timeAverageA(measured);
-        res.L                   = sim.statistics().timeAverageB(measured);
-        res.utilisation         = entry.stats().utilisation(measured, entry.resource().capacity());
-        res.measuredTime        = measured;
+            ReplicationResult res;
+            res.seed                = seed;
+            res.served              = sim.statistics().numberServed();
+            res.averageWait         = sim.statistics().averageWaitingTime();
+            res.averageTimeInSystem = sim.statistics().averageTimeInSystem();
+            res.Lq                  = sim.statistics().timeAverageA(measured);
+            res.L                   = sim.statistics().timeAverageB(measured);
+            res.utilisation         = entry.stats().utilisation(measured, entry.resource().capacity());
+            res.measuredTime        = measured;
+            if (m_observeInterval > 0.0) m_series.push_back(sim.observations());
+            return res;
+        };
+
+        ReplicationResult res = oneRun(false);
+        if (m_antithetic) {
+            // Average the mirrored run INTO this replication rather than adding
+            // it as a second one. The pair is one observation: its two halves
+            // are negatively correlated, so treating them as independent would
+            // understate the interval, which is the one direction that matters.
+            const ReplicationResult mirror = oneRun(true);
+            res.averageWait         = 0.5 * (res.averageWait + mirror.averageWait);
+            res.averageTimeInSystem = 0.5 * (res.averageTimeInSystem + mirror.averageTimeInSystem);
+            res.Lq                  = 0.5 * (res.Lq + mirror.Lq);
+            res.L                   = 0.5 * (res.L  + mirror.L);
+            res.utilisation         = 0.5 * (res.utilisation + mirror.utilisation);
+            res.served              = (res.served + mirror.served) / 2;
+        }
         m_results.push_back(res);
-
-        if (m_observeInterval > 0.0) m_series.push_back(sim.observations());
     }
 }
 
@@ -221,6 +244,29 @@ void line(const char* label, const std::vector<double>& xs) {
               << ", " << std::setw(9) << (m + hw) << "]\n";
 }
 }  // namespace
+
+Experiment::Comparison Experiment::compare(Experiment& a, Experiment& b,
+                                           double ReplicationResult::* field) {
+    Comparison c;
+    const std::vector<double> xa = a.column(field);
+    const std::vector<double> xb = b.column(field);
+    const std::size_t n = std::min(xa.size(), xb.size());
+    if (n < 2) return c;
+
+    // PAIR replication i of a with replication i of b. They share a seed, so
+    // with separateStreams() they saw the same arrival pattern -- and that
+    // common noise cancels in the difference.
+    for (std::size_t i = 0; i < n; ++i) c.differences.push_back(xa[i] - xb[i]);
+
+    c.meanDifference = Summary::mean(c.differences);
+    c.halfWidth      = Summary::halfWidth95(c.differences);
+    // The interval is on the DIFFERENCES. Excluding zero means the two designs
+    // really do differ; straddling zero means this much evidence cannot tell
+    // them apart -- which is not the same as "they are the same".
+    c.differsSignificantly = (c.meanDifference - c.halfWidth > 0.0) ||
+                             (c.meanDifference + c.halfWidth < 0.0);
+    return c;
+}
 
 void Experiment::report() const {
     std::cout << std::fixed << std::setprecision(4);

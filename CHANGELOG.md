@@ -5,6 +5,71 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [8.0.0] — 2026-08-22 — "Where the numbers come from"
+
+Random number generation, from the bit source up. Narrative in `V8_READLOG.md`.
+
+### Added
+
+- **`u01()` as the single primitive.** Every variate is now one uniform pushed
+  through an inverse CDF. Not tidiness: common random numbers need streams that
+  line up, and antithetic variates need exactly one uniform per variate,
+  monotonically transformed. `std::exponential_distribution` is opaque about how
+  many uniforms it consumes, so it could not be paired with anything.
+- **Pluggable engines**: `EngineKind::MersenneTwister` (default),
+  `LinearCongruential`, and **`Randu`** — IBM's famously broken generator,
+  included so the tests can catch it.
+- **`StreamTests`**: chi-square uniformity, Kolmogorov–Smirnov, runs up-and-down,
+  autocorrelation at lag k, and a **serial test in 3D**. RANDU passes every
+  one-dimensional test and fails the 3-D one by a factor approaching twenty, with
+  257 of 4096 cells never visited.
+- **Seven distributions**: `Normal` (truncated at zero, or throwing — a negative
+  duration is nonsense, not a subtlety), `Lognormal` (+ `lognormalFrom(mean, sd)`,
+  since the parameters are the mean and sd of the *log*), `Weibull`, `Erlang`,
+  `Discrete`, `Empirical`, `Poisson`.
+- **Independent substreams.** `useSeparateStreams()` gives each distribution a
+  stream named for its role, so changing the service time no longer shifts the
+  arrival pattern.
+- **Antithetic variates**: `Experiment::antitheticPairs()`. Each replication runs
+  twice, mirrored, averaged into **one** observation. 24% narrower interval for
+  identical compute.
+- **Common random numbers**: `Experiment::compare(a, b, field)` pairs replication
+  by replication and forms an interval on the differences. In example 14 the two
+  designs' own intervals overlap while the paired difference is **25× tighter**
+  and clearly non-zero.
+
+### Fixed
+
+- **`Empirical::mean()` reported the average of the observations**, but `draw()`
+  interpolates between order statistics, so what it samples has the trapezoidal
+  mean. Since that number feeds the stability check it must be the mean of what
+  is drawn (4.786) rather than of what was measured (4.796). Caught by example 13
+  printing both.
+- `serial3D` defaulted to 8 bins per axis, coarse enough that RANDU scraped a
+  pass. Now 16.
+
+### Changed
+
+- **Random-driven examples print different numbers than in v7**, because the
+  generators changed. The deterministic ones (example 02's hand-worked table) are
+  bit-identical. This is the one version where "every example reproduces its
+  previous numbers" could not be the acceptance criterion.
+
+### Deliberately incomplete
+
+- Only arrivals, arrival attributes and Process service times get their own
+  stream; Delay and Decide draws share the common one.
+- No general Gamma: a non-integer shape needs acceptance–rejection, which
+  consumes an unpredictable number of uniforms per variate and destroys the
+  property everything above relies on. Erlang covers integer shapes.
+
+### Verified
+
+- **260/260 checks** (215 in v7); clean under `-Wall -Wextra -Wpedantic` and
+  `-fsanitize=address,undefined`.
+
+---
+
 ## [7.0.0] — 2026-08-22 — "The servers stop belonging to one block"
 
 ### Added
@@ -643,15 +708,17 @@ filling the bodies is v2.
 
 ---
 
-## [Unreleased] — v8
+## [Unreleased] — v9
 
-1. **Common random numbers**, then antithetic variates — narrower intervals for
-   the same compute. `constant()` already draws nothing from the stream.
-2. **Resource schedules** — a nurse who goes off shift at 5pm. Needs a capacity
+1. **Resource schedules** — a nurse who goes off shift at 5pm. Needs a capacity
    that varies with time, which interacts with every rho calculation.
-3. **Preemption** — a high-priority entity taking a resource mid-service. Lazy
-   cancellation does not help: the interrupted entity must requeue with its
+2. **Preemption** — a high-priority entity taking a resource mid-service. Lazy
+   cancellation does not help: the interrupted entity must requeue carrying its
    remaining service time.
-4. **Config file input** — the validation story has been in place since v5.
-5. **Batch by attribute** — group only entities that match.
-6. **Batch means** as an alternative to independent replications.
+3. **Batch means** — one long run split into batches, as an alternative to
+   replications when the warm-up is expensive to repeat.
+4. **Config file input** — nothing has blocked it since v5.
+5. **Streams for every block**, finishing what v8 started.
+6. **Distribution fitting** — take data, suggest which distribution fits, and
+   report a goodness-of-fit statistic. `StreamTests` already has the chi-square
+   and KS machinery.

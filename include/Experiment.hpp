@@ -84,6 +84,8 @@ private:
     SimTime  m_warmUp{0.0};
     SimTime  m_observeInterval{0.0};
     std::string m_name{"experiment"};
+    bool m_separateStreams{false};
+    bool m_antithetic{false};
 
     std::vector<ReplicationResult> m_results;
 
@@ -97,6 +99,17 @@ public:
     Experiment& baseSeed(unsigned s);
     Experiment& warmUp(SimTime t);
     Experiment& observeEvery(SimTime dt);
+
+    // v8: give each distribution its own stream. Costs nothing, and it is what
+    // makes compare() below a PAIRED comparison rather than two unrelated ones.
+    Experiment& separateStreams(bool on = true);
+
+    // v8: ANTITHETIC VARIATES. Each replication is run twice -- once normally
+    // and once with every uniform replaced by 1-u -- and the pair is averaged
+    // into a single result. The two runs are negatively correlated, so the pair
+    // average has lower variance than two independent runs would, for the same
+    // compute. `replications(n)` then means n PAIRS, i.e. 2n runs.
+    Experiment& antitheticPairs(bool on = true);
 
     void run();
 
@@ -153,6 +166,24 @@ public:
     bool writeWelchSeries(const std::string& path, int window) const;
 
     void report() const;
+
+    // v8: COMMON RANDOM NUMBERS. Run two model variants across the same set of
+    // seeds and compare them REPLICATION BY REPLICATION, then form an interval
+    // on the DIFFERENCES.
+    //
+    // Why this beats comparing two independent means: the sampling noise common
+    // to both variants -- an unluckily busy arrival stream, say -- cancels in
+    // the difference. Two designs whose separate intervals overlap can still
+    // have a difference interval that excludes zero, which is a much stronger
+    // statement and often the only one your compute budget can afford.
+    struct Comparison {
+        std::vector<double> differences;
+        double meanDifference{0.0};
+        double halfWidth{0.0};
+        bool differsSignificantly{false};   // does the interval exclude zero?
+    };
+    static Comparison compare(Experiment& a, Experiment& b,
+                              double ReplicationResult::* field);
 };
 
 }  // namespace des

@@ -17,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <map>
+#include <string>
 #include <unordered_map>
 #include <vector>
 #include "Common.hpp"
@@ -81,7 +82,16 @@ private:
     FutureEventList m_fel;
     SystemState m_state;
     Statistics m_stats;            // SYSTEM-wide: arrivals, exits, time in system
-    RandomStream m_rng;            // the one source of randomness
+    RandomStream m_rng;            // the shared fallback stream
+
+    // v8: one INDEPENDENT stream per named distribution, derived from the base
+    // seed. Turning this on is what makes two model variants comparable --
+    // change the service distribution and the arrival pattern stays put,
+    // because arrivals draw from their own stream.
+    bool m_separateStreams{false};
+    bool m_antithetic{false};
+    std::map<std::string, RandomStream> m_streams;
+    void assignStreams();
     Trace m_trace;
     Model m_model;
 
@@ -148,6 +158,17 @@ public:
     // Sampling on a fixed grid (rather than at events) is what lets several
     // replications be averaged index by index.
     void setObservationInterval(SimTime dt);
+
+    // v8: give every distribution in the model its own stream, derived from the
+    // base seed and the distribution's role. Required for common random numbers
+    // to mean anything; harmless otherwise.
+    SimulationSystem& useSeparateStreams(bool on = true);
+
+    // v8: draw 1-u everywhere. Run a replication normally, then again with this
+    // set, and average the pair: the two are negatively correlated, so the
+    // average of the pair has lower variance than two independent runs.
+    SimulationSystem& useAntithetic(bool on = true);
+    bool isAntithetic() const { return m_antithetic; }
     const std::vector<double>& observations() const { return m_observations; }
 
     // Length of the MEASURED period. Not clock.now(): with warm-up removal the

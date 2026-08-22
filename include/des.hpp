@@ -34,6 +34,7 @@
 #include "Delay.hpp"
 #include "Statistics.hpp"
 #include "RandomStream.hpp"
+#include "StreamTests.hpp"
 #include "Distribution.hpp"
 #include "TerminationRule.hpp"
 #include "Trace.hpp"

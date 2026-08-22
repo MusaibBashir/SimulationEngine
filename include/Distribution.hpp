@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 #include <cstddef>
@@ -49,6 +50,20 @@ public:
     // which is the single most common modelling mistake, and one that otherwise
     // shows up as confident four-decimal nonsense.
     virtual SimTime mean() const = 0;
+
+    // v8: draw from THIS distribution's own stream if it has been given one,
+    // otherwise from the shared stream passed in. Giving each distribution its
+    // own stream is what makes two model variants comparable: change the
+    // service time and the arrival pattern does not shift underneath you.
+    void useStream(RandomStream* s) { m_stream = s; }
+    RandomStream* stream() const { return m_stream; }
+
+protected:
+    RandomStream* m_stream{nullptr};
+    // Every subclass draws through this rather than touching `rng` directly.
+    RandomStream& pick(RandomStream& fallback) const {
+        return m_stream ? *m_stream : fallback;
+    }
 };
 
 // ----------------------------------------------------------------------------
@@ -84,6 +99,95 @@ class Triangular : public IDistribution {
     SimTime m_low, m_mode, m_high;
 public:
     Triangular(SimTime low, SimTime mode, SimTime high);
+    SimTime draw(RandomStream& rng) override;
+    std::string describe() const override;
+    SimTime mean() const override;
+};
+
+// --- v8 additions -----------------------------------------------------------
+
+// Bell-shaped and symmetric. *** Truncated at zero when used for a duration ***
+// -- a normal has a left tail that goes negative, and a negative service time is
+// not a modelling subtlety, it is nonsense. Set `truncateAtZero` and it clamps;
+// leave it and it throws if a negative is drawn, so you find out.
+class Normal : public IDistribution {
+    SimTime m_mean, m_sd;
+    bool m_truncate;
+public:
+    Normal(SimTime mean, SimTime stdDev, bool truncateAtZero = true);
+    SimTime draw(RandomStream& rng) override;
+    std::string describe() const override;
+    SimTime mean() const override;
+};
+
+// Right-skewed and never negative, which is what most service times actually
+// look like. Parameters are the mean and sd OF THE LOGARITHM -- the usual
+// convention and the usual source of confusion, so `fromMeanAndSd` builds one
+// from the mean and sd you actually observed.
+class Lognormal : public IDistribution {
+    SimTime m_logMean, m_logSd;
+public:
+    Lognormal(SimTime logMean, SimTime logStdDev);
+    static std::unique_ptr<Lognormal> fromMeanAndSd(SimTime mean, SimTime sd);
+    SimTime draw(RandomStream& rng) override;
+    std::string describe() const override;
+    SimTime mean() const override;
+};
+
+// The reliability workhorse: shape < 1 means failures get rarer with age
+// (infant mortality), shape = 1 is exponential, shape > 1 means wear-out.
+class Weibull : public IDistribution {
+    SimTime m_scale, m_shape;
+public:
+    Weibull(SimTime scale, SimTime shape);
+    SimTime draw(RandomStream& rng) override;
+    std::string describe() const override;
+    SimTime mean() const override;
+};
+
+// k sequential exponential phases. Fills the gap between constant (k -> inf)
+// and exponential (k = 1), which is where most real service times live.
+class Erlang : public IDistribution {
+    SimTime m_meanEach;
+    int m_phases;
+public:
+    Erlang(SimTime meanOfEachPhase, int phases);
+    static std::unique_ptr<Erlang> fromMean(SimTime totalMean, int phases);
+    SimTime draw(RandomStream& rng) override;
+    std::string describe() const override;
+    SimTime mean() const override;
+};
+
+// A finite set of values with given probabilities -- batch sizes, part types,
+// "70% small, 20% medium, 10% large". Inverse transform over the cumulative
+// mass, so it stays antithetic-friendly.
+class Discrete : public IDistribution {
+    std::vector<SimTime> m_values;
+    std::vector<double> m_cumulative;
+public:
+    Discrete(std::vector<SimTime> values, std::vector<double> probabilities);
+    SimTime draw(RandomStream& rng) override;
+    std::string describe() const override;
+    SimTime mean() const override;
+};
+
+// Sample straight from DATA you measured, with linear interpolation between the
+// observed order statistics. When you have a hundred real service times and no
+// idea which textbook distribution they came from, this beats guessing.
+class Empirical : public IDistribution {
+    std::vector<SimTime> m_sorted;
+public:
+    explicit Empirical(std::vector<SimTime> observations);
+    SimTime draw(RandomStream& rng) override;
+    std::string describe() const override;
+    SimTime mean() const override;
+};
+
+// Counts, not durations: arrivals per hour, defects per batch.
+class Poisson : public IDistribution {
+    double m_mean;
+public:
+    explicit Poisson(double mean);
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;

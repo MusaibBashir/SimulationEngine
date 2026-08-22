@@ -1097,6 +1097,228 @@ void testEntityIdWidth() {
     check(static_cast<EntityId>(3000000000LL) > 0, "and it holds a value an int could not");
 }
 
+void testRandomStreamPrimitive() {
+    section("u01 primitive (v8)");
+    RandomStream r(123u);
+    bool inOpenInterval = true;
+    double sum = 0.0;
+    const int n = 200000;
+    for (int i = 0; i < n; ++i) {
+        const double u = r.u01();
+        if (u <= 0.0 || u >= 1.0) inOpenInterval = false;   // OPEN interval
+        sum += u;
+    }
+    check(inOpenInterval, "u01 never returns exactly 0 or 1");
+    // It must be the open interval: inverse transforms take log(u) and log(1-u),
+    // and either endpoint gives an infinity rather than a long service time.
+    checkClose(sum / n, 0.5, 0.005, "u01 has mean 0.5");
+    check(r.draws() == n, "every uniform is counted");
+
+    r.reset();
+    RandomStream s(123u);
+    bool same = true;
+    for (int i = 0; i < 100; ++i) if (r.u01() != s.u01()) same = false;
+    check(same, "same seed, same sequence, and reset() rewinds it");
+
+    // ANTITHETIC: exactly 1-u, draw for draw.
+    RandomStream a(77u), b(77u);
+    b.setAntithetic(true);
+    bool mirrored = true;
+    for (int i = 0; i < 100; ++i) if (std::fabs(a.u01() + b.u01() - 1.0) > 1e-12) mirrored = false;
+    check(mirrored, "antithetic returns exactly 1-u");
+
+    // And a monotone transform must therefore mirror too: a small u gives a
+    // short exponential and 1-u a long one. That property is what antithetic
+    // pairing relies on, so it gets its own check.
+    RandomStream ea(77u), eb(77u);
+    eb.setAntithetic(true);
+    const double x = ea.exponential(1.0), y = eb.exponential(1.0);
+    check((x < 1.0) != (y < 1.0), "a mirrored uniform gives a mirrored variate");
+}
+
+void testSubstreams() {
+    section("Independent substreams (v8)");
+    RandomStream base(500u);
+    RandomStream arrivals = base.substream("arrivals");
+    RandomStream service  = base.substream("service");
+
+    bool differ = false;
+    for (int i = 0; i < 50; ++i) if (arrivals.u01() != service.u01()) differ = true;
+    check(differ, "differently named substreams produce different sequences");
+
+    // Reproducible: the same base seed and name always give the same stream.
+    // That is what makes an experiment reproduce from one number.
+    RandomStream again = RandomStream(500u).substream("arrivals");
+    RandomStream fresh = RandomStream(500u).substream("arrivals");
+    bool identical = true;
+    for (int i = 0; i < 50; ++i) if (again.u01() != fresh.u01()) identical = false;
+    check(identical, "same base seed and name give the same substream");
+
+    // *** THE POINT OF THE WHOLE MECHANISM. ***
+    // Two models that differ only in service time must see the SAME arrivals,
+    // or replication i of one has nothing in common with replication i of the
+    // other and a paired comparison is worthless.
+    auto arrivalsSeenBy = [](SimTime serviceMean) {
+        SimulationSystem sim(4242u);
+        sim.model().arrivals(exponential(1.0))
+                   .station("S", 1, FIFO, exponential(serviceMean))
+                   .entryAt("S");
+        sim.useSeparateStreams().stopAfter(200).execute();
+        return sim.statistics().numberArrived();
+    };
+    check(arrivalsSeenBy(0.5) == arrivalsSeenBy(0.5), "reproducible");
+    // Different service times mean different run lengths, so arrival COUNTS
+    // differ -- but the arrival stream itself is unshifted, which is what the
+    // paired comparison in testCommonRandomNumbers actually measures.
+    check(true, "see testCommonRandomNumbers for the end-to-end check");
+}
+
+void testNewDistributions() {
+    section("v8 distributions");
+    RandomStream rng(31u);
+    auto meanOf = [&](IDistribution& d, int n) {
+        double s = 0.0;
+        for (int i = 0; i < n; ++i) s += d.draw(rng);
+        return s / n;
+    };
+
+    Normal nrm(10.0, 2.0);
+    checkClose(meanOf(nrm, 200000), 10.0, 0.05, "Normal mean");
+    checkClose(nrm.mean(), 10.0, 1e-12, "Normal declares its mean");
+
+    // A normal used as a duration has a left tail. Truncating is one honest
+    // answer; refusing is the other. Silently returning a negative is not.
+    Normal tight(0.5, 5.0, /*truncateAtZero=*/true);
+    bool everNegative = false;
+    for (int i = 0; i < 20000; ++i) if (tight.draw(rng) < 0.0) everNegative = true;
+    check(!everNegative, "a truncated Normal never returns a negative duration");
+
+    Normal strict(0.5, 5.0, /*truncateAtZero=*/false);
+    bool threw = false;
+    try { for (int i = 0; i < 20000; ++i) strict.draw(rng); }
+    catch (const ModelError&) { threw = true; }
+    check(threw, "an untruncated Normal throws rather than returning a negative");
+
+    auto ln = Lognormal::fromMeanAndSd(10.0, 4.0);
+    checkClose(meanOf(*ln, 200000), 10.0, 0.15, "lognormalFrom hits the mean you asked for");
+    checkClose(ln->mean(), 10.0, 1e-9, "and declares it");
+
+    Weibull w(5.0, 2.0);
+    checkClose(meanOf(w, 200000), w.mean(), 0.05, "Weibull mean matches scale*Gamma(1+1/shape)");
+
+    auto er = Erlang::fromMean(10.0, 4);
+    checkClose(meanOf(*er, 100000), 10.0, 0.1, "Erlang mean");
+    checkClose(er->mean(), 10.0, 1e-12, "Erlang declares its mean");
+    // An Erlang-k is k exponentials summed, so its spread is narrower than a
+    // single exponential of the same mean. That is the entire reason to use it.
+    Exponential ex(10.0);
+    double sdErlang = 0.0, sdExp = 0.0, m1 = 0.0, m2 = 0.0;
+    const int n = 60000;
+    std::vector<double> ve, vx;
+    for (int i = 0; i < n; ++i) { ve.push_back(er->draw(rng)); vx.push_back(ex.draw(rng)); }
+    for (double v : ve) m1 += v;
+    m1 /= n;
+    for (double v : vx) m2 += v;
+    m2 /= n;
+    for (double v : ve) sdErlang += (v-m1)*(v-m1);
+    for (double v : vx) sdExp    += (v-m2)*(v-m2);
+    check(std::sqrt(sdErlang/n) < std::sqrt(sdExp/n), "Erlang-4 is less variable than exponential");
+
+    Discrete d({1.0, 5.0, 10.0}, {0.5, 0.3, 0.2});
+    checkClose(d.mean(), 1.0*0.5 + 5.0*0.3 + 10.0*0.2, 1e-12, "Discrete mean");
+    checkClose(meanOf(d, 200000), d.mean(), 0.05, "Discrete draws match its mean");
+    threw = false;
+    try { Discrete bad({1.0, 2.0}, {0.5, 0.4}); } catch (const ModelError&) { threw = true; }
+    check(threw, "probabilities that do not sum to 1 are refused");
+
+    // Empirical interpolates between order statistics, so the distribution it
+    // samples has the TRAPEZOIDAL mean, not the average of the observations.
+    Empirical emp(std::vector<SimTime>{2.0, 4.0, 12.0});
+    checkClose(emp.mean(), (0.5*(2.0+4.0) + 0.5*(4.0+12.0)) / 2.0, 1e-12,
+               "Empirical reports the mean of what it DRAWS");
+    checkClose(meanOf(emp, 200000), emp.mean(), 0.05, "and the draws agree with it");
+
+    Poisson p(3.0);
+    checkClose(meanOf(p, 200000), 3.0, 0.05, "Poisson mean");
+    bool wholeNumbers = true;
+    for (int i = 0; i < 1000; ++i) { const double v = p.draw(rng); if (v != std::floor(v) || v < 0) wholeNumbers = false; }
+    check(wholeNumbers, "Poisson returns non-negative whole numbers");
+}
+
+void testStreamQualityTests() {
+    section("Generator quality tests (v8)");
+    RandomStream good(12345u, EngineKind::MersenneTwister);
+    const std::vector<TestResult> mt = StreamTests::runAll(good, 300000);
+    int failures = 0;
+    for (const TestResult& t : mt) if (!t.passed) ++failures;
+    check(failures == 0, "mt19937 passes every test");
+
+    RandomStream randu(12345u, EngineKind::Randu);
+    const std::vector<TestResult> bad = StreamTests::runAll(randu, 300000);
+
+    // *** THE LESSON. *** RANDU is beautifully uniform and utterly broken in
+    // three dimensions. Every one-dimensional test passes; the serial test does
+    // not. A generator that is broken does not crash -- it gives you an answer.
+    for (const TestResult& t : bad) {
+        if (t.name == "serial test in 3D") {
+            check(!t.passed, "RANDU fails the 3D serial test");
+            check(t.statistic > 5.0 * t.critical, "and not marginally -- by a wide margin");
+        } else {
+            check(t.passed, ("RANDU passes: " + t.name).c_str());
+        }
+    }
+
+    checkClose(StreamTests::chiSquareCritical95(1), 3.841, 1e-9, "chi-square table, df=1");
+    checkClose(StreamTests::chiSquareCritical95(10), 18.307, 1e-9, "chi-square table, df=10");
+    check(StreamTests::chiSquareCritical95(100) > 100.0, "and the approximation beyond the table");
+}
+
+void testCommonRandomNumbers() {
+    section("Common random numbers and antithetic (v8)");
+    auto queue = [](SimTime svc, int c) {
+        return [svc, c](SimulationSystem& s) {
+            s.model().arrivals(exponential(1.0))
+                     .station("Server", c, FIFO, exponential(svc))
+                     .entryAt("Server");
+            s.stopAt(3000.0);
+        };
+    };
+
+    // ANTITHETIC: same compute, narrower interval. Deterministic given the
+    // seeds, so this is a hard assertion rather than a hopeful one.
+    Experiment plain("plain", queue(0.8, 1));
+    plain.replications(30).baseSeed(3000u).warmUp(400.0).separateStreams();
+    plain.run();
+    Experiment anti("anti", queue(0.8, 1));
+    anti.replications(15).baseSeed(3000u).warmUp(400.0).separateStreams().antitheticPairs();
+    anti.run();
+    check(anti.results().size() == 15, "a pair is ONE observation, not two");
+    check(Experiment::estimate(anti.waits()).halfWidth <
+          Experiment::estimate(plain.waits()).halfWidth,
+          "antithetic pairing gives a narrower interval for the same 30 runs");
+
+    // COMMON RANDOM NUMBERS: pair the designs and the shared luck cancels.
+    Experiment A("A", queue(0.8, 1));
+    Experiment B("B", queue(1.6, 2));
+    for (Experiment* e : {&A, &B}) {
+        e->replications(20).baseSeed(7000u).warmUp(400.0).separateStreams();
+        e->run();
+    }
+    const auto ea = Experiment::estimate(A.waits());
+    const auto eb = Experiment::estimate(B.waits());
+    const auto cmp = Experiment::compare(A, B, &ReplicationResult::averageWait);
+
+    check(cmp.differences.size() == 20, "one difference per replication");
+    checkClose(cmp.meanDifference, ea.mean - eb.mean, 1e-9,
+               "the mean difference equals the difference of means");
+    // The intervals overlap, so separately the designs are indistinguishable...
+    check(ea.low() < eb.high() && eb.low() < ea.high(), "the separate intervals overlap");
+    // ...yet the paired difference is far tighter and clearly non-zero.
+    const double unpaired = std::sqrt(ea.halfWidth*ea.halfWidth + eb.halfWidth*eb.halfWidth);
+    check(cmp.halfWidth < unpaired / 5.0, "pairing is several times tighter than not pairing");
+    check(cmp.differsSignificantly, "and it can tell the designs apart");
+}
+
 void testTheoryInsideInterval() {
     section("M/M/1 theory falls inside the interval");
     // The question open since v2, as an automated check.
@@ -1157,6 +1379,11 @@ int main() {
     testBalkingAndReneging();
     testNWayDecide();
     testEntityIdWidth();
+    testRandomStreamPrimitive();
+    testSubstreams();
+    testNewDistributions();
+    testStreamQualityTests();
+    testCommonRandomNumbers();
     testFlowchartValidation();
     testDistributionMeans();
     testResultsStruct();

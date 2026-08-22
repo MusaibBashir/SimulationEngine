@@ -58,6 +58,40 @@ inline std::unique_ptr<IDistribution> fixedTimes(std::initializer_list<SimTime> 
     return std::make_unique<Deterministic>(std::vector<SimTime>(values), repeat);
 }
 
+// --- v8 distributions -------------------------------------------------------
+
+inline std::unique_ptr<IDistribution> normal(SimTime mean, SimTime sd, bool truncateAtZero = true) {
+    return std::make_unique<Normal>(mean, sd, truncateAtZero);
+}
+// Parameters are the mean and sd of the LOGARITHM. If you have the mean and sd
+// you actually measured, use lognormalFrom() -- the conversion is not obvious
+// and getting it wrong is silent.
+inline std::unique_ptr<IDistribution> lognormal(SimTime logMean, SimTime logSd) {
+    return std::make_unique<Lognormal>(logMean, logSd);
+}
+inline std::unique_ptr<IDistribution> lognormalFrom(SimTime mean, SimTime sd) {
+    return Lognormal::fromMeanAndSd(mean, sd);
+}
+inline std::unique_ptr<IDistribution> weibull(SimTime scale, SimTime shape) {
+    return std::make_unique<Weibull>(scale, shape);
+}
+// k phases, each with mean total/k -- so the argument is the mean you want.
+inline std::unique_ptr<IDistribution> erlang(SimTime totalMean, int phases) {
+    return Erlang::fromMean(totalMean, phases);
+}
+inline std::unique_ptr<IDistribution> discrete(std::initializer_list<SimTime> values,
+                                               std::initializer_list<double> probabilities) {
+    return std::make_unique<Discrete>(std::vector<SimTime>(values),
+                                      std::vector<double>(probabilities));
+}
+// Sample straight from data you measured.
+inline std::unique_ptr<IDistribution> empirical(std::vector<SimTime> observations) {
+    return std::make_unique<Empirical>(std::move(observations));
+}
+inline std::unique_ptr<IDistribution> poisson(double mean) {
+    return std::make_unique<Poisson>(mean);
+}
+
 // --- termination rules ------------------------------------------------------
 
 inline std::unique_ptr<ITerminationRule> timeLimit(SimTime t) {

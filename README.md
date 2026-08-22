@@ -3,12 +3,14 @@
 Written from the simulation theory table up, as a way of learning OOP and system
 design rather than as a way of getting a simulator.
 
-**Current state: v7.** A flowchart simulator in the spirit of Arena's Basic
+**Current state: v8.** A flowchart simulator in the spirit of Arena's Basic
 Process template — Process, Delay, Assign, Decide, Batch, Separate, Record,
 Dispose — with **shared resources**, balking and reneging, warm-up removal,
 replications and confidence intervals. Refuses to run an unstable model, working
 out the offered load by walking the flowchart and summing across every block that
-shares a resource. Builds clean under
+shares a resource. Random number generation is built from a single `u01()`
+primitive, with pluggable engines, generator-quality tests, twelve distributions,
+and both major variance-reduction techniques. Builds clean under
 `-Wall -Wextra -Wpedantic` and ASan/UBSan; 160/160 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
@@ -144,6 +146,7 @@ need to read the engine's source to build a model with it.
 | `V5_READLOG.md` | The ergonomics pass: namespace, factories, ModelError, ρ check |
 | `V6_READLOG.md` | Flowchart blocks, INode, and why NodeContext beat a wider public interface |
 | `V7_READLOG.md` | Shared resources, balking, reneging, N-way Decide |
+| `V8_READLOG.md` | Random number generation, RANDU, variance reduction |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
 ## Layout
@@ -253,20 +256,20 @@ two and every time-average goes quietly wrong with no error.
 
 ---
 
-# v8 — the order to do it in
+# v9 — the order to do it in
 
-1. **Common random numbers**, then antithetic variates. Narrower intervals for
-   the same compute, and the last big statistical technique missing.
-   `constant()` already draws nothing from the stream, which is the precondition.
-2. **Resource schedules** — a nurse who goes off shift at 5pm. Arena has it and
-   it is genuinely useful; it needs a capacity that varies with time, which
-   interacts with every ρ calculation in the model.
-3. **Preemption** — a high-priority entity taking a resource off a low-priority
-   one mid-service. Note that lazy cancellation does *not* solve this one: the
-   interrupted entity has to go back into a queue carrying its remaining service
-   time.
-4. **Config file input.** The validation story has been in place since v5 and the
-   graph to describe since v6. Nothing is blocking it any more.
-5. **Batch by attribute** — group only entities that match, e.g. same lot number.
-6. **Batch means** — one long run split into batches, as an alternative to
+1. **Resource schedules** — a nurse who goes off shift at 5pm. Arena has it; it
+   needs a capacity that varies with time, which interacts with every ρ
+   calculation in the model.
+2. **Preemption** — a high-priority entity taking a resource off a low-priority
+   one mid-service. Lazy cancellation does *not* solve this: the interrupted
+   entity has to requeue carrying its remaining service time.
+3. **Batch means** — one long run split into batches, as an alternative to
    independent replications when the warm-up is expensive to repeat.
+4. **Config file input.** Nothing has blocked it since v5.
+5. **Streams for every block**, finishing what v8 started — Delay durations and
+   Decide draws still share the common stream.
+6. **Distribution fitting** — hand it data, have it suggest a distribution and
+   report a goodness-of-fit statistic. `StreamTests` already has the chi-square
+   and Kolmogorov–Smirnov machinery; this is mostly wiring plus parameter
+   estimation.

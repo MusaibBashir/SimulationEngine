@@ -34,6 +34,49 @@ void SimulationSystem::setObservationInterval(SimTime dt) {
     m_observeInterval = dt;
 }
 
+SimulationSystem& SimulationSystem::useSeparateStreams(bool on) {
+    m_separateStreams = on;
+    return *this;
+}
+
+SimulationSystem& SimulationSystem::useAntithetic(bool on) {
+    m_antithetic = on;
+    return *this;
+}
+
+void SimulationSystem::assignStreams() {
+    m_streams.clear();
+    if (!m_separateStreams) {
+        // One shared stream, as every version before v8. Every distribution
+        // draws from it in whatever order events happen to fire.
+        for (std::size_t i = 0; i < m_model.nodeCount(); ++i) (void)i;
+        return;
+    }
+
+    // A stream per ROLE, named after what it drives. The name is what makes the
+    // stream stable: as long as the arrival distribution is still called
+    // "arrivals", it draws the same numbers no matter what else changed in the
+    // model. That is the whole mechanism behind common random numbers.
+    auto give = [&](IDistribution* d, const std::string& role) {
+        if (!d) return;
+        auto it = m_streams.emplace(role, m_rng.substream(role)).first;
+        it->second.setAntithetic(m_antithetic);
+        d->useStream(&it->second);
+    };
+
+    give(&m_model.interarrival(), "arrivals");
+    for (const auto& a : m_model.arrivalAttributes())
+        give(a.distribution.get(), "attribute:" + a.name);
+    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
+        Station& s = m_model.stationAt(i);
+        give(&s.serviceDistribution(), "service:" + s.name());
+    }
+    // Blocks with their own randomness (Delay durations, Decide draws) keep
+    // using the shared stream. Naming every one of them would be the complete
+    // job; this covers the two that variance reduction actually cares about,
+    // and the limit is stated rather than hidden.
+}
+
 bool SimulationSystem::enableTrace(const std::string& path, TraceLevel level, bool markdown) {
     return m_trace.open(path, level, markdown);
 }
@@ -151,6 +194,8 @@ void SimulationSystem::initialise() {
     m_stats.reset();
     m_state.reset();
     m_rng.reset();
+    m_rng.setAntithetic(m_antithetic);
+    assignStreams();
     m_fel.clear();
     m_entities.clear();
     m_nextEntityId = 1;
