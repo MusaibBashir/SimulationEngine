@@ -76,45 +76,78 @@
 // derived, deriving it is the only way it cannot go stale.
 
 #pragma once
-
+#include <string>
 #include "Common.hpp"
 
+// v4 RENAME. Through v3 the two time-integrals were called
+// m_areaUnderQueueLength and m_areaUnderServerBusy -- accurate for a station,
+// a lie for the system-level object, which was being fed (numberInQueue,
+// numberInSystem). Names that are true in one caller and false in another are
+// worse than neutral names.
+//
+// So: the class integrates TWO time series, A and B, and the CALLER says what
+// they mean by labelling them at construction. The labels come back out in
+// report headings, so nothing is lost to the reader.
 class Statistics {
 private:
-    // --- COUNTERS (bumped at discrete moments) ---
+    // --- counters, bumped at discrete moments ---
     int m_numberArrived{0};
     int m_numberServed{0};
     SimTime m_totalWaitingTime{0.0};
     SimTime m_totalTimeInSystem{0.0};
     SimTime m_maxWaitingTime{0.0};
 
-    // --- TIME INTEGRALS (accumulated over intervals) ---
-    SimTime m_areaUnderQueueLength{0.0};
-    SimTime m_areaUnderServerBusy{0.0};
+    // --- time integrals, accumulated over intervals ---
+    SimTime m_areaA{0.0};
+    SimTime m_areaB{0.0};
     SimTime m_lastUpdateTime{0.0};
 
+    // --- what A and B mean to whoever owns this object ---
+    std::string m_labelA{"queue length"};
+    std::string m_labelB{"servers busy"};
+
 public:
-    Statistics()=default;
+    Statistics() = default;
+    Statistics(std::string labelA, std::string labelB);
 
     int numberArrived() const { return m_numberArrived; }
     int numberServed() const { return m_numberServed; }
     SimTime totalWaitingTime() const { return m_totalWaitingTime; }
     SimTime totalTimeInSystem() const { return m_totalTimeInSystem; }
     SimTime maxWaitingTime() const { return m_maxWaitingTime; }
-
-    SimTime areaUnderQueueLength() const { return m_areaUnderQueueLength; }
-    SimTime areaUnderServerBusy() const { return m_areaUnderServerBusy; }
+    SimTime areaA() const { return m_areaA; }
+    SimTime areaB() const { return m_areaB; }
     SimTime lastUpdateTime() const { return m_lastUpdateTime; }
+    const std::string& labelA() const { return m_labelA; }
+    const std::string& labelB() const { return m_labelB; }
 
     void recordArrival(SimTime t);
     void recordDeparture(SimTime t, SimTime waitTime, SimTime timeInSystem);
-    // MUST BE CALLED BEFORE ANY STATE CHANGES AT TOP OF EVENT HANDLER
-    void updateTimeIntegrals(SimTime now, int queueLength, int serversBusy);
+
+    // *** CALL AT THE TOP OF EVERY EVENT, BEFORE THE CLOCK MOVES AND BEFORE ANY
+    // STATE CHANGES. *** The arguments describe the interval that just ENDED, so
+    // they must be the OLD values.
+    void updateTimeIntegrals(SimTime now, int valueA, int valueB);
+
     void reset();
+
+    // v4: throw away everything collected so far and start accumulating from
+    // `now`. This is warm-up removal: the transient start-up period is measured
+    // and then discarded, rather than being averaged in with steady state.
+    // Different from reset() only in where the integral clock restarts -- and
+    // that difference is the whole of Welch's method in one line.
+    void restartAt(SimTime now);
 
     double averageWaitingTime() const;
     double averageTimeInSystem() const;
-    double timeAverageQueueLength(SimTime totalTime) const;
-    double serverUtilisation(SimTime totalTime, int capacity) const;
-};
 
+    // Time averages over an interval of length `elapsed`. NOTE: with warm-up
+    // removal `elapsed` is (clock - warmUpEnd), not the clock -- passing the
+    // full clock would divide post-warm-up area by total time and understate
+    // every average. The caller supplies it precisely so that is visible.
+    double timeAverageA(SimTime elapsed) const;
+    double timeAverageB(SimTime elapsed) const;
+
+    // Convenience for the common case where B is "servers busy".
+    double utilisation(SimTime elapsed, int capacity) const;
+};

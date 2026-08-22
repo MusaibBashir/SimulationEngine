@@ -4,17 +4,10 @@
 
 #include "EventNotice.hpp"
 
-uint64_t EventNotice::s_nextSequenceNumber = 0;
-
 EventNotice::EventNotice(EventType type, SimTime time, Entity* entity, Station* station)
-    : m_type(type), m_time(time), m_entity(entity), m_station(station),
-      m_sequenceNumber(++s_nextSequenceNumber) {}
-
-void EventNotice::resetSequenceCounter() {
-    // v2.1: without this, sequence numbers climb across replications and two
-    // runs of the same model in one process stop being bit-identical.
-    s_nextSequenceNumber = 0;
-}
+    : m_type(type), m_time(time), m_entity(entity), m_station(station) {}
+    // m_sequenceNumber stays 0 until FutureEventList::schedule() stamps it.
+    // A notice that was never scheduled has no order, which is honest.
 
 bool EventNotice::operator>(const EventNotice& other) const {
     // Exact floating-point equality is the right test here: we are asking

@@ -47,6 +47,8 @@
 using SimTime=double;
 using EntityId=int;
 
-enum class EventType {Arrival, StartService, Departure, EndSimulation};
+// v4 adds WarmUpEnd and Observe. The run() switch is now six cases -- see the
+// note at the bottom of SimulationSystem::run() for why it is still a switch.
+enum class EventType {Arrival, StartService, Departure, EndSimulation, WarmUpEnd, Observe};
 enum class QueueDiscipline {FIFO, LIFO, Priority, Random, SPT, EDD};
 enum class ResourceState {Idle, Busy};

@@ -23,18 +23,23 @@ private:
     Entity*   m_entity;    // nullptr for system events like EndSimulation
     Station*  m_station;   // nullptr when the event is not at a station
 
-    // The tie-break counter. A mutable static, which is a wart: it makes
-    // constructing an EventNotice have a side effect, and it is not thread-safe.
-    // Moving it into FutureEventList would need a setter on a class that is
-    // deliberately immutable. Still on the list.
-    static uint64_t s_nextSequenceNumber;
-    uint64_t m_sequenceNumber;
+    // v4: the mutable static is GONE. The number is now stamped by the FEL at
+    // schedule() time through a private setter, and FutureEventList is the only
+    // thing that can reach it.
+    //
+    // Why `friend` and not a public setSequenceNumber(): a public setter would
+    // let ANY code renumber an event, including one already sitting in the heap
+    // -- which silently breaks the heap invariant. friend narrows that power to
+    // exactly the one class that needs it. Friendship is often described as
+    // "breaking encapsulation"; used like this it is the opposite, because the
+    // alternative was a setter open to everyone.
+    friend class FutureEventList;
+    uint64_t m_sequenceNumber{0};
+    void setSequenceNumber(uint64_t n) { m_sequenceNumber = n; }
 
 public:
     EventNotice(EventType type, SimTime time,
                 Entity* entity = nullptr, Station* station = nullptr);
-
-    static void resetSequenceCounter();
 
     EventType type() const { return m_type; }
     SimTime   time() const { return m_time; }

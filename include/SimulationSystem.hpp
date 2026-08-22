@@ -18,6 +18,7 @@
 #include <string>
 #include <map>
 #include <unordered_map>
+#include <vector>
 #include "Common.hpp"
 #include "Clock.hpp"
 #include "FutureEventList.hpp"
@@ -53,6 +54,15 @@ private:
 
     bool m_initialised{false};
 
+    // --- v4: warm-up removal and observation series ---
+    SimTime m_warmUp{0.0};              // 0 means no warm-up period
+    SimTime m_warmUpEnded{0.0};         // when measurement actually began
+    SimTime m_observeInterval{0.0};     // 0 means collect nothing
+    std::vector<double> m_observations; // number-in-system, sampled on a grid
+
+    void handleWarmUpEnd();
+    void handleObservation();
+
     // --- internal steps of run(), not interface ---
     void handleArrival(const EventNotice& notice);
     void handleDeparture(const EventNotice& notice);
@@ -84,6 +94,23 @@ public:
     Model& model() { return m_model; }
     const Model& model() const { return m_model; }
     void setTermination(std::unique_ptr<ITerminationRule> rule);
+
+    // v4: discard everything measured before time t. The system state is KEPT --
+    // only the statistics are thrown away -- so measurement starts from a
+    // realistically loaded system instead of an empty one. That bias is most of
+    // why Wq has read a few percent high since v2.
+    void setWarmUp(SimTime t);
+
+    // v4: sample number-in-system every dt, for Welch's warm-up analysis.
+    // Sampling on a fixed grid (rather than at events) is what lets several
+    // replications be averaged index by index.
+    void setObservationInterval(SimTime dt);
+    const std::vector<double>& observations() const { return m_observations; }
+
+    // Length of the MEASURED period. Not clock.now(): with warm-up removal the
+    // averages divide by this, and passing the full clock would understate them.
+    SimTime measuredTime() const { return m_clock.now() - m_warmUpEnded; }
+    SimTime warmUpEnd() const { return m_warmUpEnded; }
     bool enableTrace(const std::string& path, TraceLevel level, bool markdown = true);
 
     // --- read-only views ---

@@ -58,49 +58,52 @@
 //     write it down now so you remember to run it.
 
 #include "Statistics.hpp"
+#include <utility>
+
+Statistics::Statistics(std::string labelA, std::string labelB)
+    : m_labelA(std::move(labelA)), m_labelB(std::move(labelB)) {}
 
 void Statistics::recordArrival(SimTime /*t*/) {
     ++m_numberArrived;
-    // t is still unused. The parameter stays because the signature is the
-    // interface, and v4 wants arrival times for rate traces.
 }
 
 void Statistics::recordDeparture(SimTime /*t*/, SimTime waitTime, SimTime timeInSystem) {
     ++m_numberServed;
     m_totalWaitingTime  += waitTime;
     m_totalTimeInSystem += timeInSystem;
-    if (waitTime > m_maxWaitingTime) {
-        m_maxWaitingTime = waitTime;
-    }
+    if (waitTime > m_maxWaitingTime) m_maxWaitingTime = waitTime;
 }
 
-void Statistics::updateTimeIntegrals(SimTime now, int queueLength, int serversBusy) {
-    // *** CALLED AT THE TOP OF run()'s LOOP, BEFORE THE CLOCK MOVES AND BEFORE
-    // ANY STATE CHANGES. *** The arguments describe the interval that just
-    // ENDED, so they must be the OLD queue length and OLD busy count.
-    //
-    // Geometrically: we are adding one rectangle to a running integral. Its
-    // width is the time since we were last here; its height is the state that
-    // held throughout that width.
+void Statistics::updateTimeIntegrals(SimTime now, int valueA, int valueB) {
+    // One rectangle added to a running integral: width is the time since we were
+    // last here, height is the state that held throughout that width.
     const SimTime dt = now - m_lastUpdateTime;
-    m_areaUnderQueueLength += queueLength * dt;
-    m_areaUnderServerBusy  += serversBusy * dt;
+    m_areaA += valueA * dt;
+    m_areaB += valueB * dt;
     m_lastUpdateTime = now;
 }
 
 void Statistics::reset() {
-    // Assign a fresh default-constructed object over ourselves. The in-class
-    // initialisers in Statistics.hpp are the ONLY place that knows the zero
-    // values -- listing all eight again here would be a second source of truth
-    // that drifts the first time a member is added.
+    // Assign a fresh object over ourselves so the in-class initialisers stay the
+    // only place that knows the zero values -- but keep the labels, which are
+    // configuration rather than run state.
+    std::string a = std::move(m_labelA);
+    std::string b = std::move(m_labelB);
     *this = Statistics{};
+    m_labelA = std::move(a);
+    m_labelB = std::move(b);
+}
+
+void Statistics::restartAt(SimTime now) {
+    reset();
+    m_lastUpdateTime = now;   // <- the whole difference. Area accumulated from
+                              // here on is divided by (clock - now), not by the
+                              // clock, so the transient never enters any average.
 }
 
 double Statistics::averageWaitingTime() const {
-    if (m_numberServed == 0) return 0.0;   // guard: FP division by zero gives
-                                           // NaN, not a crash, and the report
-                                           // would cheerfully print "nan"
-    return m_totalWaitingTime / m_numberServed;
+    if (m_numberServed == 0) return 0.0;   // FP divide-by-zero yields NaN, not a
+    return m_totalWaitingTime / m_numberServed;   // crash, and prints as "nan"
 }
 
 double Statistics::averageTimeInSystem() const {
@@ -108,17 +111,18 @@ double Statistics::averageTimeInSystem() const {
     return m_totalTimeInSystem / m_numberServed;
 }
 
-double Statistics::timeAverageQueueLength(SimTime totalTime) const {
-    if (totalTime <= 0.0) return 0.0;
-    // LITTLE'S LAW CHECK:  L = lambda * W. This should approximately equal
-    // (effective arrival rate) x averageWaitingTime(). If they disagree, the
-    // accumulators are wrong -- the theory is not.
-    return m_areaUnderQueueLength / totalTime;
+double Statistics::timeAverageA(SimTime elapsed) const {
+    if (elapsed <= 0.0) return 0.0;
+    return m_areaA / elapsed;
 }
 
-double Statistics::serverUtilisation(SimTime totalTime, int capacity) const {
-    if (totalTime <= 0.0 || capacity <= 0) return 0.0;
-    // Dimensionless, and it MUST land in [0, 1]. Above 1 is a double-counting
-    // bug, not a busy server.
-    return m_areaUnderServerBusy / (totalTime * capacity);
+double Statistics::timeAverageB(SimTime elapsed) const {
+    if (elapsed <= 0.0) return 0.0;
+    return m_areaB / elapsed;
+}
+
+double Statistics::utilisation(SimTime elapsed, int capacity) const {
+    if (elapsed <= 0.0 || capacity <= 0) return 0.0;
+    // Dimensionless and MUST land in [0,1]. Above 1 is double counting.
+    return m_areaB / (elapsed * capacity);
 }

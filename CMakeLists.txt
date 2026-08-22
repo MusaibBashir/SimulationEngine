@@ -27,6 +27,7 @@ set(DES_SOURCES
     src/Delay.cpp
     src/Statistics.cpp
     src/TerminationRule.cpp
+    src/Experiment.cpp
     src/Trace.cpp
     src/Station.cpp
     src/Model.cpp

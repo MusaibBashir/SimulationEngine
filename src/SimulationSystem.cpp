@@ -19,6 +19,16 @@ void SimulationSystem::setTermination(std::unique_ptr<ITerminationRule> rule) {
     m_termination = std::move(rule);
 }
 
+void SimulationSystem::setWarmUp(SimTime t) {
+    assert(t >= 0.0);
+    m_warmUp = t;
+}
+
+void SimulationSystem::setObservationInterval(SimTime dt) {
+    assert(dt > 0.0);
+    m_observeInterval = dt;
+}
+
 bool SimulationSystem::enableTrace(const std::string& path, TraceLevel level, bool markdown) {
     return m_trace.open(path, level, markdown);
 }
@@ -85,8 +95,9 @@ void SimulationSystem::initialise() {
     m_activeDelays.clear();
     m_entities.clear();
     m_nextEntityId = 1;
-    EventNotice::resetSequenceCounter();
     m_model.reset();
+    m_warmUpEnded = 0.0;
+    m_observations.clear();
 
     for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
         m_model.stationAt(i).queue().setRandomStream(&m_rng);
@@ -101,6 +112,8 @@ void SimulationSystem::initialise() {
     }
 
     scheduleEvent(EventType::Arrival, 0.0);   // carries no entity -- see handleArrival
+    if (m_warmUp > 0.0)          scheduleEvent(EventType::WarmUpEnd, m_warmUp);
+    if (m_observeInterval > 0.0) scheduleEvent(EventType::Observe, m_observeInterval);
     m_initialised = true;
     refreshState();
 }
@@ -128,6 +141,8 @@ void SimulationSystem::run() {
             case EventType::Arrival:       handleArrival(notice);   break;
             case EventType::Departure:     handleDeparture(notice); break;
             case EventType::EndSimulation: return;
+            case EventType::WarmUpEnd:     handleWarmUpEnd();       break;
+            case EventType::Observe:       handleObservation();     break;
             case EventType::StartService:  break;   // reserved
         }
     }
@@ -135,9 +150,17 @@ void SimulationSystem::run() {
     // nothing happens in between -- that is why DES is fast, and why the FEL
     // had to be sorted.
     //
-    // NOT abstracted into an IEventHandler hierarchy, deliberately: four cases
-    // that fit on a screen do not need virtual dispatch, and -Wswitch still
-    // tells us when a new EventType appears. Revisit when there are eight.
+    // STILL NOT an IEventHandler hierarchy, and v4 sharpened the reason rather
+    // than weakening it. The switch is six cases now, but the cost of the
+    // abstraction is not the hierarchy -- it is that handler objects living
+    // outside this class would need admit(), startNextService(), createEntity()
+    // and refreshState() made public, or five friend declarations. Widening the
+    // public interface to satisfy an abstraction is a worse trade than a switch
+    // that fits on a screen, and -Wswitch still flags a new EventType for free.
+    //
+    // The thing that would actually change the answer: handlers that carry
+    // STATE (pre-emption, balking, reneging). A switch cannot hold state; an
+    // object can. Build it then, not before.
 }
 
 // ------------------------------------------------------------------ routing --
@@ -220,6 +243,36 @@ void SimulationSystem::startNextService(Station* station) {
 
 // ----------------------------------------------------------------- handlers --
 
+void SimulationSystem::handleWarmUpEnd() {
+    // *** WELCH'S METHOD, the whole of it. ***
+    // Throw away every measurement taken so far and start again from now. The
+    // SYSTEM STATE is deliberately untouched: entities in service stay in
+    // service, queues keep their contents. That is the point -- measurement now
+    // begins from a realistically loaded system rather than an empty one, and
+    // the start-up transient never enters an average.
+    m_stats.restartAt(m_clock.now());
+    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
+        Station& s = m_model.stationAt(i);
+        s.stats().restartAt(m_clock.now());
+        s.queue().resetStatistics();
+    }
+    m_warmUpEnded = m_clock.now();
+
+    if (m_trace.isOn()) {
+        m_trace.event(m_clock.now(), "WarmUpEnd", 0, "-",
+                      "statistics discarded; measurement starts here",
+                      0, m_state.numberInSystem());
+    }
+}
+
+void SimulationSystem::handleObservation() {
+    // Sample on a FIXED GRID, not at events. Welch's method averages replication
+    // i's observation k with replication j's observation k, so the observations
+    // have to line up -- and event times never do.
+    m_observations.push_back(static_cast<double>(m_state.numberInSystem()));
+    scheduleEvent(EventType::Observe, m_clock.now() + m_observeInterval);
+}
+
 void SimulationSystem::handleArrival(const EventNotice& /*notice*/) {
     // *** THE ARRIVAL EVENT CARRIES NO ENTITY; THE ENTITY IS BORN HERE. ***
     // Creating it earlier and attaching it to a future Arrival would stamp
@@ -298,7 +351,12 @@ void SimulationSystem::handleDeparture(const EventNotice& notice) {
 // ------------------------------------------------------------------ report --
 
 void SimulationSystem::report() const {
-    const SimTime total = m_clock.now();
+    // *** DIVIDE BY THE MEASURED PERIOD, NOT THE CLOCK. ***
+    // With a warm-up period the two differ, and using the clock would divide
+    // post-warm-up area by total elapsed time -- understating every time average
+    // by exactly the fraction of the run that was discarded.
+    const SimTime total    = m_clock.now();
+    const SimTime measured = measuredTime();
     std::cout << std::fixed << std::setprecision(4);
     std::cout << "=== simulation report =====================================\n";
     std::cout << "seed                     : " << m_rng.seed() << "\n";
@@ -315,8 +373,10 @@ void SimulationSystem::report() const {
     // L. Reusing the class this way is a small abuse of its member NAMES -- and
     // a fair sign that in v4 those should become areaUnder[A] / areaUnder[B]
     // with the meaning supplied by the caller.
-    std::cout << "time-avg in queue (Lq)   : " << m_stats.timeAverageQueueLength(total) << "\n";
-    std::cout << "time-avg in system (L)   : " << m_stats.serverUtilisation(total, 1) << "\n";
+    std::cout << "warm-up discarded        : " << m_warmUpEnded << "\n";
+    std::cout << "measured period          : " << measured << "\n";
+    std::cout << "time-avg in queue (Lq)   : " << m_stats.timeAverageA(measured) << "\n";
+    std::cout << "time-avg in system (L)   : " << m_stats.timeAverageB(measured) << "\n";
     std::cout << "still waiting at stop    : " << m_activeDelays.size() << "\n";
     std::cout << "live entity objects      : " << m_entities.size() << "\n";
     std::cout << "\n";
@@ -328,8 +388,8 @@ void SimulationSystem::report() const {
                   << std::setw(5)  << s.resource().capacity()
                   << std::setw(9)  << s.stats().numberArrived()
                   << std::setw(12) << s.stats().averageWaitingTime()
-                  << std::setw(13) << s.stats().timeAverageQueueLength(total)
-                  << std::setw(8)  << s.stats().serverUtilisation(total, s.resource().capacity())
+                  << std::setw(13) << s.stats().timeAverageA(measured)
+                  << std::setw(8)  << s.stats().utilisation(measured, s.resource().capacity())
                   << std::setw(7)  << s.queue().maxLengthObserved()
                   << "\n";
     }

@@ -343,6 +343,7 @@ arrivals ~ Exponential(mean=15)
 | 543.2100 | Exit | 40 | Cashier | exits; total wait 21.1433, time in system 49.1904 | 1 | 0 |
 | 543.2100 | Seize | 39 | Cashier | pulled from queue after waiting 2.9929, service until 545.8644 | 0 | 1 |
 | 545.8644 | Exit | 39 | Cashier | exits; total wait 33.8333, time in system 77.7082 | 0 | 0 |
+| 600.0000 | WarmUpEnd | 0 | - | statistics discarded; measurement starts here | 0 | 0 |
 | 602.9233 | Arrival | 41 | Host | enters the system | 0 | 0 |
 | 602.9233 | Seize | 41 | Host | server free, service 0.8312 until 603.7545 | 0 | 1 |
 | 603.7545 | Move | 41 | Host | service done, routing to Waiters | 0 | 0 |
@@ -3042,4 +3043,4 @@ arrivals ~ Exponential(mean=15)
 | 6012.6968 | Seize | 385 | Waiters | pulled from queue after waiting 34.6006, service until 6054.0318 | 1 | 3 |
 | 6012.6968 | Seize | 383 | Cashier | server free, service 2.0155 until 6014.7123 | 0 | 1 |
 
-*3026 events traced.*
+*3027 events traced.*

@@ -53,6 +53,12 @@ public:
     // dangling Entity* left over from a previous replication.
     void reset();
 
+    // v4: throw away the collected statistics but KEEP the entities currently
+    // waiting. Warm-up removal discards measurements, not the system state --
+    // the queue that exists at the end of the transient is exactly the
+    // non-empty starting condition that makes steady-state estimates unbiased.
+    void resetStatistics();
+
     void push(Entity* e);
 
     // Returns nullptr if and only if the queue is empty. Any other failure

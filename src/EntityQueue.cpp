@@ -24,6 +24,11 @@ void EntityQueue::reset() {
     // m_name, m_rule and m_rng are configuration, not run state.
 }
 
+void EntityQueue::resetStatistics() {
+    m_maxLengthObserved = m_waiting.size();   // the current length is a real
+                                              // observation in the new window
+}
+
 void EntityQueue::push(Entity* e) {
     assert(e != nullptr);
     m_waiting.push_back(e);

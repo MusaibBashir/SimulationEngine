@@ -5,6 +5,77 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [4.0.0] — 2026-08-22 — "How confident are we?"
+
+Since v2 every version has reported `Wq = 3.2864` against a theoretical 3.2000
+and written "not a bug — that's v4". This is v4, and the answer is that **the
+simulator was never wrong; the reporting was.**
+
+With warm-up removal and 10 replications, M/M/1 theory falls inside the 95%
+confidence interval for **all five** reported quantities. There is a test
+asserting it. Full narrative in `V4_READLOG.md`.
+
+### Added
+
+- **Warm-up removal.** `SimulationSystem::setWarmUp(t)` schedules a `WarmUpEnd`
+  event that discards every statistic collected so far while leaving the system
+  state untouched — so measurement begins from a realistically loaded system
+  instead of an empty one. `Statistics::restartAt(now)` is `reset()` plus
+  `m_lastUpdateTime = now`, and that one line is the whole of the method.
+- **`measuredTime()`.** Every time-average now divides by the measured period,
+  not `clock.now()`. Using the clock would understate each average by exactly the
+  fraction of the run discarded.
+- **Welch's method.** `EventType::Observe` samples number-in-system on a fixed
+  time grid (grids, not events, because replications must line up index by
+  index). `Experiment::welchAverages()` averages across replications and then
+  smooths; `suggestWarmUp()` returns a heuristic starting point;
+  `writeWelchSeries()` dumps CSV to plot, because the method is properly finished
+  by eye.
+- **`Experiment`** — runs N replications from one base seed, collects a
+  `ReplicationResult` each, and reports mean ± 95% interval.
+- **`Summary`** — sample mean, sample standard deviation (n−1, not n), standard
+  error, and a Student-t interval with a 30-entry critical-value table. At n=10
+  the t value is 2.262; using 1.96 would make every interval 13% too narrow.
+
+### Changed
+
+- **`Statistics` members renamed.** `m_areaUnderQueueLength` /
+  `m_areaUnderServerBusy` were accurate for a station and a lie for the
+  system-level object. The class now integrates two series A and B, and the
+  caller labels them at construction; the labels appear in report headings.
+- **The `EventNotice` sequence-number static is gone.** The counter lives in
+  `FutureEventList`, which stamps it in `schedule()` via a private setter reached
+  by a `friend` declaration — narrowing that power to the one class that needs it
+  rather than opening a setter to everyone. It rewinds with `clear()`, and two
+  simulations in one process can no longer interfere.
+- `EntityQueue::resetStatistics()` — clears the observed maximum but keeps the
+  waiting entities, which is what warm-up removal requires.
+- `EventType` gains `WarmUpEnd` and `Observe`.
+
+### Deliberately not built
+
+- **`IEventHandler`, for the fourth time.** The `run()` switch grew from four
+  cases to six, and the answer is still no — for a reason v4 sharpened: handler
+  objects outside `SimulationSystem` would need `admit()`, `startNextService()`,
+  `createEntity()` and `refreshState()` made public, or five friend declarations.
+  Widening the public interface to satisfy an abstraction is a worse trade than a
+  switch that fits on a screen. What would change the answer: handlers that carry
+  **state** (pre-emption, balking, reneging). A switch cannot hold state.
+- **Config file input.** Still I/O plumbing rather than design.
+
+### Verified
+
+- Clean under `-Wall -Wextra -Wpedantic` and `-fsanitize=address,undefined`.
+- **124/124 checks pass** (85 in v3).
+- Wq [2.9728, 3.2112] contains 3.2000; W [3.7695, 4.0121] contains 4.0000;
+  Lq [2.9611, 3.2203] contains 3.2000; L [3.7542, 4.0236] contains 4.0000;
+  ρ [0.7916, 0.8048] contains 0.8000.
+- The Welch series starts at 2.15 and settles near 4.0 — the theoretical L.
+- The deterministic hand-worked run is unchanged: 5 served, waits 0/1/0/3/1,
+  average exactly 1.0000, last exit t=13.
+
+---
+
 ## [3.0.0] — 2026-08-22 — "Abstraction, earned"
 
 The engine no longer knows what it is simulating. `SimulationSystem.cpp` contains
@@ -332,20 +403,21 @@ filling the bodies is v2.
 
 ---
 
-## [Unreleased] — v4, "how confident are we?"
+## [Unreleased] — v5, "smaller intervals for the same work"
 
-Wq still reads 3-5% above closed-form theory in every run. Not a bug — no warm-up
-removal and a single replication — and v4 is where that finally gets an honest
-answer.
+v4 made the intervals honest. v5 would make them narrower without simply running
+longer:
 
-1. **Replications** — run N times with different seeds, collect per-run results.
-2. **Warm-up removal** (Welch's method) — discard the transient start-up period.
-3. **Confidence intervals** — report a range, not a number. Then check whether
-   3.2000 falls inside it.
-4. **`Statistics` member names** — `areaUnderQueueLength` / `areaUnderServerBusy`
-   became misleading once the system-level object started holding L_q and L.
-   Rename to `areaUnderA` / `areaUnderB` with meaning supplied by the caller.
-5. **Remove the `EventNotice` sequence-number static** — let `FutureEventList`
-   stamp it, which needs a friend declaration rather than a public setter.
-6. **`IEventHandler`** — revisit once v4 pre-emption needs handlers with state.
-7. **Config file input** — once the `Model` API has settled.
+1. **Common random numbers** — compare two configurations using the *same* random
+   draws, so the difference between them is not swamped by sampling noise.
+   `Constant::draw` already deliberately consumes nothing from the stream, which
+   is a precondition for this working at all.
+2. **Antithetic variates** — pair each replication with one using `1-u`.
+3. **Steady-state detection as a termination rule** — stop when the estimate has
+   converged rather than at a fixed clock time. `ITerminationRule` receives the
+   whole system, so it is expressible today.
+4. **Batch means** — one long run split into batches, as an alternative to
+   independent replications when the warm-up period is expensive.
+5. **Widen `EntityId`** — it is a plain `int` and a very long run would overflow
+   it. One line, since it is a typedef.
+6. **`IEventHandler`** — when pre-emption or reneging needs handlers with state.

@@ -18,6 +18,7 @@
 #include <string>
 #include "SimulationSystem.hpp"
 #include "Activity.hpp"
+#include "Experiment.hpp"
 
 namespace {
 
@@ -145,7 +146,6 @@ void testFutureEventList() {
     check(fel.isEmpty(), "drained");
 
     // Tie-break: equal times come out in scheduling order.
-    EventNotice::resetSequenceCounter();
     fel.schedule(EventNotice(EventType::Arrival,   5.0));
     fel.schedule(EventNotice(EventType::Departure, 5.0));
     fel.schedule(EventNotice(EventType::StartService, 5.0));
@@ -156,6 +156,16 @@ void testFutureEventList() {
     fel.schedule(EventNotice(EventType::Arrival, 1.0));
     fel.clear();
     check(fel.isEmpty(), "clear empties the list");
+
+    // v4: the sequence counter belongs to the FEL and rewinds with clear(), so
+    // two separate lists cannot interfere and replications stay bit-identical.
+    FutureEventList a, b;
+    a.schedule(EventNotice(EventType::Arrival, 2.0));
+    a.schedule(EventNotice(EventType::Departure, 2.0));
+    b.schedule(EventNotice(EventType::Arrival, 2.0));
+    b.schedule(EventNotice(EventType::Departure, 2.0));
+    check(a.popImminent().type() == b.popImminent().type(),
+          "two independent FELs order identically");
 }
 
 void testActivityAndDelay() {
@@ -180,10 +190,10 @@ void testStatistics() {
     // Area = 2*5 + 0*5 = 10. Busy 1 throughout: area = 10.
     s.updateTimeIntegrals(5.0, 2, 1);
     s.updateTimeIntegrals(10.0, 0, 1);
-    checkClose(s.areaUnderQueueLength(), 10.0, 1e-12, "queue-length integral");
-    checkClose(s.areaUnderServerBusy(), 10.0, 1e-12, "busy integral");
-    checkClose(s.timeAverageQueueLength(10.0), 1.0, 1e-12, "time-average queue length");
-    checkClose(s.serverUtilisation(10.0, 1), 1.0, 1e-12, "utilisation");
+    checkClose(s.areaA(), 10.0, 1e-12, "integral A");
+    checkClose(s.areaB(), 10.0, 1e-12, "integral B");
+    checkClose(s.timeAverageA(10.0), 1.0, 1e-12, "time-average A");
+    checkClose(s.utilisation(10.0, 1), 1.0, 1e-12, "utilisation");
 
     s.recordArrival(0.0);
     s.recordDeparture(10.0, 4.0, 6.0);
@@ -194,7 +204,48 @@ void testStatistics() {
     checkClose(s.maxWaitingTime(), 4.0, 1e-12, "max wait");
 
     s.reset();
-    check(s.numberServed() == 0 && s.areaUnderQueueLength() == 0.0, "reset zeroes everything");
+    check(s.numberServed() == 0 && s.areaA() == 0.0, "reset zeroes everything");
+
+    // v4: restartAt is reset() plus "start the integral clock here". It is the
+    // whole of warm-up removal, so it gets its own check.
+    Statistics w;
+    w.updateTimeIntegrals(100.0, 9, 1);          // a big transient, then...
+    check(w.areaA() > 0.0, "transient accumulated");
+    w.restartAt(100.0);                          // ...discard it
+    checkClose(w.areaA(), 0.0, 1e-12, "restartAt discards accumulated area");
+    checkClose(w.lastUpdateTime(), 100.0, 1e-12, "restartAt moves the integral clock");
+    w.updateTimeIntegrals(110.0, 2, 1);
+    checkClose(w.areaA(), 20.0, 1e-12, "post-restart area measures only the new window");
+    checkClose(w.timeAverageA(10.0), 2.0, 1e-12,
+               "divide by the MEASURED period, not the clock");
+
+    Statistics labelled("in queue", "in system");
+    check(labelled.labelA() == "in queue" && labelled.labelB() == "in system", "labels");
+    labelled.reset();
+    check(labelled.labelA() == "in queue", "reset keeps labels (configuration)");
+}
+
+void testSummary() {
+    section("Summary (mean, sample sd, t interval)");
+    const std::vector<double> xs{2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0};
+    checkClose(Summary::mean(xs), 5.0, 1e-12, "mean");
+    // Population sd of this classic set is 2.0; the SAMPLE sd (n-1) is larger.
+    checkClose(Summary::stdDev(xs), std::sqrt(32.0 / 7.0), 1e-12, "sample sd uses n-1");
+    check(Summary::stdDev(xs) > 2.0, "sample sd exceeds population sd");
+    checkClose(Summary::standardError(xs), Summary::stdDev(xs) / std::sqrt(8.0), 1e-12,
+               "standard error is s/sqrt(n)");
+
+    checkClose(Summary::tCritical95(1), 12.706, 1e-9, "t(1)");
+    checkClose(Summary::tCritical95(9), 2.262, 1e-9, "t(9) -- 10 replications");
+    checkClose(Summary::tCritical95(30), 2.042, 1e-9, "t(30)");
+    checkClose(Summary::tCritical95(500), 1.96, 1e-9, "large df falls back to normal");
+    check(Summary::tCritical95(9) > 1.96,
+          "t beats the normal at small n -- using 1.96 would understate the interval");
+
+    checkClose(Summary::halfWidth95(xs),
+               Summary::tCritical95(7) * Summary::standardError(xs), 1e-12, "half-width");
+    check(Summary::stdDev(std::vector<double>{1.0}) == 0.0, "one sample says nothing about spread");
+    check(Summary::halfWidth95(std::vector<double>{}) == 0.0, "empty sample does not divide by zero");
 }
 
 void testDistributions() {
@@ -330,6 +381,120 @@ void testReproducibility() {
     check(c.statistics().numberServed() == n1, "re-initialising resets every bit of run state");
 }
 
+void testWarmUpRemoval() {
+    section("Warm-up removal");
+    // Constant everything, so the answer is arithmetic rather than statistics.
+    // Arrivals every 1.0, service 0.5 -> nobody ever waits, utilisation 0.5.
+    auto build = [](SimulationSystem& s) {
+        Model& m = s.model();
+        m.setInterarrival(std::make_unique<Constant>(1.0));
+        m.addStation("S", 1, QueueDiscipline::FIFO, std::make_unique<Constant>(0.5));
+        m.setEntry("S");
+        s.setTermination(std::make_unique<TimeLimit>(100.0));
+    };
+
+    SimulationSystem noWarm(1u); build(noWarm);
+    noWarm.initialise(); noWarm.run();
+    checkClose(noWarm.measuredTime(), noWarm.clock().now(), 1e-9,
+               "no warm-up: measured period is the whole clock");
+    checkClose(noWarm.warmUpEnd(), 0.0, 1e-12, "no warm-up: measurement starts at 0");
+
+    SimulationSystem warm(1u); build(warm);
+    warm.setWarmUp(40.0);
+    warm.initialise(); warm.run();
+    checkClose(warm.warmUpEnd(), 40.0, 1e-9, "warm-up ended when asked");
+    checkClose(warm.measuredTime(), warm.clock().now() - 40.0, 1e-9,
+               "measured period excludes the warm-up");
+    check(warm.statistics().numberServed() < noWarm.statistics().numberServed(),
+          "warm-up discards the entities served during the transient");
+    // Utilisation is 0.5 either way -- the SYSTEM did not change, only what was
+    // measured. That is the point of warm-up removal.
+    const Station& st = warm.model().stationAt(0);
+    checkClose(st.stats().utilisation(warm.measuredTime(), 1), 0.5, 1e-6,
+               "utilisation unchanged by warm-up removal");
+}
+
+void testObservations() {
+    section("Observation series");
+    SimulationSystem sim(3u);
+    Model& m = sim.model();
+    m.setInterarrival(std::make_unique<Constant>(1.0));
+    m.addStation("S", 1, QueueDiscipline::FIFO, std::make_unique<Constant>(0.5));
+    m.setEntry("S");
+    sim.setTermination(std::make_unique<TimeLimit>(100.0));
+    sim.setObservationInterval(10.0);
+    sim.initialise(); sim.run();
+    check(sim.observations().size() >= 9, "sampled on the grid, roughly time/dt points");
+    check(sim.observations().size() <= 11, "and not many more than that");
+}
+
+void testExperiment() {
+    section("Experiment");
+    auto build = [](SimulationSystem& s) {
+        Model& m = s.model();
+        m.setInterarrival(std::make_unique<Exponential>(1.0));
+        m.addStation("S", 1, QueueDiscipline::FIFO, std::make_unique<Exponential>(0.8));
+        m.setEntry("S");
+        s.setTermination(std::make_unique<TimeLimit>(1500.0));
+    };
+
+    Experiment e("test", build);
+    e.replications(6).baseSeed(300u).warmUp(200.0);
+    e.run();
+    check(e.results().size() == 6, "six replications ran");
+
+    // Each replication must use a DIFFERENT seed, or the "sample" has no
+    // variance and the confidence interval is a lie.
+    bool allDifferent = true;
+    for (std::size_t i = 1; i < e.results().size(); ++i)
+        if (e.results()[i].seed == e.results()[0].seed) allDifferent = false;
+    check(allDifferent, "replications use different seeds");
+
+    const std::vector<double> wq = e.column(&ReplicationResult::averageWait);
+    check(wq.size() == 6, "column() pulls one value per replication");
+    check(Summary::stdDev(wq) > 0.0, "results actually vary between replications");
+    check(Summary::halfWidth95(wq) > 0.0, "a real confidence interval");
+
+    // And the whole experiment is reproducible from its base seed.
+    Experiment f("test again", build);
+    f.replications(6).baseSeed(300u).warmUp(200.0);
+    f.run();
+    bool identical = true;
+    for (std::size_t i = 0; i < 6; ++i)
+        if (f.results()[i].averageWait != e.results()[i].averageWait) identical = false;
+    check(identical, "same base seed reproduces the whole experiment");
+}
+
+void testTheoryInsideInterval() {
+    section("M/M/1 theory falls inside the interval");
+    // The question open since v2, as an automated check.
+    Experiment e("mm1", [](SimulationSystem& s) {
+        Model& m = s.model();
+        m.setInterarrival(std::make_unique<Exponential>(1.0));
+        m.addStation("Server", 1, QueueDiscipline::FIFO, std::make_unique<Exponential>(0.8));
+        m.setEntry("Server");
+        s.setTermination(std::make_unique<TimeLimit>(20000.0));
+    });
+    e.replications(10).baseSeed(9000u).warmUp(4000.0);
+    e.run();
+
+    struct Case { const char* name; double ReplicationResult::* field; double theory; };
+    const Case cases[] = {
+        {"Wq", &ReplicationResult::averageWait,         3.20},
+        {"W",  &ReplicationResult::averageTimeInSystem, 4.00},
+        {"Lq", &ReplicationResult::Lq,                  3.20},
+        {"L",  &ReplicationResult::L,                   4.00},
+        {"rho", &ReplicationResult::utilisation,        0.80},
+    };
+    for (const Case& c : cases) {
+        const std::vector<double> xs = e.column(c.field);
+        const double m  = Summary::mean(xs);
+        const double hw = Summary::halfWidth95(xs);
+        check(c.theory >= m - hw && c.theory <= m + hw,
+              std::string("theory for ") + c.name + " lies inside the 95% interval");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -340,11 +505,16 @@ int main() {
     testFutureEventList();
     testActivityAndDelay();
     testStatistics();
+    testSummary();
     testDistributions();
     testTerminationRules();
     testDeterministicEndToEnd();
     testChainRouting();
     testReproducibility();
+    testWarmUpRemoval();
+    testObservations();
+    testExperiment();
+    testTheoryInsideInterval();
 
     std::cout << "\n" << (g_checks - g_failures) << " / " << g_checks << " checks passed\n";
     if (g_failures > 0) std::cout << g_failures << " FAILURES\n";

@@ -3,11 +3,11 @@
 Written from the simulation theory table up, as a way of learning OOP and system
 design rather than as a way of getting a simulator.
 
-**Current state: v3 — a network simulator.** The engine no longer knows what it
-is simulating: it owns a `Model` and runs it. Multi-server stations, chains of
-stations, pluggable distributions and queue disciplines, event tracing to file.
-Builds clean under `-Wall -Wextra -Wpedantic`, clean under ASan/UBSan, 85/85 unit
-checks pass, and a deterministic run reproduces a hand-worked table exactly.
+**Current state: v4 — honest numbers.** A network simulator with warm-up removal,
+replications and confidence intervals. M/M/1 theory falls inside the 95% interval
+for all five reported quantities. Builds clean under `-Wall -Wextra -Wpedantic`
+and ASan/UBSan; 124/124 unit checks pass; a deterministic run still reproduces a
+hand-worked table event for event.
 
 ## Build and run
 
@@ -46,10 +46,39 @@ m.setEntry("First");
 
 sim.setTermination( <ITerminationRule> );
 sim.enableTrace("trace.md", TraceLevel::Events);   // optional
+sim.setWarmUp(4000.0);                             // optional, v4
 sim.initialise();
 sim.run();
 sim.report();
 ```
+
+## Getting an answer you can defend
+
+One run of a simulation is **one sample from a random variable**. Quoting it to
+four decimals implies a precision that does not exist. Use `Experiment`:
+
+```
+Experiment e("my study", [](SimulationSystem& s){ /* build the model */ });
+e.replications(10).baseSeed(9000u).observeEvery(5.0);
+e.run();
+e.writeWelchSeries("welch.csv", 20);        // plot it, find the transient
+SimTime w = e.suggestWarmUp(20);            // heuristic starting point
+
+e.replications(10).warmUp(w);
+e.run();
+e.report();                                 // mean +/- 95% interval
+```
+
+Output:
+
+```
+  quantity                    mean      95% half-width      interval
+  average wait (Wq)         3.0920  +/-   0.1192   [   2.9728,    3.2112]
+  utilisation (rho)         0.7982  +/-   0.0066   [   0.7916,    0.8048]
+```
+
+M/M/1 theory is Wq 3.2000 and rho 0.8000 — both inside. That is what "the
+simulation agrees with theory" actually looks like.
 
 A restaurant is three `addStation` calls and two `connect` calls:
 
@@ -91,6 +120,7 @@ than as a slightly-off average — which is a far stronger statement.
 | `CHANGELOG.md` | What changed in each version |
 | `V2_READLOG.md` | Review of v2 and v2.1: every bug found and why it mattered |
 | `V3_READLOG.md` | What each v3 abstraction bought, what it cost, what was skipped |
+| `V4_READLOG.md` | Warm-up removal, Welch's method, confidence intervals |
 
 ## Layout
 
@@ -199,27 +229,22 @@ two and every time-average goes quietly wrong with no error.
 
 ---
 
-# v4 — the order to do it in
+# v5 — the order to do it in
 
-Wq has read a few percent high since v2 and every version has said "that's v4".
-This is v4. Commit after each step; `des_tests` must stay at 85/85 throughout.
+v4 made the intervals honest. v5 makes them **narrower for the same amount of
+computation**, which is where simulation output analysis gets interesting.
 
-1. **Replications.** Run the model N times with different seeds, collecting one
-   result per run. The API already supports it — `initialise()` fully resets —
-   so this is a loop plus a results container.
-2. **Warm-up removal (Welch's method).** Discard the transient start-up period.
-   Plot the moving average of queue length against time, find where it flattens,
-   drop everything before it. This is most of the 3-5% gap.
-3. **Confidence intervals.** Report `3.24 ± 0.11` instead of `3.2864`. Then ask
-   whether 3.2000 falls inside — which is the first time that question has an
-   honest answer.
-4. **Rename the `Statistics` integral members** to `areaUnderA` / `areaUnderB`
-   with meaning supplied by the caller. Small, and it removes a lie.
-5. **Remove the `EventNotice` sequence static.** Let `FutureEventList::schedule`
-   stamp it via a `friend` declaration rather than a public setter, so the class
-   stays immutable to everyone else.
-6. **`IEventHandler`** — by now pre-emption and balking will have pushed the
-   `run()` switch past the point where it fits on a screen. *Then* it is earned.
-7. **Config file input** — once the `Model` API has settled. Note that `assert`
-   is the wrong tool here: asserts vanish under `NDEBUG`, and external data needs
-   validation that survives a release build.
+1. **Common random numbers.** Compare two configurations using the same random
+   draws, so the difference between them is not swamped by sampling noise. This
+   is why `Constant::draw` deliberately consumes nothing from the stream — a
+   distribution that drew and discarded would shift every other draw and destroy
+   the pairing.
+2. **Antithetic variates.** Pair each replication with one using `1-u`.
+3. **Steady-state detection as an `ITerminationRule`.** Stop when the estimate has
+   converged rather than at a fixed clock time. Expressible today, since rules
+   receive the whole system.
+4. **Batch means.** One long run split into batches, as an alternative to
+   independent replications when the warm-up is expensive to repeat.
+5. **Widen `EntityId`.** A plain `int` overflows on a very long run. One line.
+6. **`IEventHandler`** — when pre-emption or reneging needs handlers that carry
+   state. A switch cannot hold state; that is the trigger, not the case count.

@@ -30,15 +30,21 @@
 #include "FutureEventList.hpp"
 #include <cassert>
 
+void FutureEventList::schedule(EventNotice e) {
+    // Stamp the tie-break number, then push. Two events at the same instant come
+    // out in the order they were scheduled, so a seeded run is bit-reproducible.
+    e.setSequenceNumber(++m_nextSequence);
+    m_fel.push(std::move(e));
+}
+
 void FutureEventList::clear() {
     // std::priority_queue has no clear(). Move-assigning a fresh empty one is
     // the idiomatic way, and it releases the old vector's memory too.
     m_fel = decltype(m_fel){};
+    m_nextSequence = 0;   // v4: rewind, so replications are bit-identical
 }
 
-void FutureEventList::schedule(const EventNotice& e) {
-    m_fel.push(e);
-}
+
 
 EventNotice FutureEventList::popImminent() {
     assert(!m_fel.empty());

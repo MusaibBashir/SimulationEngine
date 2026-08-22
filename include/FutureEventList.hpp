@@ -69,6 +69,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <queue>
 #include <vector>
 #include <functional>
@@ -82,6 +83,10 @@ private:
                         std::vector<EventNotice>,
                         std::greater<EventNotice>> m_fel;
 
+    // v4: was a mutable static on EventNotice. Per-FEL means it rewinds with
+    // the list, and two simulations in one process cannot interfere.
+    uint64_t m_nextSequence{0};
+
 public:
     FutureEventList() = default;
 
@@ -89,10 +94,14 @@ public:
     std::size_t size() const { return m_fel.size(); }
 
     // v2.1: empty the list, so initialise() can be called twice without the
-    // second run inheriting the first run's leftover events.
+    // second run inheriting the first run's leftover events. v4: this also
+    // rewinds the sequence counter, so replications are bit-identical without
+    // anybody having to remember a separate reset call.
     void clear();
 
-    void schedule(const EventNotice& e);
+    // v4: takes the notice BY VALUE so it can stamp the sequence number before
+    // pushing. The caller's copy is untouched; the one in the heap is ordered.
+    void schedule(EventNotice e);
     EventNotice popImminent();
     SimTime nextEventTime() const;
 };

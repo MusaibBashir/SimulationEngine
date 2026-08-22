@@ -49,6 +49,6 @@ Thumbs.db
 # ---- v2 output ----------------------------------------------------------
 # Simulation traces and result dumps: regenerable, often large, and they make
 # every diff unreadable. Ignore them from the start.
-*.csv
+welch_series.csv
 *.trace
 results/
