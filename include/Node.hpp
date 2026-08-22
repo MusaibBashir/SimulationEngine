@@ -76,7 +76,20 @@ public:
     // v7: come back at `at` to check whether this entity is still waiting.
     void scheduleRenegeCheck(SimTime at, Entity* e, INode* node);
 
+    // v9: a source asking to produce again. A separate call rather than reusing
+    // scheduleReturn() because the event TYPE differs, and an Arrival carrying
+    // no entity would trip the departure handler's assertion -- which is exactly
+    // what happened the first time this was wired up.
+    void scheduleNextArrival(SimTime at, INode* source);
+
     Entity* createEntity();
+
+    // v9: "this entity has just ENTERED the system". Only a Create block calls
+    // it. Batch representatives and Separate duplicates are made with
+    // createEntity() and are deliberately NOT arrivals -- they are entities the
+    // model manufactured, not demand the system received, and counting them
+    // would inflate every arrival rate in the report.
+    void registerArrival(Entity* e);
     void destroy(Entity* e);
 };
 

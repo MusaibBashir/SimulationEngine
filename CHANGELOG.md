@@ -5,6 +5,59 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [9.0.0] — 2026-08-22 — "Solve the coursework"
+
+Three Arena lab problems built end to end, and the features they demanded.
+Narrative in `V9_READLOG.md`; module-by-module translation in `ARENA_MAP.md`.
+
+### Added
+
+- **`CreateNode` / `Model::source()`** — several named arrival streams, each with
+  its own distribution, entity type, maximum count, first-arrival time and
+  entities-per-arrival. It is an `INode` like any other, which let
+  `SimulationSystem::handleArrival` be **deleted**: arrivals stopped being a
+  special case in the engine.
+- **Entity types** and per-type `NumberIn` / `NumberOut` / `WIP` / `TotalTime`.
+  Only entities from a Create count as arrivals — batch representatives and
+  Separate duplicates are manufactured, not demand.
+- **Matched batching**: `batchBySameAttribute` (entities that agree) and
+  `batchOneOfEach` (entities that differ). The second is the rule plain batching
+  cannot fake — with streams at different speeds, "the first three to arrive" is
+  often three of the same thing.
+- **Batching-station queue statistics, one observation per member**, which is
+  what Arena reports and a factor of `size` different from per batch.
+- **`Separate` has two exits**: `route()` for the Original, `routeDuplicate()`
+  for the Duplicate. Arena's "Percent Cost to Duplicates" is carried as an
+  attribute — it splits cost, not routing, which is how it is usually misread.
+- **`Model::allowOverload()`** — run a model whose queues grow without bound,
+  with the report stamped accordingly.
+- **`reportArenaStyle()`** — tally variables, discrete-change variables, outputs,
+  in Arena's layout.
+- **`IDistribution::clone()`**.
+- Example 15: the three lab problems, solved and explained.
+- `ARENA_MAP.md`.
+
+### Fixed
+
+- **WIP was silently zero for models with no Process block.** `refreshState()`
+  summed over Process blocks only — complete until v6 made batch queues a place
+  an entity can wait. Problem 5 reported WIP 0.0000 with 32 balls queued. A
+  statistic that is silently zero is worse than one that is missing.
+- **The stability check was unconditional.** Refusing ρ ≥ 1 is right for a
+  steady-state study and wrong for a terminating one: "run the clinic for four
+  hours" is a good question about an overloaded shift. Refusing was the correct
+  default; refusing with no way through was a design error.
+- Stream assignment pointed at the copy of the interarrival distribution kept for
+  the stability check rather than the live one in the Create block, silently
+  costing arrivals their own stream. The antithetic unit test caught it.
+
+### Verified
+
+- **293/293 checks** (260 in v8); clean under `-Wall -Wextra -Wpedantic` and
+  `-fsanitize=address,undefined`.
+
+---
+
 ## [8.0.0] — 2026-08-22 — "Where the numbers come from"
 
 Random number generation, from the bit source up. Narrative in `V8_READLOG.md`.
@@ -708,17 +761,14 @@ filling the bodies is v2.
 
 ---
 
-## [Unreleased] — v9
+## [Unreleased] — v10
 
-1. **Resource schedules** — a nurse who goes off shift at 5pm. Needs a capacity
-   that varies with time, which interacts with every rho calculation.
-2. **Preemption** — a high-priority entity taking a resource mid-service. Lazy
-   cancellation does not help: the interrupted entity must requeue carrying its
-   remaining service time.
-3. **Batch means** — one long run split into batches, as an alternative to
-   replications when the warm-up is expensive to repeat.
-4. **Config file input** — nothing has blocked it since v5.
+1. **Resource schedules** — a nurse who goes off shift at 5pm. This is also what
+   makes Arena's *scheduled* utilization differ from plain utilization.
+2. **Preemption** — a high-priority entity taking a resource mid-service.
+3. **Batch means**, and replications wired into `reportArenaStyle()` so a
+   terminating study reports intervals rather than one run.
+4. **Config file input.**
 5. **Streams for every block**, finishing what v8 started.
-6. **Distribution fitting** — take data, suggest which distribution fits, and
-   report a goodness-of-fit statistic. `StreamTests` already has the chi-square
-   and KS machinery.
+6. **Distribution fitting** — hand it data, get a suggested distribution and a
+   goodness-of-fit statistic.

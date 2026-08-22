@@ -35,6 +35,7 @@ add_library(des_engine STATIC
     src/Trace.cpp
     src/Station.cpp
     src/Nodes.cpp
+    src/Create.cpp
     src/Node.cpp
     src/Model.cpp
     src/SimulationSystem.cpp

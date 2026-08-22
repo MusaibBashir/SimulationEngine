@@ -8,6 +8,7 @@
 #include "Trace.hpp"
 #include "ModelError.hpp"
 #include <algorithm>
+#include <functional>
 #include <cassert>
 #include <iomanip>
 #include <sstream>
@@ -224,72 +225,157 @@ BatchNode::BatchNode(std::string name, std::size_t size, bool permanent)
     if (size < 2) throw ModelError("batch '" + m_name + "': size must be at least 2");
 }
 
-void BatchNode::enter(NodeContext& ctx, Entity* e) {
-    m_stats.recordArrival(ctx.now());
-    m_waiting.push_back(e);
+BatchNode::BatchNode(std::string name, std::size_t size, bool permanent,
+                     Rule rule, std::string attribute)
+    : INode(std::move(name)), m_size(size), m_permanent(permanent),
+      m_rule(rule), m_attribute(std::move(attribute)) {
+    if (size < 2) throw ModelError("batch '" + m_name + "': size must be at least 2");
+    if (m_rule != Rule::AnyEntity && m_attribute.empty())
+        throw ModelError("batch '" + m_name + "': this rule needs an attribute name");
+}
 
-    if (ctx.trace().isOn()) {
-        std::ostringstream os;
-        os << "held for batch (" << m_waiting.size() << "/" << m_size << ")";
-        ctx.trace().event(ctx.now(), "Batch", e->id(), m_name, os.str(),
-                          m_waiting.size(), 0);
+std::vector<std::size_t> BatchNode::selectMembers() const {
+    std::vector<std::size_t> chosen;
+
+    if (m_rule == Rule::AnyEntity) {
+        if (m_waiting.size() < m_size) return chosen;
+        for (std::size_t i = 0; i < m_size; ++i) chosen.push_back(i);
+        return chosen;
     }
 
-    if (m_waiting.size() < m_size) return;   // not enough yet -- the entity waits
+    if (m_rule == Rule::SameAttribute) {
+        // Group by value; the first group to reach `size` goes. Scanning in
+        // arrival order means the OLDEST complete group wins, so nothing is
+        // starved by a later, busier value.
+        for (std::size_t i = 0; i < m_waiting.size(); ++i) {
+            const double v = m_waiting[i]->attribute(m_attribute);
+            std::vector<std::size_t> group;
+            for (std::size_t j = i; j < m_waiting.size(); ++j)
+                if (m_waiting[j]->attribute(m_attribute) == v) group.push_back(j);
+            if (group.size() >= m_size) {
+                group.resize(m_size);
+                return group;
+            }
+        }
+        return chosen;
+    }
 
-    // Form the batch. The representative is a NEW entity, and its creation time
-    // is the OLDEST member's, so time-in-system measures how long the first
-    // arrival waited for the group rather than starting the clock at "now".
-    // Using now() here is an easy and completely silent way to understate it.
+    // DistinctAttribute: one of each. Take the OLDEST entity of each distinct
+    // value until we have `size` different values. Oldest-first matters: taking
+    // the newest would let an entity sit forever while its own kind kept
+    // arriving and being picked ahead of it.
+    std::vector<double> valuesTaken;
+    for (std::size_t i = 0; i < m_waiting.size() && chosen.size() < m_size; ++i) {
+        const double v = m_waiting[i]->attribute(m_attribute);
+        bool already = false;
+        for (double t : valuesTaken) if (t == v) { already = true; break; }
+        if (already) continue;
+        valuesTaken.push_back(v);
+        chosen.push_back(i);
+    }
+    if (chosen.size() < m_size) chosen.clear();
+    return chosen;
+}
+
+bool BatchNode::tryFormBatch(NodeContext& ctx) {
+    const std::vector<std::size_t> chosen = selectMembers();
+    if (chosen.empty()) return false;
+
+    // The representative is a NEW entity whose creation time is the OLDEST
+    // member's, so time-in-system measures how long the first arrival waited for
+    // the group. Using now() here understates it by exactly the batching delay.
     Entity* rep = ctx.createEntity();
-    SimTime oldest = m_waiting.front()->creationTime();
+    SimTime oldest = m_waiting[chosen.front()]->creationTime();
     SimTime totalWait = 0.0;
-    for (Entity* member : m_waiting) {
+    std::vector<Entity*> members;
+    for (std::size_t idx : chosen) {
+        Entity* member = m_waiting[idx];
         oldest = std::min(oldest, member->creationTime());
         totalWait += member->attribute("waitTime");
+        // One waiting-time observation PER MEMBER, which is what Arena reports
+        // for a batching station queue.
+        m_queueStats.recordDeparture(ctx.now(), ctx.now() - m_arrivedAt[idx],
+                                     ctx.now() - m_arrivedAt[idx]);
+        members.push_back(member);
         rep->addMember(member);
     }
+    rep->setType(m_waiting[chosen.front()]->type());
     rep->setCreationTime(oldest);
-    rep->setAttribute("waitTime", totalWait / static_cast<double>(m_waiting.size()));
-    rep->setAttribute("batchSize", static_cast<double>(m_waiting.size()));
+    rep->setAttribute("waitTime", totalWait / static_cast<double>(members.size()));
+    rep->setAttribute("batchSize", static_cast<double>(members.size()));
+
+    // Remove the chosen entries, highest index first so the earlier ones do not
+    // shift underneath us.
+    std::vector<std::size_t> order = chosen;
+    std::sort(order.begin(), order.end(), std::greater<std::size_t>());
+    for (std::size_t idx : order) {
+        m_waiting.erase(m_waiting.begin() + static_cast<std::ptrdiff_t>(idx));
+        m_arrivedAt.erase(m_arrivedAt.begin() + static_cast<std::ptrdiff_t>(idx));
+    }
 
     ++m_batchesFormed;
     m_stats.recordDeparture(ctx.now(), 0.0, ctx.now() - oldest);
 
     if (ctx.trace().isOn()) {
         std::ostringstream os;
-        os << "batch of " << m_size << " formed as entity " << rep->id()
+        os << "batch of " << members.size() << " formed as entity " << rep->id()
            << (m_permanent ? " (permanent)" : " (temporary)");
-        ctx.trace().event(ctx.now(), "Batch", rep->id(), m_name, os.str(), 0, 0);
+        ctx.trace().event(ctx.now(), "Batch", rep->id(), m_name, os.str(),
+                          m_waiting.size(), 0);
     }
 
     if (m_permanent) {
-        // Members are consumed: the batch IS the thing from now on. Destroy them
-        // so the entity table does not grow forever.
-        for (Entity* member : m_waiting) ctx.destroy(member);
+        // Members are consumed: the batch IS the thing from now on.
+        for (Entity* member : members) ctx.destroy(member);
         rep->clearMembers();
     }
-    m_waiting.clear();
 
     ctx.route(rep, m_next);
+    return true;
+}
+
+void BatchNode::enter(NodeContext& ctx, Entity* e) {
+    m_stats.recordArrival(ctx.now());
+    m_queueStats.recordArrival(ctx.now());
+    m_waiting.push_back(e);
+    m_arrivedAt.push_back(ctx.now());
+    m_maxQueue = std::max(m_maxQueue, m_waiting.size());
+
+    if (ctx.trace().isOn()) {
+        std::ostringstream os;
+        os << "held for batch (" << m_waiting.size() << " waiting, need " << m_size << ")";
+        ctx.trace().event(ctx.now(), "Batch", e->id(), m_name, os.str(),
+                          m_waiting.size(), 0);
+    }
+
+    // Loop: one arrival can complete more than one batch when a matched rule has
+    // been holding several near-complete groups.
+    while (tryFormBatch(ctx)) {}
 }
 
 void BatchNode::resetStatistics(SimTime now) {
     m_stats.restartAt(now);
+    m_queueStats.restartAt(now);
     m_batchesFormed = 0;
+    m_maxQueue = m_waiting.size();
 }
 
 void BatchNode::reset() {
     m_waiting.clear();
+    m_arrivedAt.clear();
     m_batchesFormed = 0;
+    m_maxQueue = 0;
     m_stats.reset();
+    m_queueStats.reset();
 }
 
 std::string BatchNode::describe() const {
     std::ostringstream os;
     os << "Batch " << m_name << " [size " << m_size << ", "
-       << (m_permanent ? "permanent" : "temporary")
-       << ", next=" << (m_next ? m_next->name() : std::string("exit")) << "]";
+       << (m_permanent ? "permanent" : "temporary");
+    if (m_rule == Rule::SameAttribute)     os << ", same " << m_attribute;
+    if (m_rule == Rule::DistinctAttribute) os << ", one of each " << m_attribute;
+    os << ", next=" << (m_next ? m_next->name() : std::string("exit")) << "]";
     return os.str();
 }
 
@@ -309,14 +395,21 @@ void SeparateNode::enter(NodeContext& ctx, Entity* e) {
         // DUPLICATE. Send the original on, then the copies. Copies inherit the
         // attributes but get their own ids and their own creation time of now --
         // they did not exist before this instant.
+        // Route the ORIGINAL last: the copies are made from it, and routing it
+        // first could send it somewhere that destroys it before they are built.
+        const double share = m_percentToDuplicates / 100.0;
         for (int i = 0; i < m_duplicates; ++i) {
             Entity* copy = ctx.createEntity();
             copy->copyAttributesFrom(*e);
+            copy->setType(e->type());
+            copy->setCreationTime(e->creationTime());   // it is the same work
+            copy->setAttribute("costShare", share / m_duplicates);
             if (ctx.trace().isOn())
                 ctx.trace().event(ctx.now(), "Duplicate", copy->id(), m_name,
                                   "copy of entity " + std::to_string(e->id()), 0, 0);
-            ctx.route(copy, m_next);
+            ctx.route(copy, m_duplicateTo ? m_duplicateTo : m_next);
         }
+        e->setAttribute("costShare", 1.0 - share);
         ctx.route(e, m_next);
         return;
     }

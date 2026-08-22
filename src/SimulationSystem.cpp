@@ -64,7 +64,15 @@ void SimulationSystem::assignStreams() {
         d->useStream(&it->second);
     };
 
-    give(&m_model.interarrival(), "arrivals");
+    // v9: the SOURCES own the interarrival distributions now. Model::interarrival()
+    // is only the copy kept for the stability check, and streaming that copy
+    // instead of the live one silently stopped arrivals having their own stream
+    // -- which is precisely what common random numbers depends on. The
+    // antithetic unit test caught it, which is what that test is for.
+    for (std::size_t i = 0; i < m_model.sourceCount(); ++i) {
+        CreateNode& c = m_model.sourceAt(i);
+        give(&c.interarrival(), "arrivals:" + c.name());
+    }
     for (const auto& a : m_model.arrivalAttributes())
         give(a.distribution.get(), "attribute:" + a.name);
     for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
@@ -91,7 +99,34 @@ Entity* SimulationSystem::createEntity() {
     return raw;
 }
 
+void SimulationSystem::noteArrival(Entity* e) {
+    // Attributes the model stamps on everything that arrives -- priority, due
+    // date, whatever this model says an entity carries.
+    for (const auto& a : m_model.arrivalAttributes())
+        e->setAttribute(a.name, a.distribution->draw(m_rng));
+    e->setAttribute("counted", 1.0);   // so noteExit knows this one was demand
+    m_stats.recordArrival(m_clock.now());
+    TypeStats& t = m_byType[e->type()];
+    ++t.in;
+    ++t.inSystem;
+}
+
+void SimulationSystem::noteExit(Entity* e) {
+    if (!e->hasAttribute("counted")) return;   // manufactured, not demand
+    TypeStats& t = m_byType[e->type()];
+    ++t.out;
+    if (t.inSystem > 0) --t.inSystem;
+    const SimTime inSystem = m_clock.now() - e->creationTime();
+    t.totalTime += inSystem;
+    t.maxTime = std::max(t.maxTime, inSystem);
+}
+
 void SimulationSystem::destroyEntity(EntityId id) {
+    // Every destruction is an exit for that entity type, whether it reached a
+    // Dispose or was consumed by a permanent Batch. Arena counts both, and a
+    // plate swallowed by a batch has certainly left the system.
+    auto it = m_entities.find(id);
+    if (it != m_entities.end()) noteExit(it->second.get());
     m_entities.erase(id);
 }
 
@@ -107,6 +142,7 @@ SimTime NodeContext::now() const { return m_sim.m_clock.now(); }
 RandomStream& NodeContext::rng() { return m_sim.m_rng; }
 Trace& NodeContext::trace() { return m_sim.m_trace; }
 Entity* NodeContext::createEntity() { return m_sim.createEntity(); }
+void NodeContext::registerArrival(Entity* e) { m_sim.noteArrival(e); }
 void NodeContext::destroy(Entity* e) { m_sim.destroyEntity(e->id()); }
 
 void NodeContext::route(Entity* e, INode* to) {
@@ -126,6 +162,10 @@ void NodeContext::scheduleRenegeCheck(SimTime at, Entity* e, INode* node) {
     m_sim.scheduleEvent(EventType::Renege, at, e, node);
 }
 
+void NodeContext::scheduleNextArrival(SimTime at, INode* source) {
+    m_sim.scheduleEvent(EventType::Arrival, at, nullptr, source);
+}
+
 // ------------------------------------------------------------------ state --
 
 std::size_t SimulationSystem::stillWaitingCount() const {
@@ -136,8 +176,8 @@ std::size_t SimulationSystem::stillWaitingCount() const {
 }
 
 void SimulationSystem::refreshState() {
-    // SystemState is a SNAPSHOT summed across every process block. The blocks
-    // remain the single source of truth; SystemState never decides anything.
+    // SystemState is a SNAPSHOT. The blocks remain the single source of truth;
+    // SystemState never decides anything, it only reports.
     int queued = 0;
     int busy   = 0;
     for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
@@ -145,8 +185,24 @@ void SimulationSystem::refreshState() {
         queued += static_cast<int>(s.queue().length());
         busy   += s.resource().unitsBusy();
     }
+    // v9 FIX: also count entities held at a BATCH block waiting for companions.
+    // Before this, "number in queue" meant "in a Process queue", so a model made
+    // entirely of batching blocks -- which the ball-matching problem is --
+    // reported a queue length and a WIP of exactly zero while 32 balls sat
+    // waiting. A statistic that is silently zero is worse than one that is
+    // missing, because it gets copied into an answer.
+    for (std::size_t i = 0; i < m_model.nodeCount(); ++i)
+        if (auto* b = dynamic_cast<const BatchNode*>(&m_model.nodeAt(i)))
+            queued += static_cast<int>(b->waitingForBatch());
+
+    // WIP is every entity the system is holding, wherever it is -- in service,
+    // in a queue, on a conveyor, waiting for a batch. Counting only queues and
+    // servers would miss anything in a Delay.
+    int inSystem = 0;
+    for (const auto& kv : m_byType) inSystem += kv.second.inSystem;
+
     m_state.setNumberInQueue(queued);
-    m_state.setNumberInSystem(queued + busy);
+    m_state.setNumberInSystem(inSystem);
     m_state.setServerStatus(busy > 0 ? ResourceState::Busy : ResourceState::Idle);
 }
 
@@ -160,6 +216,12 @@ void SimulationSystem::updateAllIntegrals(SimTime upTo) {
                                       s.unitsHeld());
     }
     m_stats.updateTimeIntegrals(upTo, m_state.numberInQueue(), m_state.numberInSystem());
+    // WIP per type: the same rectangle rule, one integral per entity type.
+    for (auto& kv : m_byType) {
+        TypeStats& t = kv.second;
+        t.areaWIP += t.inSystem * (upTo - t.lastUpdate);
+        t.lastUpdate = upTo;
+    }
 }
 
 void SimulationSystem::disposeEntity(Entity* e) {
@@ -186,6 +248,10 @@ void SimulationSystem::disposeEntity(Entity* e) {
 }
 
 void SimulationSystem::initialise() {
+    // Wire the shorthand source to the entry block BEFORE validating -- the
+    // caller may have said arrivals() before entryAt(), and the order in which
+    // a model is described should not matter.
+    m_model.wireSources();
     m_model.validate();          // catch modelling mistakes BEFORE the run
     assert(m_termination != nullptr && "no termination rule set");
 
@@ -198,6 +264,7 @@ void SimulationSystem::initialise() {
     assignStreams();
     m_fel.clear();
     m_entities.clear();
+    m_byType.clear();
     m_nextEntityId = 1;
     m_model.reset();
     m_warmUpEnded = 0.0;
@@ -215,7 +282,13 @@ void SimulationSystem::initialise() {
         m_trace.note(os.str());
     }
 
-    scheduleEvent(EventType::Arrival, 0.0);   // carries no entity -- see handleArrival
+    // v9: one Arrival event per SOURCE. There is no special arrival handling
+    // left in the engine -- a Create is a block like any other, and its callback
+    // makes the entity and reschedules itself.
+    for (std::size_t i = 0; i < m_model.sourceCount(); ++i) {
+        CreateNode& c = m_model.sourceAt(i);
+        scheduleEvent(EventType::Arrival, c.firstAt(), nullptr, &c);
+    }
     if (m_warmUp > 0.0)          scheduleEvent(EventType::WarmUpEnd, m_warmUp);
     if (m_observeInterval > 0.0) scheduleEvent(EventType::Observe, m_observeInterval);
     m_initialised = true;
@@ -242,7 +315,13 @@ void SimulationSystem::run() {
         m_clock.advanceTo(notice.time());
 
         switch (notice.type()) {
-            case EventType::Arrival:       handleArrival(notice);   break;
+            case EventType::Arrival: {
+                // A source's turn to produce. Same shape as any other callback.
+                NodeContext ctx(*this);
+                if (notice.node()) notice.node()->onScheduledEvent(ctx, nullptr);
+                refreshState();
+                break;
+            }
             case EventType::Departure:     handleDeparture(notice); break;
             case EventType::EndSimulation: return;
             case EventType::WarmUpEnd:     handleWarmUpEnd();       break;
@@ -288,6 +367,16 @@ void SimulationSystem::handleWarmUpEnd() {
     // service, queues keep their contents. Measurement now begins from a
     // realistically loaded system rather than an empty one.
     m_stats.restartAt(m_clock.now());
+    // Per-type counters restart too, for the same reason every other statistic
+    // does: a count spanning the warm-up next to a utilisation that does not is
+    // two numbers in one report measuring different periods.
+    for (auto& kv : m_byType) {
+        TypeStats& t = kv.second;
+        const int stillHere = t.inSystem;
+        t = TypeStats{};
+        t.inSystem   = stillHere;      // state survives; measurement restarts
+        t.lastUpdate = m_clock.now();
+    }
     // EVERY block, not just the process ones -- a Record or Decide counter that
     // spanned the warm-up while the utilisation next to it did not would be two
     // numbers in one report meaning different periods.
@@ -308,32 +397,6 @@ void SimulationSystem::handleObservation() {
     // line up; grid points do.
     m_observations.push_back(static_cast<double>(m_state.numberInSystem()));
     scheduleEvent(EventType::Observe, m_clock.now() + m_observeInterval);
-}
-
-void SimulationSystem::handleArrival(const EventNotice& /*notice*/) {
-    // *** THE ARRIVAL EVENT CARRIES NO ENTITY; THE ENTITY IS BORN HERE. ***
-    // Creating it earlier and attaching it to a future Arrival would stamp
-    // creationTime before it actually arrived, inflating every time-in-system.
-    Entity* arriving = createEntity();
-    arriving->setAttribute("waitTime", 0.0);
-    for (const auto& a : m_model.arrivalAttributes())
-        arriving->setAttribute(a.name, a.distribution->draw(m_rng));
-    m_stats.recordArrival(m_clock.now());
-
-    if (m_trace.isOn()) {
-        m_trace.event(m_clock.now(), "Arrival", arriving->id(),
-                      m_model.entry()->name(), "enters the system", 0, 0);
-    }
-
-    // *** FEED THE SIMULATION. *** Forget this and the run stops after one
-    // entity -- the classic first-run bug.
-    scheduleEvent(EventType::Arrival, m_clock.now() + m_model.interarrival().draw(m_rng));
-
-    // Hand it to the first block. From here the FLOWCHART decides everything;
-    // the engine's only remaining job is to move the clock.
-    NodeContext ctx(*this);
-    ctx.route(arriving, m_model.entry());
-    refreshState();
 }
 
 void SimulationSystem::handleDeparture(const EventNotice& notice) {
@@ -411,6 +474,102 @@ RunResults SimulationSystem::results() const {
         r.stations.push_back(std::move(sr));
     }
     return r;
+}
+
+void SimulationSystem::reportArenaStyle() const {
+    const RunResults r = results();
+    const SimTime T = r.measuredTime;
+    std::cout << std::fixed;
+    std::cout << "\n============================================================\n";
+    std::cout << "Replication ended at time : " << std::setprecision(4) << r.simulatedTime << "\n";
+    if (m_model.overloadAllowed()) {
+        std::cout << "*** OVERLOADED MODEL: at least one queue grows without bound.\n"
+                     "*** These are TERMINATING-run results for this horizon only.\n"
+                     "*** They are not steady-state values and will change if the\n"
+                     "*** run length changes.\n";
+    }
+
+    std::cout << "\nTALLY VARIABLES\n";
+    std::cout << std::setw(34) << std::left << "Identifier" << std::right
+              << std::setw(12) << "Average" << std::setw(12) << "Minimum"
+              << std::setw(12) << "Maximum" << std::setw(14) << "Observations" << "\n";
+    std::cout << std::string(84, '-') << "\n";
+
+    auto tally = [&](const std::string& id, double avg, double mn, double mx, long long obs) {
+        std::cout << std::setw(34) << std::left << id << std::right
+                  << std::setw(12) << std::setprecision(5) << avg
+                  << std::setw(12) << mn << std::setw(12) << mx
+                  << std::setw(14) << obs << "\n";
+    };
+
+    for (const auto& kv : m_byType) {
+        const TypeStats& t = kv.second;
+        const double avg = t.out ? t.totalTime / static_cast<double>(t.out) : 0.0;
+        tally(kv.first + ".TotalTime", avg, 0.0, t.maxTime, t.out);
+    }
+    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
+        const Station& s = m_model.stationAt(i);
+        tally(s.name() + ".Queue.WaitingTime", s.stats().averageWaitingTime(),
+              0.0, s.stats().maxWaitingTime(), s.stats().numberServed());
+    }
+    for (std::size_t i = 0; i < m_model.nodeCount(); ++i) {
+        if (auto* b = dynamic_cast<const BatchNode*>(&m_model.nodeAt(i)))
+            tally(b->name() + ".Queue.WaitingTime", b->queueStats().averageWaitingTime(),
+                  0.0, b->queueStats().maxWaitingTime(), b->queueStats().numberServed());
+    }
+
+    std::cout << "\nDISCRETE-CHANGE VARIABLES\n";
+    std::cout << std::setw(34) << std::left << "Identifier" << std::right
+              << std::setw(12) << "Average" << std::setw(14) << "Final Value" << "\n";
+    std::cout << std::string(60, '-') << "\n";
+    auto dcv = [&](const std::string& id, double avg, double final) {
+        std::cout << std::setw(34) << std::left << id << std::right
+                  << std::setw(12) << std::setprecision(5) << avg
+                  << std::setw(14) << final << "\n";
+    };
+    for (const auto& kv : m_byType)
+        dcv(kv.first + ".WIP", T > 0 ? kv.second.areaWIP / T : 0.0, kv.second.inSystem);
+    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
+        const Station& s = m_model.stationAt(i);
+        // Arena's "scheduled utilization" is busy resource-time divided by
+        // (capacity x scheduled time) -- exactly what utilisation() computes,
+        // because this engine has no resource schedules yet and every resource
+        // is scheduled for the whole run.
+        dcv(s.name() + ".Utilization", s.stats().utilisation(T, s.resource().capacity()),
+            s.unitsHeld());
+        dcv(s.name() + ".Queue.NumberInQueue", s.stats().timeAverageA(T), s.queue().length());
+    }
+
+    std::cout << "\nOUTPUTS\n";
+    std::cout << std::string(60, '-') << "\n";
+    auto out = [&](const std::string& id, double v) {
+        std::cout << std::setw(40) << std::left << id << std::right
+                  << std::setw(14) << std::setprecision(3) << v << "\n";
+    };
+    for (const auto& kv : m_byType) {
+        out(kv.first + ".NumberIn",  static_cast<double>(kv.second.in));
+        out(kv.first + ".NumberOut", static_cast<double>(kv.second.out));
+    }
+    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
+        const Station& s = m_model.stationAt(i);
+        out(s.name() + " Number In",  static_cast<double>(s.stats().numberArrived()));
+        out(s.name() + " Number Out", static_cast<double>(s.stats().numberServed()));
+        out(s.name() + ".ScheduledUtilization",
+            s.stats().utilisation(T, s.resource().capacity()));
+    }
+    for (std::size_t i = 0; i < m_model.nodeCount(); ++i) {
+        const INode& n = m_model.nodeAt(i);
+        if (auto* d = dynamic_cast<const DisposeNode*>(&n))
+            out(d->name() + ".NumberOut", static_cast<double>(d->count()));
+        if (auto* b = dynamic_cast<const BatchNode*>(&n))
+            out(b->name() + ".BatchesFormed", static_cast<double>(b->batchesFormed()));
+        if (auto* rc = dynamic_cast<const RecordNode*>(&n)) {
+            out(rc->name() + ".Count", static_cast<double>(rc->count()));
+            out(rc->name() + ".Average", rc->average());
+        }
+    }
+    out("System.NumberOut", static_cast<double>(r.exited));
+    std::cout << "============================================================\n";
 }
 
 void SimulationSystem::report() const {

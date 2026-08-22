@@ -260,4 +260,27 @@ std::string Poisson::describe() const {
 }
 SimTime Poisson::mean() const { return m_mean; }
 
+
+// v9: clone(), so a distribution can be described once and used twice.
+std::unique_ptr<IDistribution> Exponential::clone() const { return std::make_unique<Exponential>(m_mean); }
+std::unique_ptr<IDistribution> Constant::clone() const { return std::make_unique<Constant>(m_value); }
+std::unique_ptr<IDistribution> Uniform::clone() const { return std::make_unique<Uniform>(m_low, m_high); }
+std::unique_ptr<IDistribution> Triangular::clone() const { return std::make_unique<Triangular>(m_low, m_mode, m_high); }
+std::unique_ptr<IDistribution> Deterministic::clone() const { return std::make_unique<Deterministic>(m_values, m_repeat); }
+std::unique_ptr<IDistribution> Normal::clone() const { return std::make_unique<Normal>(m_mean, m_sd, m_truncate); }
+std::unique_ptr<IDistribution> Lognormal::clone() const { return std::make_unique<Lognormal>(m_logMean, m_logSd); }
+std::unique_ptr<IDistribution> Weibull::clone() const { return std::make_unique<Weibull>(m_scale, m_shape); }
+std::unique_ptr<IDistribution> Erlang::clone() const { return std::make_unique<Erlang>(m_meanEach, m_phases); }
+std::unique_ptr<IDistribution> Poisson::clone() const { return std::make_unique<Poisson>(m_mean); }
+std::unique_ptr<IDistribution> Discrete::clone() const {
+    // Rebuild the per-value probabilities from the cumulative ones.
+    std::vector<double> p;
+    double prev = 0.0;
+    for (double c : m_cumulative) { p.push_back(c - prev); prev = c; }
+    return std::make_unique<Discrete>(m_values, p);
+}
+std::unique_ptr<IDistribution> Empirical::clone() const {
+    return std::make_unique<Empirical>(m_sorted);
+}
+
 }  // namespace des

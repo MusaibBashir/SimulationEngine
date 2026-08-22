@@ -137,13 +137,42 @@ public:
 // wanted to know, and is easy to get silently wrong by using "now".
 // ---------------------------------------------------------------------------
 class BatchNode : public INode {
+public:
+    // v9: HOW entities are grouped. Arena calls this the batching Rule.
+    enum class Rule {
+        AnyEntity,          // the first `size` to show up
+        SameAttribute,      // `size` entities that AGREE on an attribute --
+                            // same lot number, same customer, same order
+        DistinctAttribute   // `size` entities that DIFFER -- one of each type.
+                            // "a set of three balls, one baseball, one
+                            // basketball, one football" is this rule, and it is
+                            // the one AnyEntity cannot fake: with three streams
+                            // running at different speeds, taking the first
+                            // three to arrive gives you three baseballs.
+    };
+
+private:
     std::size_t m_size;
     bool m_permanent;
+    Rule m_rule{Rule::AnyEntity};
+    std::string m_attribute;
     std::vector<Entity*> m_waiting;
+    // When each waiting entity arrived, so the wait for a batch can be measured
+    // per member. Arena reports one observation PER MEMBER at the batching
+    // station queue, not one per batch, and the difference is a factor of `size`.
+    std::vector<SimTime> m_arrivedAt;
     long long m_batchesFormed{0};
     Statistics m_stats;
+    Statistics m_queueStats;     // waiting time, one observation per member
+    std::size_t m_maxQueue{0};
+
+    bool tryFormBatch(NodeContext& ctx);
+    std::vector<std::size_t> selectMembers() const;
+
 public:
     BatchNode(std::string name, std::size_t size, bool permanent = false);
+    BatchNode(std::string name, std::size_t size, bool permanent,
+              Rule rule, std::string attribute);
     void enter(NodeContext& ctx, Entity* e) override;
     void reset() override;
     void resetStatistics(SimTime now) override;
@@ -152,6 +181,12 @@ public:
     bool isPermanent() const { return m_permanent; }
     long long batchesFormed() const { return m_batchesFormed; }
     std::size_t waitingForBatch() const { return m_waiting.size(); }
+    std::size_t maxQueueLength() const { return m_maxQueue; }
+    // Waiting-time statistics for the batching station queue: one observation
+    // per MEMBER, matching what Arena reports.
+    const Statistics& queueStats() const { return m_queueStats; }
+    const Statistics& stats() const { return m_stats; }
+    Rule rule() const { return m_rule; }
 };
 
 // ---------------------------------------------------------------------------
@@ -164,7 +199,24 @@ public:
 class SeparateNode : public INode {
     int m_duplicates{0};   // 0 means "split a batch" rather than "duplicate"
     long long m_processed{0};
+
+    // v9: Arena's Separate block has TWO exit points, Original and Duplicate,
+    // and models routinely send them different ways -- the sample to one test
+    // bench and its duplicate to another. next() is the Original exit; this is
+    // the Duplicate exit, and if it is not set the copies follow the original.
+    INode* m_duplicateTo{nullptr};
+
+    // Arena's "Percent Cost to Duplicates". Carried on the entity as an
+    // attribute so a downstream Record can cost it. It does NOT affect routing,
+    // which is the thing everyone reads it as the first time.
+    double m_percentToDuplicates{50.0};
+
 public:
+    void setDuplicateExit(INode* n) { m_duplicateTo = n; }
+    INode* duplicateExit() const { return m_duplicateTo; }
+    void setPercentToDuplicates(double pct) { m_percentToDuplicates = pct; }
+    double percentToDuplicates() const { return m_percentToDuplicates; }
+
     // Split a batch back into its members.
     explicit SeparateNode(std::string name);
     // Duplicate: the original plus `copies` clones.

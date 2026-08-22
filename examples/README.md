@@ -80,6 +80,7 @@ directory. Run them from a directory you don't mind cluttering.
 | 12 | `12_shared_resources.cpp` | **Shared resources**, balking, reneging, N-way Decide. |
 | 13 | `13_random_numbers.cpp` | Where the random numbers come from, all twelve distributions, and testing a generator. |
 | 14 | `14_variance_reduction.cpp` | Antithetic variates and common random numbers — a narrower answer for the same compute. |
+| 15 | `15_lab_problems.cpp` | **Three Arena coursework problems solved end to end**: batching, duplication with two exits, matched "one of each" batching. |
 
 If you are short of time: **01, 02, 08**. Those three are the difference between
 using the tool correctly and producing confident nonsense. Then **11** if your

@@ -51,6 +51,10 @@ public:
     // shows up as confident four-decimal nonsense.
     virtual SimTime mean() const = 0;
 
+    // v9: needed because arrivals() keeps a copy for the stability check AND
+    // hands one to the Create block, and a unique_ptr cannot be in two places.
+    virtual std::unique_ptr<IDistribution> clone() const = 0;
+
     // v8: draw from THIS distribution's own stream if it has been given one,
     // otherwise from the shared stream passed in. Giving each distribution its
     // own stream is what makes two model variants comparable: change the
@@ -75,6 +79,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
 };
 
 class Constant : public IDistribution {
@@ -84,6 +89,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
 };
 
 class Uniform : public IDistribution {
@@ -93,6 +99,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
 };
 
 class Triangular : public IDistribution {
@@ -102,6 +109,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
 };
 
 // --- v8 additions -----------------------------------------------------------
@@ -118,6 +126,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
 };
 
 // Right-skewed and never negative, which is what most service times actually
@@ -132,6 +141,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
 };
 
 // The reliability workhorse: shape < 1 means failures get rarer with age
@@ -143,6 +153,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
 };
 
 // k sequential exponential phases. Fills the gap between constant (k -> inf)
@@ -156,6 +167,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
 };
 
 // A finite set of values with given probabilities -- batch sizes, part types,
@@ -169,6 +181,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
 };
 
 // Sample straight from DATA you measured, with linear interpolation between the
@@ -181,6 +194,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
 };
 
 // Counts, not durations: arrivals per hour, defects per batch.
@@ -191,6 +205,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
 };
 
 // The one that makes hand-checking possible: hand it the exact sequence from a
@@ -205,6 +220,7 @@ public:
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
     SimTime mean() const override;
+    std::unique_ptr<IDistribution> clone() const override;
     void reset() override;
 };
 

@@ -1319,6 +1319,252 @@ void testCommonRandomNumbers() {
     check(cmp.differsSignificantly, "and it can tell the designs apart");
 }
 
+void testMultipleSources() {
+    section("Multiple sources and entity types (v9)");
+    {
+        SimulationSystem sim(5u);
+        sim.model()
+            .source("A arrivals", "Alpha", constant(1.0), /*max=*/10)
+            .source("B arrivals", "Beta",  constant(2.0), /*max=*/5)
+            .station("Desk", 1, FIFO, constant(0.1))
+            .dispose("Out")
+            .route("A arrivals", "Desk").route("B arrivals", "Desk")
+            .route("Desk", "Out")
+            .entryAt("Desk");
+        sim.stopAt(100.0).execute();
+
+        const auto& t = sim.byType();
+        check(t.count("Alpha") == 1 && t.count("Beta") == 1, "both entity types appear");
+        // *** THE CAP IS A HARD LIMIT. *** 100 minutes at one a minute would
+        // give 100 Alphas without it.
+        check(t.at("Alpha").in == 10, "Alpha stopped at its maximum of 10");
+        check(t.at("Beta").in == 5,   "Beta stopped at its maximum of 5");
+        check(t.at("Alpha").out == 10 && t.at("Beta").out == 5, "and all of them left");
+        check(sim.results().exited == 15, "15 entities through the system");
+    }
+
+    // An uncapped source keeps producing.
+    {
+        SimulationSystem sim(5u);
+        sim.model().source("S", "Thing", constant(1.0))
+                   .station("Desk", 1, FIFO, constant(0.1))
+                   .dispose("Out")
+                   .route("S", "Desk").route("Desk", "Out").entryAt("Desk");
+        sim.stopAt(50.0).execute();
+        check(sim.byType().at("Thing").in > 40, "an uncapped source runs for the whole horizon");
+    }
+
+    // Nothing routes INTO a Create.
+    bool threw = false;
+    try {
+        SimulationSystem s(1u);
+        s.model().source("S", "T", constant(1.0)).station("D", 1, FIFO, constant(0.5))
+                 .route("D", "S");
+        s.model().route("S", "D");
+        s.model().entryAt("D");
+        s.stopAt(10.0).execute();
+    } catch (const ModelError&) { threw = true; }
+    check(threw, "routing into a Create is refused");
+
+    // A source that feeds nothing is a mistake, not an empty run.
+    threw = false;
+    try {
+        SimulationSystem s(1u);
+        s.model().source("S", "T", constant(1.0))
+                 .source("S2", "T2", constant(1.0))
+                 .station("D", 1, FIFO, constant(0.5)).dispose("O")
+                 .route("S", "D").route("D", "O").entryAt("D");
+        s.stopAt(10.0).execute();      // S2 goes nowhere
+    } catch (const ModelError&) { threw = true; }
+    check(threw, "a source wired to nothing is caught before the run");
+}
+
+void testMatchedBatching() {
+    section("Matched batching (v9)");
+
+    // ONE OF EACH. Three streams at different speeds: without matching, the
+    // fast stream would be batched with itself. With it, sets are limited by
+    // the slowest ingredient and the fast type piles up.
+    {
+        SimulationSystem sim(7u);
+        sim.model()
+            .source("fast", "Fast", constant(1.0))
+            .source("slow", "Slow", constant(4.0))
+            .assign("tagFast", "kind", constant(1.0))
+            .assign("tagSlow", "kind", constant(2.0))
+            .batchOneOfEach("Match", 2, "kind", /*permanent=*/true)
+            .dispose("Out")
+            .route("fast", "tagFast").route("slow", "tagSlow")
+            .route("tagFast", "Match").route("tagSlow", "Match")
+            .route("Match", "Out")
+            .entryAt("Match");
+        sim.stopAt(100.0).execute();
+
+        const auto& b = sim.model().nodeAs<BatchNode>("Match");
+        const auto& t = sim.byType();
+        // A set needs one of each, so the number of sets is governed by the
+        // SLOW stream -- about 25 in 100 minutes, not the fast stream's 100.
+        check(b.batchesFormed() >= 20 && b.batchesFormed() <= 26,
+              "sets are limited by the slowest ingredient");
+        check(t.at("Fast").out == t.at("Slow").out,
+              "exactly as many Fast as Slow were consumed");
+        check(t.at("Fast").in > t.at("Fast").out + 40,
+              "and the fast type piles up waiting for partners");
+    }
+
+    // A PLAIN batch of 2 on the same streams would happily take two Fasts, so
+    // it is NOT limited by the slow stream. That contrast is the whole reason
+    // the matched rule exists.
+    {
+        SimulationSystem sim(7u);
+        sim.model()
+            .source("fast", "Fast", constant(1.0))
+            .source("slow", "Slow", constant(4.0))
+            .batch("Any", 2, /*permanent=*/true)
+            .dispose("Out")
+            .route("fast", "Any").route("slow", "Any").route("Any", "Out")
+            .entryAt("Any");
+        sim.stopAt(100.0).execute();
+        check(sim.model().nodeAs<BatchNode>("Any").batchesFormed() > 50,
+              "a plain batch is not limited by the slow stream -- different model");
+    }
+
+    // SAME ATTRIBUTE: group entities that agree.
+    {
+        SimulationSystem sim(3u);
+        sim.model()
+            .source("s", "Job", constant(1.0))
+            .assign("lot", "lotNumber", discrete({1.0, 2.0}, {0.5, 0.5}))
+            .batchBySameAttribute("ByLot", 3, "lotNumber", true)
+            .dispose("Out")
+            .route("s", "lot").route("lot", "ByLot").route("ByLot", "Out")
+            .entryAt("ByLot");
+        sim.stopAt(300.0).execute();
+        check(sim.model().nodeAs<BatchNode>("ByLot").batchesFormed() > 50,
+              "same-attribute batching forms groups");
+    }
+
+    // The batching queue records one observation PER MEMBER, not per batch --
+    // which is what Arena reports and a factor of `size` different.
+    {
+        SimulationSystem sim(1u);
+        sim.model().source("s", "P", constant(1.0), 20)
+                   .batch("B", 5, true).dispose("Out")
+                   .route("s", "B").route("B", "Out").entryAt("B");
+        sim.stopAt(100.0).execute();
+        const auto& b = sim.model().nodeAs<BatchNode>("B");
+        check(b.batchesFormed() == 4, "20 arrivals make 4 batches of 5");
+        check(b.queueStats().numberServed() == 20,
+              "20 waiting-time observations -- one per member, not per batch");
+        // Members arrive one a minute; within a batch they wait 4,3,2,1,0
+        // minutes, so the average is exactly 2.
+        checkClose(b.queueStats().averageWaitingTime(), 2.0, 1e-9,
+                   "and the average member wait is exactly right");
+    }
+}
+
+void testOverloadAllowed() {
+    section("Terminating runs of overloaded models (v9)");
+    auto build = [](SimulationSystem& s, bool allow) {
+        Model& m = s.model();
+        if (allow) m.allowOverload();
+        m.arrivals(exponential(0.5))
+         .station("Chem", 1, FIFO, triangular(0.5, 1.0, 1.5))   // rho = 2
+         .dispose("Out").route("Chem", "Out").entryAt("Chem");
+        s.stopAt(4.0);
+    };
+
+    bool threw = false;
+    try { SimulationSystem s(1u); build(s, false); s.execute(); }
+    catch (const ModelError&) { threw = true; }
+    check(threw, "an overloaded model is refused by default");
+
+    bool ok = true;
+    SimulationSystem s(1u);
+    try { build(s, true); s.execute(); } catch (...) { ok = false; }
+    check(ok, "and runs when the model says allowOverload()");
+    check(s.model().overloadAllowed(), "the model remembers, so the report can say so");
+    check(s.results().exited > 0, "and it produces results for the horizon asked about");
+}
+
+void testSeparateExits() {
+    section("Separate's two exits (v9)");
+    // Arena's Separate has an Original exit and a Duplicate exit, and models
+    // routinely send them different ways. Reading the "50%" in the lab question
+    // as a routing probability instead gives a similar-looking wrong model.
+    SimulationSystem sim(1u);
+    sim.model()
+        .source("s", "Sample", constant(10.0), 5)
+        .duplicate("Split", 1)
+        .station("BenchA", 1, FIFO, constant(1.0))
+        .station("BenchB", 1, FIFO, constant(1.0))
+        .dispose("Out")
+        .route("s", "Split")
+        .route("Split", "BenchA")               // ORIGINAL
+        .routeDuplicate("Split", "BenchB")      // DUPLICATE
+        .route("BenchA", "Out").route("BenchB", "Out")
+        .entryAt("Split");
+    sim.stopAt(100.0).execute();
+
+    check(sim.model().station("BenchA")->stats().numberServed() == 5,
+          "every original went to bench A");
+    check(sim.model().station("BenchB")->stats().numberServed() == 5,
+          "every duplicate went to bench B");
+    check(sim.results().exited == 10, "5 samples in, 10 results out");
+
+    // Without a duplicate exit, copies follow the original -- the v6 behaviour.
+    SimulationSystem two(1u);
+    two.model()
+        .source("s", "Sample", constant(10.0), 5)
+        .duplicate("Split", 1)
+        .station("Bench", 1, FIFO, constant(1.0))
+        .dispose("Out")
+        .route("s", "Split").route("Split", "Bench").route("Bench", "Out")
+        .entryAt("Split");
+    two.stopAt(100.0).execute();
+    check(two.model().station("Bench")->stats().numberServed() == 10,
+          "with one exit, copies follow the original");
+}
+
+void testPerTypeStatistics() {
+    section("Per-entity-type statistics (v9)");
+    SimulationSystem sim(1u);
+    sim.model()
+        .source("s", "Widget", constant(2.0), 10)
+        .station("Desk", 1, FIFO, constant(1.0))
+        .dispose("Out")
+        .route("s", "Desk").route("Desk", "Out").entryAt("Desk");
+    sim.stopAt(100.0).execute();
+
+    const auto& w = sim.byType().at("Widget");
+    check(w.in == 10 && w.out == 10, "ten in, ten out");
+    check(w.inSystem == 0, "and none left inside");
+    // Arrivals every 2 minutes, service exactly 1: nobody ever waits, so every
+    // widget spends exactly its service time in the system.
+    checkClose(w.totalTime / static_cast<double>(w.out), 1.0, 1e-9,
+               "average time in system is exactly the service time");
+    checkClose(w.maxTime, 1.0, 1e-9, "and so is the maximum");
+    // WIP: one widget present for 1 minute in every 2, from t=0 to the last
+    // exit at t=19. Time-average is therefore about 0.5.
+    checkClose(w.areaWIP / sim.measuredTime(), 10.0 / sim.measuredTime(), 1e-6,
+               "WIP integral is total time in system divided by the horizon");
+}
+
+void testDistributionClone() {
+    section("Distribution clone (v9)");
+    // arrivals() keeps a copy for the stability check and gives one to the
+    // Create block; a unique_ptr cannot be in two places, hence clone().
+    auto e = exponential(3.0);
+    auto c = e->clone();
+    checkClose(c->mean(), 3.0, 1e-12, "a clone keeps its parameters");
+    check(c.get() != e.get(), "and is a separate object");
+
+    auto d = discrete({1.0, 2.0}, {0.25, 0.75});
+    checkClose(d->clone()->mean(), d->mean(), 1e-12, "Discrete rebuilds its probabilities");
+    auto emp = empirical({1.0, 2.0, 9.0});
+    checkClose(emp->clone()->mean(), emp->mean(), 1e-12, "Empirical clones its data");
+}
+
 void testTheoryInsideInterval() {
     section("M/M/1 theory falls inside the interval");
     // The question open since v2, as an automated check.
@@ -1384,6 +1630,12 @@ int main() {
     testNewDistributions();
     testStreamQualityTests();
     testCommonRandomNumbers();
+    testMultipleSources();
+    testMatchedBatching();
+    testOverloadAllowed();
+    testSeparateExits();
+    testPerTypeStatistics();
+    testDistributionClone();
     testFlowchartValidation();
     testDistributionMeans();
     testResultsStruct();

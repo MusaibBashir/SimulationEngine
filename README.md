@@ -3,7 +3,7 @@
 Written from the simulation theory table up, as a way of learning OOP and system
 design rather than as a way of getting a simulator.
 
-**Current state: v8.** A flowchart simulator in the spirit of Arena's Basic
+**Current state: v9.** A flowchart simulator in the spirit of Arena's Basic
 Process template — Process, Delay, Assign, Decide, Batch, Separate, Record,
 Dispose — with **shared resources**, balking and reneging, warm-up removal,
 replications and confidence intervals. Refuses to run an unstable model, working
@@ -147,6 +147,8 @@ need to read the engine's source to build a model with it.
 | `V6_READLOG.md` | Flowchart blocks, INode, and why NodeContext beat a wider public interface |
 | `V7_READLOG.md` | Shared resources, balking, reneging, N-way Decide |
 | `V8_READLOG.md` | Random number generation, RANDU, variance reduction |
+| `V9_READLOG.md` | Multiple sources, entity types, matched batching, terminating runs |
+| `ARENA_MAP.md` | Arena module → this engine, and where the two differ |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
 ## Layout

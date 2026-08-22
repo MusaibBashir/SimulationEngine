@@ -117,7 +117,6 @@ private:
     void handleObservation();
 
     // --- internal steps of run(), not interface ---
-    void handleArrival(const EventNotice& notice);
     void handleDeparture(const EventNotice& notice);
 
     // v6: NodeContext is the only part of this class a node can see. It is a
@@ -130,6 +129,22 @@ private:
 
     void refreshState();
     std::size_t stillWaitingCount() const;
+
+    // v9: per-entity-type accounting -- Arena's NumberIn / NumberOut / WIP /
+    // TotalTime, which a model with three arrival streams needs and a model with
+    // one does not miss.
+    struct TypeStats {
+        long long in{0};
+        long long out{0};
+        int     inSystem{0};
+        SimTime totalTime{0.0};
+        SimTime maxTime{0.0};
+        SimTime areaWIP{0.0};        // integral of number-in-system over time
+        SimTime lastUpdate{0.0};
+    };
+    std::map<std::string, TypeStats> m_byType;
+    void noteArrival(Entity* e);
+    void noteExit(Entity* e);
     void updateAllIntegrals(SimTime upTo);
 
     // SAFETY INVARIANT: an Entity may only be destroyed when nothing holds a raw
@@ -193,10 +208,16 @@ public:
     void run();
     void report() const;
 
+    // v9: the same numbers laid out the way Arena lays them out -- tally
+    // variables, discrete-change variables, outputs -- so a run can be put
+    // beside an Arena report and read line for line.
+    void reportArenaStyle() const;
+
     // v5 conveniences. No new behaviour -- execute() is initialise() then run(),
     // and results() is the numbers report() prints, returned instead of printed.
     SimulationSystem& execute();
     RunResults results() const;
+    const std::map<std::string, TypeStats>& byType() const { return m_byType; }
 
     // Chaining versions of the setters, so a whole study reads as one statement.
     SimulationSystem& stopWhen(std::unique_ptr<ITerminationRule> rule);

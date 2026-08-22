@@ -96,6 +96,11 @@ class Entity{
         // them back; a permanent batch destroys them and clears this.
         std::vector<Entity*> m_members;
 
+        // v9: what KIND of thing this is -- "Metal Plate", "Baseball". Arena
+        // reports NumberIn / NumberOut / WIP / TotalTime per entity type, and
+        // a model with three arrival streams is meaningless without it.
+        std::string m_type{"Entity"};
+
     public:
         Entity(EntityId id, SimTime creationTime)
         : m_id(id), m_creationTime(creationTime) {}
@@ -122,6 +127,9 @@ class Entity{
         // group. This is the only place an entity's birth time may be rewritten,
         // and it exists for that one reason.
         void setCreationTime(SimTime t) { m_creationTime = t; }
+
+        const std::string& type() const { return m_type; }
+        void setType(std::string t) { m_type = std::move(t); }
 
 };
 

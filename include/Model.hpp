@@ -18,6 +18,7 @@
 #include "Common.hpp"
 #include "Node.hpp"
 #include "Nodes.hpp"
+#include "Create.hpp"
 #include "Station.hpp"
 #include "Distribution.hpp"
 #include "ModelError.hpp"
@@ -57,6 +58,8 @@ private:
     // blocks can point at the same Resource and compete for it.
     std::vector<std::unique_ptr<Resource>> m_resources;
     std::vector<Station*> m_processes;                // non-owning, for reports
+    std::vector<CreateNode*> m_sources;               // non-owning, for reports
+    bool m_allowOverload{false};
     std::vector<ArrivalAttribute> m_arrivalAttributes;
     std::unique_ptr<IDistribution> m_interarrival;
     INode* m_entry{nullptr};
@@ -70,7 +73,30 @@ public:
     Model& operator=(const Model&) = delete;
 
     // --- arrivals ---
+    // v9: a named arrival source. Several may coexist -- three ball types
+    // arriving on their own schedules, each capped, is three of these.
+    Model& source(const std::string& name, const std::string& entityType,
+                  std::unique_ptr<IDistribution> interarrival,
+                  long long maxArrivals = -1, SimTime firstAt = 0.0,
+                  int entitiesPerArrival = 1);
+
+    // Shorthand for the single-source case: creates a source called "Arrivals".
     Model& arrivals(std::unique_ptr<IDistribution> d);
+
+    // *** v9: run a model whose queues grow without bound. ***
+    // The stability check has refused rho >= 1 since v5, and for a STEADY-STATE
+    // study that is right: the queue never settles, so "average wait" is a
+    // function of run length rather than a property of the system.
+    //
+    // But a TERMINATING simulation -- "run the clinic for 4 hours and tell me
+    // what happened" -- is a perfectly good question even when work arrives
+    // faster than it can be done. That is what an overloaded shift IS, and
+    // refusing to model it was conflating two different kinds of study.
+    //
+    // Turning this on says you know. The report then says so too, so the numbers
+    // are never quietly presented as steady-state results.
+    Model& allowOverload(bool on = true);
+    bool overloadAllowed() const { return m_allowOverload; }
     void setInterarrival(std::unique_ptr<IDistribution> d) { arrivals(std::move(d)); }
     Model& attribute(const std::string& name, std::unique_ptr<IDistribution> d);
     void assignOnArrival(const std::string& n, std::unique_ptr<IDistribution> d) { attribute(n, std::move(d)); }
@@ -122,6 +148,14 @@ public:
     Model& decideByChance(const std::string& name, double probabilityTrue);
     Model& decideByCondition(const std::string& name, DecideNode::Condition condition);
     Model& batch(const std::string& name, std::size_t size, bool permanent = false);
+    // Group entities that AGREE on an attribute (same lot, same order).
+    Model& batchBySameAttribute(const std::string& name, std::size_t size,
+                                const std::string& attribute, bool permanent = false);
+    // Group entities that DIFFER -- one of each type. This is the rule plain
+    // batching cannot fake: with three streams running at different speeds, the
+    // first three to arrive are often three of the same thing.
+    Model& batchOneOfEach(const std::string& name, std::size_t size,
+                          const std::string& attribute, bool permanent = false);
     Model& separate(const std::string& name);                 // split a batch
     Model& duplicate(const std::string& name, int copies);    // clone
     Model& record(const std::string& name);                              // count
@@ -134,6 +168,10 @@ public:
     // A Decide's TRUE branch. Its false branch is plain route(), so a Decide with
     // only a true branch set falls through to whatever comes next.
     Model& routeTrue(const std::string& decideName, const std::string& to);
+
+    // A Separate's DUPLICATE exit. Its Original exit is plain route(), so a
+    // Separate with only route() set sends copies the same way as the original.
+    Model& routeDuplicate(const std::string& separateName, const std::string& to);
     Model& entryAt(const std::string& name);
     void connect(const std::string& f, const std::string& t) { route(f, t); }
     void setEntry(const std::string& n) { entryAt(n); }
@@ -156,6 +194,9 @@ public:
     std::size_t stationCount() const { return m_processes.size(); }
     Station& stationAt(std::size_t i) { return *m_processes[i]; }
     const Station& stationAt(std::size_t i) const { return *m_processes[i]; }
+    std::size_t sourceCount() const { return m_sources.size(); }
+    CreateNode& sourceAt(std::size_t i) { return *m_sources[i]; }
+    const CreateNode& sourceAt(std::size_t i) const { return *m_sources[i]; }
     std::size_t nodeCount() const { return m_nodes.size(); }
     INode& nodeAt(std::size_t i) { return *m_nodes[i]; }
     const INode& nodeAt(std::size_t i) const { return *m_nodes[i]; }
@@ -164,6 +205,7 @@ public:
     VisitRatios visitRatios() const;
     double offeredLoad(const Station& s) const;
 
+    void wireSources();
     void reset();
     void validate() const;
     std::string describe() const;

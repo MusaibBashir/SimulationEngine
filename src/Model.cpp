@@ -24,9 +24,46 @@ INode* Model::add(std::unique_ptr<INode> n) {
     return raw;
 }
 
+Model& Model::source(const std::string& name, const std::string& entityType,
+                     std::unique_ptr<IDistribution> interarrival,
+                     long long maxArrivals, SimTime firstAt, int entitiesPerArrival) {
+    requireUnique(name);
+    auto c = std::make_unique<CreateNode>(name, entityType, std::move(interarrival),
+                                          maxArrivals, firstAt, entitiesPerArrival);
+    CreateNode* raw = c.get();
+    m_nodes.push_back(std::move(c));
+    m_sources.push_back(raw);
+    // A Create is NOT a candidate for m_entry -- it is where entities come from,
+    // not where they go. add() would have made the first one the entry point.
+    return *this;
+}
+
 Model& Model::arrivals(std::unique_ptr<IDistribution> d) {
     if (!d) throw ModelError("arrivals: null distribution");
-    m_interarrival = std::move(d);
+    if (node("Arrivals") != nullptr)
+        throw ModelError("arrivals() has already been called; use source() for more streams");
+    m_interarrival = std::move(d);   // kept for offeredLoad()
+    // The single-source shorthand. Its next() is wired to the entry block in
+    // validate(), because entryAt() may not have been called yet.
+    auto copy = m_interarrival->clone();
+    return source("Arrivals", "Entity", std::move(copy));
+}
+
+Model& Model::allowOverload(bool on) { m_allowOverload = on; return *this; }
+
+Model& Model::batchBySameAttribute(const std::string& name, std::size_t size,
+                                   const std::string& attribute, bool permanent) {
+    requireUnique(name);
+    add(std::make_unique<BatchNode>(name, size, permanent,
+                                    BatchNode::Rule::SameAttribute, attribute));
+    return *this;
+}
+
+Model& Model::batchOneOfEach(const std::string& name, std::size_t size,
+                             const std::string& attribute, bool permanent) {
+    requireUnique(name);
+    add(std::make_unique<BatchNode>(name, size, permanent,
+                                    BatchNode::Rule::DistinctAttribute, attribute));
     return *this;
 }
 
@@ -228,6 +265,13 @@ Model& Model::routeTrue(const std::string& decideName, const std::string& to) {
     return *this;
 }
 
+Model& Model::routeDuplicate(const std::string& separateName, const std::string& to) {
+    INode* t = node(to);
+    if (!t) throw ModelError("routeDuplicate: no block named '" + to + "'");
+    nodeAs<SeparateNode>(separateName).setDuplicateExit(t);
+    return *this;
+}
+
 Model& Model::entryAt(const std::string& name) {
     INode* n = node(name);
     if (!n) throw ModelError("entryAt: no block named '" + name + "'");
@@ -259,6 +303,7 @@ void Model::reset() {
     // moment reset() does more than zero a counter.
     for (auto& r : m_resources) r->reset();
     for (auto& n : m_nodes) n->reset();
+    // m_sources are among m_nodes, so they are reset with everything else.
     if (m_interarrival) m_interarrival->reset();
     for (auto& a : m_arrivalAttributes) a.distribution->reset();
 }
@@ -323,11 +368,15 @@ Model::VisitRatios Model::visitRatios() const {
         }
         if (dynamic_cast<const DisposeNode*>(it.node)) continue;
         if (auto* s = dynamic_cast<const SeparateNode*>(it.node)) {
-            // A duplicate multiplies the flow; a batch-split restores it. The
-            // split factor is the batch size, which this node does not know, so
-            // it is left at 1 and flagged.
-            (void)s;
-            vr.exact = false;
+            if (s->duplicateExit() != nullptr) {
+                // Copies leave by their own exit, so follow it with the copies'
+                // share of the flow and let the original carry on via next().
+                stack.push_back({s->duplicateExit(), it.weight, it.depth + 1});
+            } else {
+                // A batch-split's factor is the batch size, which this block
+                // does not know, so the ratio downstream is approximate.
+                vr.exact = false;
+            }
         }
         stack.push_back({it.node->next(), out, it.depth + 1});
     }
@@ -335,10 +384,15 @@ Model::VisitRatios Model::visitRatios() const {
 }
 
 double Model::offeredLoad(const Station& s) const {
-    if (!m_interarrival) return 0.0;
-    const SimTime meanGap = m_interarrival->mean();
-    if (meanGap <= 0.0) return 0.0;
-    const double lambda = 1.0 / meanGap;
+    // v9: sum the rate over EVERY source. Three streams feeding one machine
+    // means three times the work, and judging it against one of them would pass
+    // a model that cannot run.
+    double lambda = 0.0;
+    for (const CreateNode* c : m_sources) {
+        const SimTime gap = c->interarrival().mean();
+        if (gap > 0.0) lambda += c->entitiesPerArrival() / gap;
+    }
+    if (lambda <= 0.0) return 0.0;
 
     SimTime meanService = 0.0;
     if (s.usesServiceAttribute()) {
@@ -359,10 +413,20 @@ double Model::offeredLoad(const Station& s) const {
     return lambda * visits * meanService * s.unitsNeeded() / s.resource().capacity();
 }
 
+void Model::wireSources() {
+    // A source added by arrivals() has no explicit destination, so it feeds the
+    // entry block. Sources added by source() may name their own via route().
+    for (CreateNode* c : m_sources)
+        if (c->next() == nullptr && m_entry != nullptr) c->setNext(m_entry);
+}
+
 void Model::validate() const {
-    if (m_nodes.empty())           throw ModelError("model has no blocks");
-    if (m_interarrival == nullptr) throw ModelError("model has no arrival distribution -- call arrivals()");
-    if (m_entry == nullptr)        throw ModelError("model has no entry block -- call entryAt()");
+    if (m_nodes.empty())      throw ModelError("model has no blocks");
+    if (m_sources.empty())    throw ModelError("model has no arrival source -- call arrivals() or source()");
+    if (m_entry == nullptr)   throw ModelError("model has no entry block -- call entryAt()");
+    for (const CreateNode* c : m_sources)
+        if (c->next() == nullptr)
+            throw ModelError("source '" + c->name() + "' feeds nothing -- route() it to a block");
 
     // A routing loop means entities never leave, the run never drains, and the
     // symptom is a program that simply does not stop with no clue why. Follow
@@ -416,7 +480,7 @@ void Model::validate() const {
             total += offeredLoad(*st);
             ++users;
         }
-        if (users > 1 && total >= 1.0) {
+        if (users > 1 && total >= 1.0 && !m_allowOverload) {
             std::ostringstream os;
             os << "resource '" << res->name() << "' is oversubscribed: the "
                << users << " blocks sharing it need a combined offered load of "
@@ -429,13 +493,16 @@ void Model::validate() const {
     for (const Station* st : m_processes) {
         if (vr.visits.find(st) == vr.visits.end()) continue;   // unreachable block
         const double rho = offeredLoad(*st);
-        if (rho >= 1.0) {
+        if (rho >= 1.0 && !m_allowOverload) {
             std::ostringstream os;
             os << "process '" << st->name() << "' is unstable: offered load rho = "
                << rho << " (>= 1). Work arrives faster than "
                << st->resource().capacity() << " server(s) can do it, so the queue "
                   "grows without bound and every average is meaningless. "
-                  "Add capacity, speed up service, or slow arrivals.";
+                  "Add capacity, speed up service, or slow arrivals -- or, if "
+                  "this is a TERMINATING run (a fixed shift, not a steady-state "
+                  "study), say allowOverload() and the numbers will be reported "
+                  "with that caveat attached.";
             if (!vr.exact)
                 os << " (Flow rates are approximate here: a condition-based Decide "
                       "or a batch split means the true split is an output of the run.)";
