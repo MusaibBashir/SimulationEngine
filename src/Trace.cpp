@@ -6,6 +6,9 @@
 #include <iomanip>
 #include <sstream>
 
+namespace des {
+
+
 Trace::~Trace() { close(); }
 
 bool Trace::open(const std::string& path, TraceLevel level, bool markdown) {
@@ -83,3 +86,5 @@ void Trace::note(const std::string& text) {
     if (m_markdown) m_out << "\n" << text << "\n\n";
     else            m_out << text << "\n";
 }
+
+}  // namespace des

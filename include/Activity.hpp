@@ -45,6 +45,9 @@
 #include <string>
 #include "Common.hpp"
 
+namespace des {
+
+
 class Activity {
 private:
     std::string m_name;
@@ -60,3 +63,4 @@ public:
     SimTime endTime() const { return m_startTime + m_duration; }
 };
 
+}  // namespace des

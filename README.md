@@ -3,11 +3,22 @@
 Written from the simulation theory table up, as a way of learning OOP and system
 design rather than as a way of getting a simulator.
 
-**Current state: v4 — honest numbers.** A network simulator with warm-up removal,
-replications and confidence intervals. M/M/1 theory falls inside the 95% interval
-for all five reported quantities. Builds clean under `-Wall -Wextra -Wpedantic`
-and ASan/UBSan; 124/124 unit checks pass; a deterministic run still reproduces a
-hand-worked table event for event.
+**Current state: v5.** A queueing-network simulator with warm-up removal,
+replications and confidence intervals, wrapped in an API you can use without
+reading its source. Refuses to run an unstable model. Builds clean under
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 160/160 unit checks pass; a
+deterministic run still reproduces a hand-worked table event for event.
+
+```cpp
+#include "des.hpp"
+using namespace des;
+
+SimulationSystem sim(12345u);
+sim.model().arrivals(exponential(1.0))
+           .station("Teller", 1, FIFO, exponential(0.8))
+           .entryAt("Teller");
+sim.stopAt(480.0).execute().report();
+```
 
 ## Build and run
 
@@ -127,6 +138,7 @@ need to read the engine's source to build a model with it.
 | `V2_READLOG.md` | Review of v2 and v2.1: every bug found and why it mattered |
 | `V3_READLOG.md` | What each v3 abstraction bought, what it cost, what was skipped |
 | `V4_READLOG.md` | Warm-up removal, Welch's method, confidence intervals |
+| `V5_READLOG.md` | The ergonomics pass: namespace, factories, ModelError, ρ check |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
 ## Layout
@@ -236,22 +248,19 @@ two and every time-average goes quietly wrong with no error.
 
 ---
 
-# v5 — the order to do it in
+# v6 — the order to do it in
 
-v4 made the intervals honest. v5 makes them **narrower for the same amount of
-computation**, which is where simulation output analysis gets interesting.
-
-1. **Common random numbers.** Compare two configurations using the same random
-   draws, so the difference between them is not swamped by sampling noise. This
-   is why `Constant::draw` deliberately consumes nothing from the stream — a
-   distribution that drew and discarded would shift every other draw and destroy
-   the pairing.
-2. **Antithetic variates.** Pair each replication with one using `1-u`.
-3. **Steady-state detection as an `ITerminationRule`.** Stop when the estimate has
-   converged rather than at a fixed clock time. Expressible today, since rules
-   receive the whole system.
-4. **Batch means.** One long run split into batches, as an alternative to
-   independent replications when the warm-up is expensive to repeat.
-5. **Widen `EntityId`.** A plain `int` overflows on a very long run. One line.
-6. **`IEventHandler`** — when pre-emption or reneging needs handlers that carry
-   state. A switch cannot hold state; that is the trigger, not the case count.
+1. **Probabilistic routing.** An entity leaving a station picks its next by
+   probability. The biggest modelling gap left — and note it breaks the v5
+   stability check, which assumes one visit per station and would need visit
+   ratios instead.
+2. **Common random numbers**, then **antithetic variates**. Narrower intervals
+   for the same compute. `constant()` already draws nothing from the stream,
+   which is a precondition for the pairing to work.
+3. **Batch means** — an alternative to replications when warm-up is expensive.
+4. **Config file input** — worth building now that `ModelError` exists and the
+   validation story is settled. That was the blocker in v3 and v4.
+5. **Balking and reneging** — customers who refuse a long queue, or give up
+   waiting. These need handlers that carry **state**, which is the long-standing
+   trigger for finally building `IEventHandler`.
+6. **Widen `EntityId`** — a plain `int` overflows on a very long run. One line.

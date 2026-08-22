@@ -2,69 +2,63 @@
 // 01 — Hello, queue.  The smallest useful program.
 // ============================================================================
 // One server, customers arriving at random, first-come-first-served.
-// If you read one example, read this one: every other example is this shape
-// with more parts.
-//
-// The five steps never change:
-//   1. make a SimulationSystem (the engine) with a seed
-//   2. describe your system in its Model
-//   3. say when to stop
-//   4. initialise() then run()
-//   5. report()
+// Read this one first; every other example is this shape with more parts.
 // ============================================================================
 
 #include <iostream>
-#include <memory>
-#include "SimulationSystem.hpp"
+#include "des.hpp"
+
+using namespace des;   // everything lives in namespace des
 
 int main() {
-    // 1. The engine. The seed makes the run REPRODUCIBLE -- same seed, same
-    //    numbers, every time. Change it to get a different sample.
-    SimulationSystem sim(/*seed=*/12345u);
+    // The engine. The seed makes the run REPRODUCIBLE -- same seed, same
+    // numbers, every time. Change it to get a different sample.
+    SimulationSystem sim(12345u);
 
-    // 2. The model: what you are simulating. The engine knows nothing about
-    //    tellers or customers; it only knows what you put in here.
-    Model& m = sim.model();
+    // Describe the system. The engine knows nothing about tellers or customers;
+    // it only knows what you put in the model.
+    sim.model()
+       .arrivals(exponential(1.0))                       // one every ~1.0 min
+       .station("Teller", /*capacity=*/1, FIFO,
+                exponential(0.8))                        // service ~0.8 min
+       .entryAt("Teller");                               // where arrivals land
 
-    //    Customers arrive on average every 1.0 minutes.
-    //    *** Exponential takes the MEAN, not the rate. *** Exponential(1.0)
-    //    means "one every minute on average", not "one per minute rate = 1".
-    //    For the exponential they happen to be reciprocals, so this is the
-    //    single easiest thing in queueing to get backwards.
-    m.setInterarrival(std::make_unique<Exponential>(1.0));
+    // *** exponential() takes the MEAN, not the rate. ***
+    // exponential(0.8) means "0.8 minutes on average". Passing 1.25 because
+    // "the rate is 1.25/min" gives a model that is wrong and runs happily.
 
-    //    One station called "Teller": capacity 1 (one server), first-in
-    //    first-out queue, service taking 0.8 minutes on average.
-    m.addStation("Teller", /*capacity=*/1, QueueDiscipline::FIFO,
-                 std::make_unique<Exponential>(0.8));
+    // Stop after an 8-hour day of SIMULATED time. It runs in milliseconds,
+    // because the clock jumps from event to event and nothing is computed
+    // in between.
+    sim.stopAt(480.0);
 
-    //    Where arrivals land. With one station this is optional -- the first
-    //    station added becomes the entry by default -- but be explicit.
-    m.setEntry("Teller");
+    // execute() is initialise() then run(). Then print.
+    sim.execute().report();
 
-    // 3. Stop after 8 hours of simulated time. Simulated: this runs in
-    //    milliseconds of real time, because the clock JUMPS from event to
-    //    event and nothing is computed in between.
-    sim.setTermination(std::make_unique<TimeLimit>(480.0));
+    // ------------------------------------------------------------------
+    // Getting numbers out programmatically: results() hands you everything
+    // with the divisions already done.
+    // ------------------------------------------------------------------
+    const RunResults r = sim.results();
+    std::cout << "\ncustomers served      : " << r.exited << "\n"
+              << "average wait          : " << r.averageWait << " min\n"
+              << "longest anyone waited : " << r.maxWait << " min\n"
+              << "teller utilisation    : " << r.station("Teller").utilisation << "\n"
+              << "longest the queue got : " << r.station("Teller").maxQueueLength << "\n";
 
-    // 4. initialise() resets everything and schedules the first arrival.
-    //    run() processes events until the termination rule says stop.
-    sim.initialise();
-    sim.run();
+    std::cout << R"(
+Utilisation lands near 0.80 because rho = 0.8 / 1.0 = 0.8: the server is
+busy 80% of the time.
 
-    // 5. Print what happened.
-    sim.report();
+THAT NUMBER IS THE ONE TO CHECK BEFORE ANY MODEL RUNS.
 
-    // You can also pull individual numbers out.
-    std::cout << "\nutilisation was "
-              << sim.model().station("Teller")->stats()
-                    .utilisation(sim.measuredTime(), 1)
-              << " -- with arrivals every 1.0 min and service taking 0.8,\n"
-                 "the server is busy 80% of the time. rho = 0.8 / 1.0 = 0.8.\n";
+    rho = mean service time / (capacity * mean interarrival time)
 
-    // A WARNING YOU WILL NEED: if service is SLOWER than arrivals (rho >= 1)
-    // the queue grows forever and every average is meaningless. The simulator
-    // will happily run it and report confident numbers. Always compute rho by
-    // hand before trusting anything.
+If rho >= 1, work arrives faster than it can be done, the queue grows for
+as long as you run, and every average is a function of run length rather
+than a property of the system. Try changing the service time to 1.4 and
+re-running: the engine refuses, with a message saying why. It used to run
+and print confident nonsense.
+)";
     return 0;
 }

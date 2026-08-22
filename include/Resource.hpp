@@ -61,6 +61,9 @@
 #include <string>
 #include "Common.hpp"
 
+namespace des {
+
+
 class Resource{
     private:
         std::string m_name;
@@ -88,3 +91,5 @@ class Resource{
         void seize(int units = 1);
         void release(int units = 1);
 };
+
+}  // namespace des

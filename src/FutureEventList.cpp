@@ -30,6 +30,9 @@
 #include "FutureEventList.hpp"
 #include <cassert>
 
+namespace des {
+
+
 void FutureEventList::schedule(EventNotice e) {
     // Stamp the tie-break number, then push. Two events at the same instant come
     // out in the order they were scheduled, so a seeded run is bit-reproducible.
@@ -58,3 +61,4 @@ SimTime FutureEventList::nextEventTime() const {
     return m_fel.top().time();
 }
 
+}  // namespace des

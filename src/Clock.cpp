@@ -21,6 +21,9 @@
 #include "Clock.hpp"
 #include <cassert>
 
+namespace des {
+
+
 void Clock::advanceTo(SimTime t) {
     // The two lines that are the entire reason Clock is a class and not a bare
     // double. >= not > : several events legitimately share one instant, so
@@ -33,3 +36,4 @@ void Clock::reset() {
     m_now = 0.0;
 }
 
+}  // namespace des

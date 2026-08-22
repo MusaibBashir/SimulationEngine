@@ -4,11 +4,15 @@
 
 #include "SimulationSystem.hpp"
 #include "Activity.hpp"
+#include "Build.hpp"
 #include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <utility>
 #include <cassert>
+
+namespace des {
+
 
 SimulationSystem::SimulationSystem(unsigned seed) : m_rng(seed) {}
 
@@ -354,48 +358,103 @@ void SimulationSystem::handleDeparture(const EventNotice& notice) {
 
 // ------------------------------------------------------------------ report --
 
-void SimulationSystem::report() const {
-    // *** DIVIDE BY THE MEASURED PERIOD, NOT THE CLOCK. ***
-    // With a warm-up period the two differ, and using the clock would divide
-    // post-warm-up area by total elapsed time -- understating every time average
-    // by exactly the fraction of the run that was discarded.
-    const SimTime total    = m_clock.now();
+const StationResults& RunResults::station(const std::string& name) const {
+    for (const auto& s : stations) {
+        if (s.name == name) return s;
+    }
+    throw ModelError("results: no station named '" + name + "'");
+}
+
+SimulationSystem& SimulationSystem::execute() {
+    initialise();
+    run();
+    return *this;
+}
+
+SimulationSystem& SimulationSystem::stopWhen(std::unique_ptr<ITerminationRule> rule) {
+    setTermination(std::move(rule));
+    return *this;
+}
+SimulationSystem& SimulationSystem::stopAt(SimTime t) { return stopWhen(timeLimit(t)); }
+SimulationSystem& SimulationSystem::stopAfter(int entities) { return stopWhen(entityLimit(entities)); }
+SimulationSystem& SimulationSystem::warmUpFor(SimTime t) { setWarmUp(t); return *this; }
+SimulationSystem& SimulationSystem::traceTo(const std::string& path, TraceLevel level) {
+    enableTrace(path, level);
+    return *this;
+}
+
+RunResults SimulationSystem::results() const {
+    // The measured period, NOT the clock. With a warm-up the two differ, and
+    // dividing by the clock would understate every time average by exactly the
+    // fraction of the run that was discarded. Doing it here once means no caller
+    // can get it wrong.
     const SimTime measured = measuredTime();
+
+    RunResults r;
+    r.simulatedTime         = m_clock.now();
+    r.warmUpDiscarded       = m_warmUpEnded;
+    r.measuredTime          = measured;
+    r.arrived               = m_stats.numberArrived();
+    r.exited                = m_stats.numberServed();
+    r.averageWait           = m_stats.averageWaitingTime();
+    r.averageTimeInSystem   = m_stats.averageTimeInSystem();
+    r.maxWait               = m_stats.maxWaitingTime();
+    r.averageNumberInQueue  = m_stats.timeAverageA(measured);
+    r.averageNumberInSystem = m_stats.timeAverageB(measured);
+    r.stillWaitingAtStop    = m_activeDelays.size();
+
+    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
+        const Station& s = m_model.stationAt(i);
+        StationResults sr;
+        sr.name               = s.name();
+        sr.capacity           = s.resource().capacity();
+        sr.served             = s.stats().numberServed();
+        sr.averageWait        = s.stats().averageWaitingTime();
+        sr.averageTimeHere    = s.stats().averageTimeInSystem();
+        sr.maxWait            = s.stats().maxWaitingTime();
+        sr.averageQueueLength = s.stats().timeAverageA(measured);
+        sr.maxQueueLength     = s.queue().maxLengthObserved();
+        sr.utilisation        = s.stats().utilisation(measured, sr.capacity);
+        r.stations.push_back(std::move(sr));
+    }
+    return r;
+}
+
+void SimulationSystem::report() const {
+    // v5: report() prints results(). It does not recompute anything -- one place
+    // knows how a number is derived, and printing is just a view of it.
+    const RunResults r = results();
     std::cout << std::fixed << std::setprecision(4);
     std::cout << "=== simulation report =====================================\n";
     std::cout << "seed                     : " << m_rng.seed() << "\n";
     std::cout << "termination              : "
               << (m_termination ? m_termination->describe() : "<none>") << "\n";
-    std::cout << "total simulated time     : " << total << "\n";
-    std::cout << "entities arrived         : " << m_stats.numberArrived() << "\n";
-    std::cout << "entities exited          : " << m_stats.numberServed() << "\n";
-    std::cout << "average total wait       : " << m_stats.averageWaitingTime() << "\n";
-    std::cout << "average time in system   : " << m_stats.averageTimeInSystem() << "\n";
-    std::cout << "max total wait           : " << m_stats.maxWaitingTime() << "\n";
-    // The system-level Statistics object was fed (numberInQueue, numberInSystem)
-    // rather than (queueLength, serversBusy), so its two integrals mean L_q and
-    // L. Reusing the class this way is a small abuse of its member NAMES -- and
-    // a fair sign that in v4 those should become areaUnder[A] / areaUnder[B]
-    // with the meaning supplied by the caller.
-    std::cout << "warm-up discarded        : " << m_warmUpEnded << "\n";
-    std::cout << "measured period          : " << measured << "\n";
-    std::cout << "time-avg in queue (Lq)   : " << m_stats.timeAverageA(measured) << "\n";
-    std::cout << "time-avg in system (L)   : " << m_stats.timeAverageB(measured) << "\n";
-    std::cout << "still waiting at stop    : " << m_activeDelays.size() << "\n";
+    std::cout << "total simulated time     : " << r.simulatedTime << "\n";
+    std::cout << "warm-up discarded        : " << r.warmUpDiscarded << "\n";
+    std::cout << "measured period          : " << r.measuredTime << "\n";
+    std::cout << "entities arrived         : " << r.arrived << "\n";
+    std::cout << "entities exited          : " << r.exited << "\n";
+    std::cout << "average total wait       : " << r.averageWait << "\n";
+    std::cout << "average time in system   : " << r.averageTimeInSystem << "\n";
+    std::cout << "max total wait           : " << r.maxWait << "\n";
+    std::cout << "time-avg in queue (Lq)   : " << r.averageNumberInQueue << "\n";
+    std::cout << "time-avg in system (L)   : " << r.averageNumberInSystem << "\n";
+    std::cout << "still waiting at stop    : " << r.stillWaitingAtStop << "\n";
     std::cout << "live entity objects      : " << m_entities.size() << "\n";
     std::cout << "\n";
     std::cout << "  station        cap   served    avg wait   time-avg Q    util   maxQ\n";
     std::cout << "  -----------------------------------------------------------------\n";
-    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
-        const Station& s = m_model.stationAt(i);
-        std::cout << "  " << std::setw(12) << std::left << s.name() << std::right
-                  << std::setw(5)  << s.resource().capacity()
-                  << std::setw(9)  << s.stats().numberArrived()
-                  << std::setw(12) << s.stats().averageWaitingTime()
-                  << std::setw(13) << s.stats().timeAverageA(measured)
-                  << std::setw(8)  << s.stats().utilisation(measured, s.resource().capacity())
-                  << std::setw(7)  << s.queue().maxLengthObserved()
+    for (const StationResults& s : r.stations) {
+        std::cout << "  " << std::setw(12) << std::left << s.name << std::right
+                  << std::setw(5)  << s.capacity
+                  << std::setw(9)  << s.served
+                  << std::setw(12) << s.averageWait
+                  << std::setw(13) << s.averageQueueLength
+                  << std::setw(8)  << s.utilisation
+                  << std::setw(7)  << s.maxQueueLength
                   << "\n";
     }
     std::cout << "===========================================================\n";
 }
+
+}  // namespace des

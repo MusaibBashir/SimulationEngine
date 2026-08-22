@@ -22,6 +22,9 @@
 
 #include "SystemState.hpp"
 
+namespace des {
+
+
 void SystemState::reset() {
     // Assign a fresh default-constructed object over ourselves. The in-class
     // initialisers in SystemState.hpp are now the ONLY place that knows the
@@ -31,3 +34,4 @@ void SystemState::reset() {
     *this = SystemState{};
 }
 
+}  // namespace des

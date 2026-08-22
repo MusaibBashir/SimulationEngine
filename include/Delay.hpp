@@ -49,6 +49,9 @@
 
 #include "Common.hpp"
 
+namespace des {
+
+
 class Delay {
 private:
     SimTime m_startTime;
@@ -66,3 +69,4 @@ public:
     SimTime duration() const;
 };
 
+}  // namespace des

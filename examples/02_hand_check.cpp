@@ -14,7 +14,9 @@
 #include <iostream>
 #include <memory>
 #include <vector>
-#include "SimulationSystem.hpp"
+#include "des.hpp"
+
+using namespace des;
 
 int main() {
     SimulationSystem sim(1u);   // seed is irrelevant: nothing here is random
@@ -32,7 +34,7 @@ int main() {
     m.setEntry("Server");
 
     // Stop after 5 customers have LEFT. EntityLimit counts exits, not arrivals.
-    sim.setTermination(std::make_unique<EntityLimit>(5));
+    sim.setTermination(entityLimit(5));
 
     // Write every event to a file you can read.
     sim.enableTrace("trace_02.md", TraceLevel::Events);

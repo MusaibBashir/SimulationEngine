@@ -12,8 +12,9 @@
 #include <iomanip>
 #include <memory>
 #include <vector>
-#include "SimulationSystem.hpp"
-#include "Experiment.hpp"
+#include "des.hpp"
+
+using namespace des;
 
 namespace {
 
@@ -29,10 +30,10 @@ void heading(const char* text) {
 //   L  = lambda * W          = 4.0000
 void buildMM1(SimulationSystem& sim, SimTime runLength) {
     Model& m = sim.model();
-    m.setInterarrival(std::make_unique<Exponential>(1.0));
-    m.addStation("Server", 1, QueueDiscipline::FIFO, std::make_unique<Exponential>(0.8));
+    m.setInterarrival(exponential(1.0));
+    m.addStation("Server", 1, QueueDiscipline::FIFO, exponential(0.8));
     m.setEntry("Server");
-    sim.setTermination(std::make_unique<TimeLimit>(runLength));
+    sim.setTermination(timeLimit(runLength));
 }
 
 }  // namespace
@@ -49,11 +50,11 @@ int main() {
     {
         SimulationSystem sim(1u);
         Model& m = sim.model();
-        m.setInterarrival(std::make_unique<Deterministic>(std::vector<SimTime>{2, 4, 1, 3, 5}));
+        m.setInterarrival(fixedTimes({2, 4, 1, 3, 5}));
         m.addStation("Server", 1, QueueDiscipline::FIFO,
-                     std::make_unique<Deterministic>(std::vector<SimTime>{3, 2, 4, 1, 2}));
+                     fixedTimes({3, 2, 4, 1, 2}));
         m.setEntry("Server");
-        sim.setTermination(std::make_unique<EntityLimit>(5));
+        sim.setTermination(entityLimit(5));
         sim.enableTrace("trace_deterministic.md", TraceLevel::Events);
         sim.initialise();
         sim.run();
@@ -68,17 +69,17 @@ int main() {
     {
         SimulationSystem sim(7u);
         Model& m = sim.model();
-        m.setInterarrival(std::make_unique<Exponential>(15.0));
-        m.addStation("Host",    1, QueueDiscipline::FIFO,     std::make_unique<Exponential>(2.0));
-        m.addStation("Waiters", 3, QueueDiscipline::FIFO,     std::make_unique<Triangular>(20.0, 35.0, 60.0));
-        m.addStation("Cashier", 1, QueueDiscipline::Priority, std::make_unique<Uniform>(1.0, 4.0));
+        m.setInterarrival(exponential(15.0));
+        m.addStation("Host",    1, QueueDiscipline::FIFO,     exponential(2.0));
+        m.addStation("Waiters", 3, QueueDiscipline::FIFO,     triangular(20.0, 35.0, 60.0));
+        m.addStation("Cashier", 1, QueueDiscipline::Priority, uniform(1.0, 4.0));
         m.connect("Host", "Waiters");
         m.connect("Waiters", "Cashier");
         m.setEntry("Host");
 
         auto stop = std::make_unique<AnyOf>();
-        stop->add(std::make_unique<TimeLimit>(6000.0));
-        stop->add(std::make_unique<EntityLimit>(100000));
+        stop->add(timeLimit(6000.0));
+        stop->add(entityLimit(100000));
         sim.setTermination(std::move(stop));
 
         sim.setWarmUp(600.0);   // discard the first ten hours of the transient

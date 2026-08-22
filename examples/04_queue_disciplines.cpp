@@ -21,26 +21,27 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include "SimulationSystem.hpp"
-#include "Experiment.hpp"
+#include "des.hpp"
+
+using namespace des;
 
 namespace {
 
 // Build the same job shop every time, changing only the sequencing rule.
 void buildShop(SimulationSystem& sim, QueueDiscipline rule) {
     Model& m = sim.model();
-    m.setInterarrival(std::make_unique<Exponential>(10.0));
+    m.setInterarrival(exponential(10.0));
 
     // Every arriving JOB carries two numbers of its own:
-    m.assignOnArrival("serviceTime", std::make_unique<Uniform>(2.0, 14.0));
-    m.assignOnArrival("dueDate",     std::make_unique<Uniform>(10.0, 60.0));
+    m.assignOnArrival("serviceTime", uniform(2.0, 14.0));
+    m.assignOnArrival("dueDate",     uniform(10.0, 60.0));
     //   - serviceTime : how long this job will take on the machine
     //   - dueDate     : how long after arrival it is promised
     // Priority uses an attribute literally called "priority"; SPT uses
     // "serviceTime"; EDD uses "dueDate". Those names are fixed by the rules.
 
     Station* machine = m.addStation("Machine", 1, rule,
-                                    std::make_unique<Uniform>(2.0, 14.0));
+                                    uniform(2.0, 14.0));
 
     // *** Make the machine actually TAKE the time the job says it needs. ***
     // Without this the station would draw a fresh random service time and SPT
@@ -49,7 +50,7 @@ void buildShop(SimulationSystem& sim, QueueDiscipline rule) {
     machine->setServiceFromAttribute("serviceTime");
 
     m.setEntry("Machine");
-    sim.setTermination(std::make_unique<TimeLimit>(20000.0));
+    sim.setTermination(timeLimit(20000.0));
     sim.setWarmUp(2000.0);
 }
 
@@ -104,7 +105,7 @@ LATENESS. Judge a rule by the objective it was designed for.
 
 Priority is left out of the table above because this model has no
 "priority" attribute -- see the note at the top of the file. Add
-  m.assignOnArrival("priority", std::make_unique<Uniform>(1.0, 5.0));
+  m.assignOnArrival("priority", uniform(1.0, 5.0));
 and QueueDiscipline::Priority will serve the highest value first.
 -------------------------------------------------------------------------
 )";

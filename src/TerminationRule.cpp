@@ -7,6 +7,9 @@
 #include <cassert>
 #include <sstream>
 
+namespace des {
+
+
 TimeLimit::TimeLimit(SimTime maxTime) : m_maxTime(maxTime) { assert(maxTime > 0.0); }
 
 bool TimeLimit::isMet(const SimulationSystem& sim) const {
@@ -58,3 +61,5 @@ std::string AnyOf::describe() const {
     os << "]";
     return os.str();
 }
+
+}  // namespace des

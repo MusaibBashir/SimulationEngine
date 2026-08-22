@@ -16,6 +16,9 @@
 #include <cstddef>
 #include "Common.hpp"
 
+namespace des {
+
+
 class RandomStream {
 private:
     unsigned     m_seed;
@@ -44,3 +47,5 @@ public:
     // Uniform index in [0, n). Used by EntityQueue's Random discipline.
     std::size_t uniformIndex(std::size_t n);
 };
+
+}  // namespace des

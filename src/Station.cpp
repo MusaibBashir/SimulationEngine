@@ -8,6 +8,9 @@
 #include "Entity.hpp"
 #include "RandomStream.hpp"
 
+namespace des {
+
+
 Station::Station(std::string name, int capacity,
                  std::unique_ptr<IQueueRule> rule,
                  std::unique_ptr<IDistribution> service)
@@ -51,3 +54,5 @@ std::string Station::describe() const {
        << "]";
     return os.str();
 }
+
+}  // namespace des

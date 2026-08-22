@@ -44,6 +44,9 @@
 
 #pragma once
 
+namespace des {
+
+
 using SimTime=double;
 using EntityId=int;
 
@@ -52,3 +55,5 @@ using EntityId=int;
 enum class EventType {Arrival, StartService, Departure, EndSimulation, WarmUpEnd, Observe};
 enum class QueueDiscipline {FIFO, LIFO, Priority, Random, SPT, EDD};
 enum class ResourceState {Idle, Busy};
+
+}  // namespace des

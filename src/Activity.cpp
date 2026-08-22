@@ -13,5 +13,10 @@
 #include "Activity.hpp"
 #include <utility>
 
+namespace des {
+
+
 Activity::Activity(std::string name, SimTime start, SimTime duration)
     : m_name(std::move(name)), m_startTime(start), m_duration(duration) {}
+
+}  // namespace des

@@ -16,6 +16,9 @@
 #include <string>
 #include "Common.hpp"
 
+namespace des {
+
+
 enum class TraceLevel {
     Off,       // no file is opened, and every trace call returns immediately
     Events,    // one line per event
@@ -61,3 +64,5 @@ public:
     // Free-form line, for run headers and anything that is not an event.
     void note(const std::string& text);
 };
+
+}  // namespace des

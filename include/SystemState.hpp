@@ -53,6 +53,9 @@
 
 #include "Common.hpp"
 
+namespace des {
+
+
 class SystemState {
 private:
     int m_numberInSystem{0};
@@ -73,3 +76,4 @@ public:
     void reset();
 };
 
+}  // namespace des

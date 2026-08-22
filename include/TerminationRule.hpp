@@ -20,6 +20,9 @@
 #include <vector>
 #include "Common.hpp"
 
+namespace des {
+
+
 class SimulationSystem;
 
 class ITerminationRule {
@@ -66,3 +69,5 @@ public:
     std::string describe() const override;
     bool empty() const { return m_rules.empty(); }
 };
+
+}  // namespace des

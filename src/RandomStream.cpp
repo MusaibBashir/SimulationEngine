@@ -5,6 +5,9 @@
 #include "RandomStream.hpp"
 #include <cassert>
 
+namespace des {
+
+
 RandomStream::RandomStream(unsigned seed)
     : m_seed(seed), m_engine(seed) {}
 
@@ -31,3 +34,5 @@ std::size_t RandomStream::uniformIndex(std::size_t n) {
     std::uniform_int_distribution<std::size_t> dist(0, n - 1);
     return dist(m_engine);
 }
+
+}  // namespace des

@@ -20,6 +20,9 @@
 #include "Common.hpp"
 #include "QueueRule.hpp"
 
+namespace des {
+
+
 class Entity;
 class RandomStream;
 
@@ -66,3 +69,5 @@ public:
     // entity, which is exactly the bug v2 shipped.
     Entity* pop();
 };
+
+}  // namespace des

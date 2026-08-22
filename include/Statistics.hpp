@@ -79,6 +79,9 @@
 #include <string>
 #include "Common.hpp"
 
+namespace des {
+
+
 // v4 RENAME. Through v3 the two time-integrals were called
 // m_areaUnderQueueLength and m_areaUnderServerBusy -- accurate for a station,
 // a lie for the system-level object, which was being fed (numberInQueue,
@@ -151,3 +154,5 @@ public:
     // Convenience for the common case where B is "servers busy".
     double utilisation(SimTime elapsed, int capacity) const;
 };
+
+}  // namespace des

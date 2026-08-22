@@ -16,9 +16,9 @@
 #include <memory>
 #include <vector>
 #include <string>
-#include "SimulationSystem.hpp"
-#include "Activity.hpp"
-#include "Experiment.hpp"
+#include "des.hpp"
+
+using namespace des;
 
 namespace {
 
@@ -288,28 +288,28 @@ void testTerminationRules() {
     section("Termination rules");
     SimulationSystem sim(5u);
     Model& m = sim.model();
-    m.setInterarrival(std::make_unique<Constant>(1.0));
-    m.addStation("S", 1, QueueDiscipline::FIFO, std::make_unique<Constant>(0.5));
+    m.setInterarrival(constant(1.0));
+    m.addStation("S", 1, QueueDiscipline::FIFO, constant(0.5));
     m.setEntry("S");
-    sim.setTermination(std::make_unique<EntityLimit>(10));
+    sim.setTermination(entityLimit(10));
     sim.initialise();
     sim.run();
     check(sim.statistics().numberServed() >= 10, "EntityLimit stops after N exits");
 
     SimulationSystem sim2(5u);
     Model& m2 = sim2.model();
-    m2.setInterarrival(std::make_unique<Constant>(1.0));
-    m2.addStation("S", 1, QueueDiscipline::FIFO, std::make_unique<Constant>(0.5));
+    m2.setInterarrival(constant(1.0));
+    m2.addStation("S", 1, QueueDiscipline::FIFO, constant(0.5));
     m2.setEntry("S");
-    sim2.setTermination(std::make_unique<TimeLimit>(20.0));
+    sim2.setTermination(timeLimit(20.0));
     sim2.initialise();
     sim2.run();
     check(sim2.clock().now() >= 20.0, "TimeLimit stops at the time limit");
 
     auto any = std::make_unique<AnyOf>();
     check(any->empty(), "an empty AnyOf reports empty");
-    any->add(std::make_unique<TimeLimit>(1000.0));
-    any->add(std::make_unique<EntityLimit>(5));
+    any->add(timeLimit(1000.0));
+    any->add(entityLimit(5));
     check(!any->empty(), "AnyOf holds its children");
 }
 
@@ -319,11 +319,11 @@ void testDeterministicEndToEnd() {
     //   5 served, waits 0,1,0,3,1 -> average 1.0, last exit at t = 13.
     SimulationSystem sim(1u);
     Model& m = sim.model();
-    m.setInterarrival(std::make_unique<Deterministic>(std::vector<SimTime>{2, 4, 1, 3, 5}));
+    m.setInterarrival(fixedTimes({2, 4, 1, 3, 5}));
     m.addStation("Server", 1, QueueDiscipline::FIFO,
-                 std::make_unique<Deterministic>(std::vector<SimTime>{3, 2, 4, 1, 2}));
+                 fixedTimes({3, 2, 4, 1, 2}));
     m.setEntry("Server");
-    sim.setTermination(std::make_unique<EntityLimit>(5));
+    sim.setTermination(entityLimit(5));
     sim.initialise();
     sim.run();
 
@@ -340,12 +340,12 @@ void testChainRouting() {
     // Two stations in series, no randomness anywhere: an entity must visit both.
     SimulationSystem sim(1u);
     Model& m = sim.model();
-    m.setInterarrival(std::make_unique<Constant>(100.0));   // one arrival, then far apart
-    m.addStation("A", 1, QueueDiscipline::FIFO, std::make_unique<Constant>(2.0));
-    m.addStation("B", 1, QueueDiscipline::FIFO, std::make_unique<Constant>(3.0));
+    m.setInterarrival(constant(100.0));   // one arrival, then far apart
+    m.addStation("A", 1, QueueDiscipline::FIFO, constant(2.0));
+    m.addStation("B", 1, QueueDiscipline::FIFO, constant(3.0));
     m.connect("A", "B");
     m.setEntry("A");
-    sim.setTermination(std::make_unique<EntityLimit>(1));
+    sim.setTermination(entityLimit(1));
     sim.initialise();
     sim.run();
 
@@ -361,10 +361,10 @@ void testReproducibility() {
     section("Reproducibility");
     auto build = [](SimulationSystem& s) {
         Model& m = s.model();
-        m.setInterarrival(std::make_unique<Exponential>(1.0));
-        m.addStation("S", 2, QueueDiscipline::FIFO, std::make_unique<Exponential>(1.5));
+        m.setInterarrival(exponential(1.0));
+        m.addStation("S", 2, QueueDiscipline::FIFO, exponential(1.5));
         m.setEntry("S");
-        s.setTermination(std::make_unique<TimeLimit>(500.0));
+        s.setTermination(timeLimit(500.0));
     };
     SimulationSystem a(4242u); build(a); a.initialise(); a.run();
     SimulationSystem b(4242u); build(b); b.initialise(); b.run();
@@ -387,10 +387,10 @@ void testWarmUpRemoval() {
     // Arrivals every 1.0, service 0.5 -> nobody ever waits, utilisation 0.5.
     auto build = [](SimulationSystem& s) {
         Model& m = s.model();
-        m.setInterarrival(std::make_unique<Constant>(1.0));
-        m.addStation("S", 1, QueueDiscipline::FIFO, std::make_unique<Constant>(0.5));
+        m.setInterarrival(constant(1.0));
+        m.addStation("S", 1, QueueDiscipline::FIFO, constant(0.5));
         m.setEntry("S");
-        s.setTermination(std::make_unique<TimeLimit>(100.0));
+        s.setTermination(timeLimit(100.0));
     };
 
     SimulationSystem noWarm(1u); build(noWarm);
@@ -418,10 +418,10 @@ void testObservations() {
     section("Observation series");
     SimulationSystem sim(3u);
     Model& m = sim.model();
-    m.setInterarrival(std::make_unique<Constant>(1.0));
-    m.addStation("S", 1, QueueDiscipline::FIFO, std::make_unique<Constant>(0.5));
+    m.setInterarrival(constant(1.0));
+    m.addStation("S", 1, QueueDiscipline::FIFO, constant(0.5));
     m.setEntry("S");
-    sim.setTermination(std::make_unique<TimeLimit>(100.0));
+    sim.setTermination(timeLimit(100.0));
     sim.setObservationInterval(10.0);
     sim.initialise(); sim.run();
     check(sim.observations().size() >= 9, "sampled on the grid, roughly time/dt points");
@@ -432,10 +432,10 @@ void testExperiment() {
     section("Experiment");
     auto build = [](SimulationSystem& s) {
         Model& m = s.model();
-        m.setInterarrival(std::make_unique<Exponential>(1.0));
-        m.addStation("S", 1, QueueDiscipline::FIFO, std::make_unique<Exponential>(0.8));
+        m.setInterarrival(exponential(1.0));
+        m.addStation("S", 1, QueueDiscipline::FIFO, exponential(0.8));
         m.setEntry("S");
-        s.setTermination(std::make_unique<TimeLimit>(1500.0));
+        s.setTermination(timeLimit(1500.0));
     };
 
     Experiment e("test", build);
@@ -471,10 +471,10 @@ void testWarmUpSuggestion() {
     // minutes to fill from empty toward steady state.
     Experiment busy("busy", [](SimulationSystem& s) {
         Model& m = s.model();
-        m.setInterarrival(std::make_unique<Exponential>(1.0));
-        m.addStation("S", 1, QueueDiscipline::FIFO, std::make_unique<Exponential>(0.9));
+        m.setInterarrival(exponential(1.0));
+        m.addStation("S", 1, QueueDiscipline::FIFO, exponential(0.9));
         m.setEntry("S");
-        s.setTermination(std::make_unique<TimeLimit>(20000.0));
+        s.setTermination(timeLimit(20000.0));
     });
     busy.replications(20).baseSeed(500u).observeEvery(20.0);
     busy.run();
@@ -492,15 +492,151 @@ void testWarmUpSuggestion() {
     check(head / 5.0 < tail / 100.0, "the run starts emptier than it ends");
 }
 
+void testModelErrors() {
+    section("Model errors (v5)");
+    auto throwsModelError = [](auto fn) {
+        try { fn(); } catch (const ModelError&) { return true; } catch (...) { return false; }
+        return false;
+    };
+
+    check(throwsModelError([]{
+        SimulationSystem s(1u);
+        s.model().arrivals(exponential(1.0))
+                 .station("A", 1, FIFO, exponential(1.4))   // rho = 1.4
+                 .entryAt("A");
+        s.stopAt(100.0).execute();
+    }), "an unstable station (rho >= 1) is refused, not simulated");
+
+    check(throwsModelError([]{
+        SimulationSystem s(1u);
+        s.model().arrivals(exponential(1.0))
+                 .station("A", 1, FIFO, exponential(0.5))
+                 .route("A", "Nope");
+    }), "routing to a station that does not exist");
+
+    check(throwsModelError([]{
+        SimulationSystem s(1u);
+        s.model().arrivals(exponential(1.0))
+                 .station("A", 1, FIFO, exponential(0.5))
+                 .station("A", 1, FIFO, exponential(0.5));
+    }), "duplicate station name");
+
+    check(throwsModelError([]{
+        SimulationSystem s(1u);
+        s.model().arrivals(exponential(1.0))
+                 .attribute("waitTime", constant(1.0));
+    }), "a reserved attribute name");
+
+    check(throwsModelError([]{
+        SimulationSystem s(1u);
+        s.model().station("A", 1, FIFO, exponential(0.5)).entryAt("A");
+        s.stopAt(10.0).execute();
+    }), "no arrival distribution");
+
+    // And an attribute-driven service time is checked too -- job shops are the
+    // models most likely to be accidentally unstable, so skipping them would be
+    // exactly backwards.
+    check(throwsModelError([]{
+        SimulationSystem s(1u);
+        s.model().arrivals(exponential(10.0))
+                 .attribute(attr::serviceTime, uniform(2.0, 30.0))   // mean 16
+                 .station("M", 1, SPT, uniform(2.0, 30.0))
+                 .entryAt("M");
+        s.model().station("M")->setServiceFromAttribute(attr::serviceTime);
+        s.stopAt(100.0).execute();
+    }), "unstable attribute-driven service is caught");
+
+    // A stable model must NOT throw.
+    bool ok = true;
+    try {
+        SimulationSystem s(1u);
+        s.model().arrivals(exponential(1.0))
+                 .station("A", 2, FIFO, exponential(1.5))   // rho = 0.75
+                 .entryAt("A");
+        s.stopAt(200.0).execute();
+    } catch (...) { ok = false; }
+    check(ok, "a stable model runs without complaint");
+}
+
+void testDistributionMeans() {
+    section("Distribution means (v5)");
+    checkClose(Exponential(4.0).mean(), 4.0, 1e-12, "Exponential mean is its parameter");
+    checkClose(Constant(2.5).mean(), 2.5, 1e-12, "Constant");
+    checkClose(Uniform(2.0, 6.0).mean(), 4.0, 1e-12, "Uniform is (a+b)/2");
+    checkClose(Triangular(1.0, 2.0, 6.0).mean(), 3.0, 1e-12, "Triangular is (a+m+b)/3");
+    checkClose(Deterministic(std::vector<SimTime>{1.0, 2.0, 6.0}).mean(), 3.0, 1e-12,
+               "Deterministic is the list average");
+}
+
+void testResultsStruct() {
+    section("RunResults (v5)");
+    SimulationSystem sim(4u);
+    sim.model().arrivals(constant(1.0))
+               .station("A", 1, FIFO, constant(0.5))
+               .station("B", 1, FIFO, constant(0.25))
+               .route("A", "B")
+               .entryAt("A");
+    sim.stopAt(200.0).warmUpFor(50.0).execute();
+
+    const RunResults r = sim.results();
+    check(r.stations.size() == 2, "one entry per station");
+    check(r.station("A").name == "A" && r.station("B").name == "B", "lookup by name");
+    checkClose(r.measuredTime, r.simulatedTime - r.warmUpDiscarded, 1e-9,
+               "measured period excludes the warm-up");
+    // results() must divide by the MEASURED period, not the clock. Utilisation
+    // at A is 0.5 either way only if that is done right.
+    checkClose(r.station("A").utilisation, 0.5, 1e-3, "utilisation uses measuredTime");
+    checkClose(r.station("B").utilisation, 0.25, 1e-3, "second station too");
+
+    bool threw = false;
+    try { r.station("nope"); } catch (const ModelError&) { threw = true; }
+    check(threw, "unknown station name throws instead of returning zeros");
+
+    // report() must agree with results() -- it is supposed to be a view of it.
+    checkClose(r.averageWait, sim.statistics().averageWaitingTime(), 1e-12,
+               "results() and the underlying Statistics agree");
+}
+
+void testBuildHelpers() {
+    section("Build helpers (v5)");
+    // The factories must produce exactly what the constructors did.
+    checkClose(exponential(3.0)->mean(), 3.0, 1e-12, "exponential()");
+    checkClose(uniform(1.0, 3.0)->mean(), 2.0, 1e-12, "uniform()");
+    checkClose(triangular(1.0, 2.0, 3.0)->mean(), 2.0, 1e-12, "triangular()");
+    checkClose(fixedTimes({2.0, 4.0})->mean(), 3.0, 1e-12, "fixedTimes()");
+    check(FIFO == QueueDiscipline::FIFO && SPT == QueueDiscipline::SPT, "discipline aliases");
+    check(attr::serviceTime == "serviceTime" && attr::priority == "priority",
+          "attribute name constants match what the rules look up");
+
+    // anyOf() must compose variadically and fire when any child fires.
+    SimulationSystem sim(1u);
+    sim.model().arrivals(constant(1.0)).station("A", 1, FIFO, constant(0.5)).entryAt("A");
+    sim.stopWhen(anyOf(timeLimit(1000.0), entityLimit(20))).execute();
+    check(sim.statistics().numberServed() >= 20 && sim.clock().now() < 1000.0,
+          "anyOf stops on whichever child fires first");
+}
+
+void testEstimate() {
+    section("Experiment::Estimate (v5)");
+    const std::vector<double> xs{1.0, 2.0, 3.0, 4.0, 5.0};
+    const Experiment::Estimate e = Experiment::estimate(xs);
+    checkClose(e.mean, 3.0, 1e-12, "mean");
+    checkClose(e.halfWidth, Summary::halfWidth95(xs), 1e-12, "half-width matches Summary");
+    checkClose(e.low(), e.mean - e.halfWidth, 1e-12, "low");
+    checkClose(e.high(), e.mean + e.halfWidth, 1e-12, "high");
+    check(e.covers(3.0), "covers its own mean");
+    check(!e.covers(100.0), "does not cover a distant value");
+}
+
 void testTheoryInsideInterval() {
     section("M/M/1 theory falls inside the interval");
     // The question open since v2, as an automated check.
     Experiment e("mm1", [](SimulationSystem& s) {
         Model& m = s.model();
-        m.setInterarrival(std::make_unique<Exponential>(1.0));
-        m.addStation("Server", 1, QueueDiscipline::FIFO, std::make_unique<Exponential>(0.8));
+        m.setInterarrival(exponential(1.0));
+        m.addStation("Server", 1, QueueDiscipline::FIFO, exponential(0.8));
         m.setEntry("Server");
-        s.setTermination(std::make_unique<TimeLimit>(20000.0));
+        s.setTermination(timeLimit(20000.0));
     });
     // 20 replications. At 10 the half-width is wide enough that coverage
     // depends on the seed -- and a test that fails 1 run in 20 is not a test.
@@ -546,6 +682,11 @@ int main() {
     testWarmUpRemoval();
     testObservations();
     testExperiment();
+    testModelErrors();
+    testDistributionMeans();
+    testResultsStruct();
+    testBuildHelpers();
+    testEstimate();
     testWarmUpSuggestion();
     testTheoryInsideInterval();
 

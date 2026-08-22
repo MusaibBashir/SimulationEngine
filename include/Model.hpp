@@ -18,6 +18,10 @@
 #include "Common.hpp"
 #include "Station.hpp"
 #include "Distribution.hpp"
+#include "ModelError.hpp"
+
+namespace des {
+
 
 class Model {
 public:
@@ -58,6 +62,23 @@ public:
 
     void setInterarrival(std::unique_ptr<IDistribution> d);
 
+    // v5: shorter names that read as a description of the system, and each
+    // returns *this so a model can be written as one statement. Identical
+    // behaviour -- these forward to the setters above.
+    Model& arrivals(std::unique_ptr<IDistribution> d);
+    Model& station(const std::string& name, int capacity,
+                   QueueDiscipline discipline, std::unique_ptr<IDistribution> service);
+    Model& route(const std::string& from, const std::string& to);
+    Model& entryAt(const std::string& name);
+    Model& attribute(const std::string& name, std::unique_ptr<IDistribution> d);
+
+    // v5: the offered load at a station -- arrival rate x mean service time,
+    // divided by capacity. THE NUMBER EVERY MODEL MUST CHECK BEFORE RUNNING.
+    // rho >= 1 means work arrives faster than it can be done, the queue grows
+    // without bound, and every average the simulator prints is meaningless.
+    // validate() now checks this for you instead of leaving it as advice.
+    double offeredLoad(const Station& s) const;
+
     // Give every arriving entity an attribute drawn from `d`.
     void assignOnArrival(const std::string& name, std::unique_ptr<IDistribution> d);
     const std::vector<ArrivalAttribute>& arrivalAttributes() const { return m_arrivalAttributes; }
@@ -82,3 +103,5 @@ public:
 
     std::string describe() const;
 };
+
+}  // namespace des

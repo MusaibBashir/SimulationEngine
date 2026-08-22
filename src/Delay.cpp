@@ -17,6 +17,9 @@
 #include "Delay.hpp"
 #include <cassert>
 
+namespace des {
+
+
 Delay::Delay(SimTime start)
     : m_startTime(start), m_endTime(start), m_ended(false) {}
 
@@ -35,3 +38,4 @@ SimTime Delay::duration() const {
     return m_endTime - m_startTime;
 }
 
+}  // namespace des

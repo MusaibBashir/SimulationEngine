@@ -30,6 +30,49 @@
 #include "Model.hpp"
 #include "Entity.hpp"
 #include "Delay.hpp"
+#include "ModelError.hpp"
+#include <string>
+#include <vector>
+
+namespace des {
+
+
+// v5: everything a run produced, in one object with the divisions already done.
+// Before this, reading a station's utilisation meant
+//     sim.model().stationAt(0).stats().utilisation(sim.measuredTime(), cap)
+// which requires knowing that you divide by measuredTime() and not by the
+// clock. Getting that wrong silently understates every time average, so the
+// engine should not have been leaving it to the caller.
+struct StationResults {
+    std::string name;
+    int    capacity{0};
+    int    served{0};
+    double averageWait{0.0};
+    double averageTimeHere{0.0};
+    double maxWait{0.0};
+    double averageQueueLength{0.0};
+    std::size_t maxQueueLength{0};
+    double utilisation{0.0};
+};
+
+struct RunResults {
+    SimTime simulatedTime{0.0};
+    SimTime warmUpDiscarded{0.0};
+    SimTime measuredTime{0.0};
+    int     arrived{0};
+    int     exited{0};
+    double  averageWait{0.0};          // total, across every station visited
+    double  averageTimeInSystem{0.0};
+    double  maxWait{0.0};
+    double  averageNumberInQueue{0.0}; // Lq
+    double  averageNumberInSystem{0.0};// L
+    std::size_t stillWaitingAtStop{0};
+    std::vector<StationResults> stations;
+
+    // Look a station up by name; throws ModelError if there is no such station,
+    // rather than returning a zeroed struct that reads as a very idle server.
+    const StationResults& station(const std::string& name) const;
+};
 
 class SimulationSystem {
 private:
@@ -128,4 +171,19 @@ public:
     void initialise();
     void run();
     void report() const;
+
+    // v5 conveniences. No new behaviour -- execute() is initialise() then run(),
+    // and results() is the numbers report() prints, returned instead of printed.
+    SimulationSystem& execute();
+    RunResults results() const;
+
+    // Chaining versions of the setters, so a whole study reads as one statement.
+    SimulationSystem& stopWhen(std::unique_ptr<ITerminationRule> rule);
+    SimulationSystem& stopAt(SimTime t);
+    SimulationSystem& stopAfter(int entities);
+    SimulationSystem& warmUpFor(SimTime t);
+    SimulationSystem& traceTo(const std::string& path,
+                              TraceLevel level = TraceLevel::Events);
 };
+
+}  // namespace des

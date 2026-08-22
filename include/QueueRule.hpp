@@ -23,6 +23,9 @@
 #include <cstddef>
 #include "Common.hpp"
 
+namespace des {
+
+
 class Entity;
 class RandomStream;
 
@@ -83,3 +86,5 @@ public:
 // keeps working. A factory like this is the usual way to introduce a hierarchy
 // without breaking every caller on the same day.
 std::unique_ptr<IQueueRule> makeQueueRule(QueueDiscipline d);
+
+}  // namespace des

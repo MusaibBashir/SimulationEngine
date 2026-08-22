@@ -7,6 +7,9 @@
 #include "RandomStream.hpp"
 #include <cassert>
 
+namespace des {
+
+
 namespace {
 // One scan, parameterised. This is what the three duplicated loops in v2 turned
 // into: a single algorithm that both attribute rules share.
@@ -80,3 +83,5 @@ std::unique_ptr<IQueueRule> makeQueueRule(QueueDiscipline d) {
     assert(false && "unhandled QueueDiscipline");
     return std::make_unique<FifoRule>();
 }
+
+}  // namespace des

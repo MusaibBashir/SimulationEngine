@@ -40,6 +40,9 @@
 
 #include "Entity.hpp"
 
+namespace des {
+
+
 void Entity::setAttribute(const std::string& name, double value) {
     m_attributes[name] = value;
 }   
@@ -53,3 +56,5 @@ double Entity::attribute(const std::string& name) const{
 bool Entity::hasAttribute(const std::string& name) const{
     return m_attributes.count(name)>0;
 }
+
+}  // namespace des

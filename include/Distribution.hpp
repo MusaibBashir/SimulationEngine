@@ -17,6 +17,9 @@
 #include <cstddef>
 #include "Common.hpp"
 
+namespace des {
+
+
 class RandomStream;
 
 class IDistribution {
@@ -40,6 +43,12 @@ public:
     // has anything to do; the base gives everyone else the correct no-op, which
     // is the difference between a pure virtual and a virtual with a default.
     virtual void reset() {}
+
+    // v5: the theoretical mean. The engine uses it to compute the offered load
+    // of each station BEFORE the run and warn you if the system is unstable --
+    // which is the single most common modelling mistake, and one that otherwise
+    // shows up as confident four-decimal nonsense.
+    virtual SimTime mean() const = 0;
 };
 
 // ----------------------------------------------------------------------------
@@ -50,6 +59,7 @@ public:
     explicit Exponential(SimTime mean);
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
+    SimTime mean() const override;
 };
 
 class Constant : public IDistribution {
@@ -58,6 +68,7 @@ public:
     explicit Constant(SimTime value);
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
+    SimTime mean() const override;
 };
 
 class Uniform : public IDistribution {
@@ -66,6 +77,7 @@ public:
     Uniform(SimTime low, SimTime high);
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
+    SimTime mean() const override;
 };
 
 class Triangular : public IDistribution {
@@ -74,6 +86,7 @@ public:
     Triangular(SimTime low, SimTime mode, SimTime high);
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
+    SimTime mean() const override;
 };
 
 // The one that makes hand-checking possible: hand it the exact sequence from a
@@ -87,5 +100,8 @@ public:
     explicit Deterministic(std::vector<SimTime> values, bool repeat = true);
     SimTime draw(RandomStream& rng) override;
     std::string describe() const override;
+    SimTime mean() const override;
     void reset() override;
 };
+
+}  // namespace des

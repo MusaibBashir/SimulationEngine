@@ -45,6 +45,9 @@
 
 #include "Common.hpp"
 
+namespace des {
+
+
 class Clock {
 private:
     SimTime m_now{0.0};
@@ -58,3 +61,4 @@ public:
     void reset();
 };
 
+}  // namespace des

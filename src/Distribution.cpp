@@ -8,10 +8,15 @@
 #include <cmath>
 #include <sstream>
 
+namespace des {
+
+
 // ------------------------------------------------------------- Exponential --
 Exponential::Exponential(SimTime mean) : m_mean(mean) { assert(mean > 0.0); }
 
 SimTime Exponential::draw(RandomStream& rng) { return rng.exponential(m_mean); }
+
+SimTime Exponential::mean() const { return m_mean; }
 
 std::string Exponential::describe() const {
     std::ostringstream os; os << "Exponential(mean=" << m_mean << ")"; return os.str();
@@ -28,6 +33,8 @@ SimTime Constant::draw(RandomStream& /*rng*/) {
     return m_value;
 }
 
+SimTime Constant::mean() const { return m_value; }
+
 std::string Constant::describe() const {
     std::ostringstream os; os << "Constant(" << m_value << ")"; return os.str();
 }
@@ -38,6 +45,8 @@ Uniform::Uniform(SimTime low, SimTime high) : m_low(low), m_high(high) {
 }
 
 SimTime Uniform::draw(RandomStream& rng) { return rng.uniform(m_low, m_high); }
+
+SimTime Uniform::mean() const { return 0.5 * (m_low + m_high); }
 
 std::string Uniform::describe() const {
     std::ostringstream os; os << "Uniform(" << m_low << ", " << m_high << ")"; return os.str();
@@ -59,6 +68,8 @@ SimTime Triangular::draw(RandomStream& rng) {
     }
     return m_high - std::sqrt((1.0 - u) * (m_high - m_low) * (m_high - m_mode));
 }
+
+SimTime Triangular::mean() const { return (m_low + m_mode + m_high) / 3.0; }
 
 std::string Triangular::describe() const {
     std::ostringstream os;
@@ -82,6 +93,14 @@ SimTime Deterministic::draw(RandomStream& /*rng*/) {
     return m_values[m_cursor++];
 }
 
+SimTime Deterministic::mean() const {
+    // The average of the list. For a repeating list that IS the long-run mean;
+    // for a one-pass list it is the mean of the values you supplied.
+    SimTime total = 0.0;
+    for (SimTime v : m_values) total += v;
+    return total / static_cast<SimTime>(m_values.size());
+}
+
 std::string Deterministic::describe() const {
     std::ostringstream os;
     os << "Deterministic(" << m_values.size() << " values, "
@@ -90,3 +109,5 @@ std::string Deterministic::describe() const {
 }
 
 void Deterministic::reset() { m_cursor = 0; }
+
+}  // namespace des

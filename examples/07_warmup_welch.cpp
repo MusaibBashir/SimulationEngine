@@ -21,18 +21,19 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
-#include "SimulationSystem.hpp"
-#include "Experiment.hpp"
+#include "des.hpp"
+
+using namespace des;
 
 namespace {
 // rho = 0.9.  Theory: Wq = rho / (mu - lambda) = 0.9 / (1/0.9 - 1) = 8.1000
 Experiment::Builder busyQueue(SimTime runLength) {
     return [runLength](SimulationSystem& s) {
         Model& m = s.model();
-        m.setInterarrival(std::make_unique<Exponential>(1.0));
-        m.addStation("Server", 1, QueueDiscipline::FIFO, std::make_unique<Exponential>(0.9));
+        m.setInterarrival(exponential(1.0));
+        m.addStation("Server", 1, QueueDiscipline::FIFO, exponential(0.9));
         m.setEntry("Server");
-        s.setTermination(std::make_unique<TimeLimit>(runLength));
+        s.setTermination(timeLimit(runLength));
     };
 }
 

@@ -21,18 +21,19 @@
 #include <iomanip>
 #include <memory>
 #include <string>
-#include "SimulationSystem.hpp"
-#include "Experiment.hpp"
+#include "des.hpp"
+
+using namespace des;
 
 namespace {
 
 void trial(const std::string& label, std::function<std::unique_ptr<IDistribution>()> makeService) {
     Experiment e(label, [&makeService](SimulationSystem& s) {
         Model& m = s.model();
-        m.setInterarrival(std::make_unique<Exponential>(1.0));
+        m.setInterarrival(exponential(1.0));
         m.addStation("S", 1, QueueDiscipline::FIFO, makeService());
         m.setEntry("S");
-        s.setTermination(std::make_unique<TimeLimit>(20000.0));
+        s.setTermination(timeLimit(20000.0));
     });
     e.replications(8).baseSeed(600u).warmUp(3000.0);
     e.run();
@@ -54,10 +55,10 @@ int main() {
     std::cout << "  service distribution         mean Wq    +/-        rho\n";
     std::cout << "  ---------------------------------------------------------\n";
 
-    trial("Constant(0.8)",              []{ return std::make_unique<Constant>(0.8); });
-    trial("Uniform(0.4, 1.2)",          []{ return std::make_unique<Uniform>(0.4, 1.2); });
-    trial("Triangular(0.2,0.6,1.6)",    []{ return std::make_unique<Triangular>(0.2, 0.6, 1.6); });
-    trial("Exponential(0.8)",           []{ return std::make_unique<Exponential>(0.8); });
+    trial("Constant(0.8)",              []{ return constant(0.8); });
+    trial("Uniform(0.4, 1.2)",          []{ return uniform(0.4, 1.2); });
+    trial("Triangular(0.2,0.6,1.6)",    []{ return triangular(0.2, 0.6, 1.6); });
+    trial("Exponential(0.8)",           []{ return exponential(0.8); });
 
     std::cout << R"(
 --- what to notice ------------------------------------------------------

@@ -29,6 +29,9 @@
 #include <cassert>
 #include <utility>
 
+namespace des {
+
+
 Resource::Resource(std::string name, int capacity)
     : m_name(std::move(name)), m_capacity(capacity), m_unitsBusy(0) {
     assert(capacity > 0);
@@ -50,3 +53,5 @@ void Resource::release(int units) {
     assert(units <= m_unitsBusy);
     m_unitsBusy -= units;
 }
+
+}  // namespace des

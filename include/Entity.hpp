@@ -80,6 +80,9 @@
 #include <string>
 #include "Common.hpp"
 
+namespace des {
+
+
 class Entity{
     private:
         EntityId m_id;
@@ -98,3 +101,5 @@ class Entity{
         bool hasAttribute(const std::string& name) const;
 
 };
+
+}  // namespace des

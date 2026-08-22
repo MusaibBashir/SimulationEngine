@@ -15,18 +15,20 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
-#include "SimulationSystem.hpp"
+#include "des.hpp"
+
+using namespace des;
 
 namespace {
 
 void runWith(int servers, SimTime meanService, double theoryWq, double theoryW) {
     SimulationSystem sim(2024u);
     Model& m = sim.model();
-    m.setInterarrival(std::make_unique<Exponential>(1.0));
+    m.setInterarrival(exponential(1.0));
     m.addStation("Servers", servers, QueueDiscipline::FIFO,
-                 std::make_unique<Exponential>(meanService));
+                 exponential(meanService));
     m.setEntry("Servers");
-    sim.setTermination(std::make_unique<TimeLimit>(50000.0));
+    sim.setTermination(timeLimit(50000.0));
     sim.setWarmUp(2000.0);          // see example 07 for what this is
     sim.initialise();
     sim.run();

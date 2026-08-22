@@ -13,6 +13,9 @@
 #include <cstdint>
 #include "Common.hpp"
 
+namespace des {
+
+
 class Entity;
 class Station;
 
@@ -58,3 +61,5 @@ public:
     // breaks the heap invariant silently. To change a scheduled event you
     // cancel it and schedule a new one.
 };
+
+}  // namespace des

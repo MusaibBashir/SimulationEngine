@@ -11,6 +11,9 @@
 #include <iostream>
 #include <numeric>
 
+namespace des {
+
+
 // ------------------------------------------------------------------ Summary --
 
 double Summary::mean(const std::vector<double>& xs) {
@@ -113,6 +116,18 @@ std::vector<double> Experiment::column(double ReplicationResult::* field) const 
     out.reserve(m_results.size());
     for (const auto& r : m_results) out.push_back(r.*field);
     return out;
+}
+
+std::vector<double> Experiment::waits() const { return column(&ReplicationResult::averageWait); }
+std::vector<double> Experiment::timesInSystem() const { return column(&ReplicationResult::averageTimeInSystem); }
+std::vector<double> Experiment::queueLengths() const { return column(&ReplicationResult::Lq); }
+std::vector<double> Experiment::utilisations() const { return column(&ReplicationResult::utilisation); }
+
+Experiment::Estimate Experiment::estimate(const std::vector<double>& xs) {
+    Estimate e;
+    e.mean      = Summary::mean(xs);
+    e.halfWidth = Summary::halfWidth95(xs);
+    return e;
 }
 
 std::vector<double> Experiment::welchAverages(int window) const {
@@ -225,3 +240,5 @@ void Experiment::report() const {
     line("utilisation (rho)",   column(&ReplicationResult::utilisation));
     std::cout << "=====================================================================\n";
 }
+
+}  // namespace des

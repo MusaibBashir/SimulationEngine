@@ -20,6 +20,9 @@
 #include "Statistics.hpp"
 #include "Distribution.hpp"
 
+namespace des {
+
+
 class Entity;
 class RandomStream;
 
@@ -68,6 +71,7 @@ public:
     // v4.1. Pass an empty string to go back to drawing from the distribution.
     void setServiceFromAttribute(const std::string& attributeName);
     bool usesServiceAttribute() const { return !m_serviceAttribute.empty(); }
+    const std::string& serviceAttributeName() const { return m_serviceAttribute; }
 
     // The one place a service duration comes from, whichever source is in use.
     SimTime drawService(const Entity& e, RandomStream& rng);
@@ -81,3 +85,5 @@ public:
 
     std::string describe() const;
 };
+
+}  // namespace des

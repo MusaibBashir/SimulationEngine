@@ -5,6 +5,74 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [5.0.0] — 2026-08-22 — "The same engine, easier to hold"
+
+**No simulation logic changed.** Every example produces byte-identical output to
+v4.1 and every v1–v4 test passes untouched. v5 is entirely about what the person
+*using* the engine has to type, read and remember. Narrative in `V5_READLOG.md`.
+
+### Added
+
+- **`namespace des`** around the whole engine, and **`des.hpp`** as an umbrella
+  header. The engine had 47 global names including `Model`, `Entity`, `Clock`,
+  `Uniform`, `Constant`, `Summary` and `Trace` — every one a name user code might
+  want.
+- **Factory functions**: `exponential(m)`, `constant(v)`, `uniform(a,b)`,
+  `triangular(a,m,b)`, `fixedTimes({...})`, `timeLimit(t)`, `entityLimit(n)`,
+  `whenDrained()`, variadic `anyOf(...)`. The ten examples contained 53
+  `std::make_unique` calls; they now contain none.
+- **`attr::priority` / `attr::serviceTime` / `attr::dueDate`** — the disciplines
+  look attributes up by string, and a typo silently turns SPT into FIFO. That
+  exact failure shipped in v3 and survived to v4.1.
+- **`RunResults` / `StationResults`** and `sim.results()` — every number with the
+  division by the *measured* period already done. `report()` now prints
+  `results()` rather than recomputing, so one place knows how each number is
+  derived. `results().station("nope")` throws rather than returning a zeroed
+  struct that reads as a perfectly idle server.
+- **`des::ModelError`** — user mistakes are now exceptions, checked in every
+  build. `assert` compiles to nothing under `-DNDEBUG`, so `connect("A","Typo")`
+  would previously have done nothing at all in a release build. Asserts remain
+  for engine invariants a user cannot trigger.
+- **The stability check.** `Model::offeredLoad()` plus a pure-virtual
+  `IDistribution::mean()`. Every version of the docs said "compute ρ by hand
+  before trusting anything"; the engine now computes it and refuses to run an
+  unstable model, with a message saying what to change. It follows the
+  service-time attribute too, so job shops — the models most likely to be
+  accidentally unstable — are checked rather than skipped.
+- **Chaining and shortcuts**: `Model::arrivals/station/route/entryAt/attribute`
+  return `Model&`; `SimulationSystem::stopAt/stopAfter/stopWhen/warmUpFor/traceTo`
+  return `SimulationSystem&`; `execute()` is `initialise()` then `run()`.
+- **`Experiment::waits() / timesInSystem() / queueLengths() / utilisations()`**
+  and `Experiment::estimate(xs)` returning `{mean, halfWidth}` with `low()`,
+  `high()` and `covers(v)` — the mean and its half-width are always wanted
+  together, and separating them invites quoting the mean alone.
+
+### Changed
+
+- Examples and tests rewritten against the new API; example 01 is now eight lines
+  and example 10 gains a section on catching `ModelError`.
+- Older names (`setInterarrival`, `addStation`, `connect`, `setEntry`,
+  `assignOnArrival`, `initialise`/`run`) all still work.
+
+### Deliberately not done
+
+- A full fluent builder (`station("A").capacity(3).fifo()`) — the chained `Model`
+  methods get most of the readability for a fraction of the API surface.
+- Renaming `SimulationSystem` to `Simulation` — it would break every existing
+  line for a shorter name, and the namespace already removed the collision risk.
+- `IEventHandler`, for the fifth time. Same reasoning; the trigger is still
+  handlers that carry state.
+
+### Verified
+
+- **160/160 checks** (128 in v4.1). The 32 new ones cover every `ModelError`
+  path, distribution means, `RunResults` dividing by the measured period, the
+  build helpers, variadic `anyOf`, and `Estimate`.
+- All ten examples produce identical output to v4.1 — the interface changed, the
+  simulation did not.
+
+---
+
 ## [4.1.0] — 2026-08-22 — "A folder your friend can learn from"
 
 An `examples/` folder of ten runnable programs covering every feature, plus two
@@ -462,21 +530,20 @@ filling the bodies is v2.
 
 ---
 
-## [Unreleased] — v5, "smaller intervals for the same work"
+## [Unreleased] — v6
 
-v4 made the intervals honest. v5 would make them narrower without simply running
-longer:
-
-1. **Common random numbers** — compare two configurations using the *same* random
-   draws, so the difference between them is not swamped by sampling noise.
-   `Constant::draw` already deliberately consumes nothing from the stream, which
-   is a precondition for this working at all.
-2. **Antithetic variates** — pair each replication with one using `1-u`.
-3. **Steady-state detection as a termination rule** — stop when the estimate has
-   converged rather than at a fixed clock time. `ITerminationRule` receives the
-   whole system, so it is expressible today.
-4. **Batch means** — one long run split into batches, as an alternative to
-   independent replications when the warm-up period is expensive.
-5. **Widen `EntityId`** — it is a plain `int` and a very long run would overflow
-   it. One line, since it is a typedef.
-6. **`IEventHandler`** — when pre-emption or reneging needs handlers with state.
+1. **Probabilistic routing** — an entity leaving a station picks its next by
+   probability, or by a rule. This is the biggest modelling gap left, and it is
+   also what breaks the v5 stability check: offered load then needs visit ratios
+   rather than assuming one visit per station.
+2. **Common random numbers and antithetic variates** — narrower intervals for the
+   same compute. `constant()` already consumes nothing from the stream, which is
+   a precondition.
+3. **Batch means** — an alternative to independent replications when the warm-up
+   is expensive to repeat.
+4. **Config file input** — now that `ModelError` exists, the validation story is
+   in place and this is finally worth building.
+5. **Balking and reneging** — customers who refuse to join a long queue, or leave
+   after waiting too long. These need handlers that carry state, which is the
+   long-standing trigger for `IEventHandler`.
+6. **Widen `EntityId`** — a plain `int` overflows on a very long run. One line.

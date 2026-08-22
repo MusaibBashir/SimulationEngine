@@ -4,6 +4,9 @@
 
 #include "EventNotice.hpp"
 
+namespace des {
+
+
 EventNotice::EventNotice(EventType type, SimTime time, Entity* entity, Station* station)
     : m_type(type), m_time(time), m_entity(entity), m_station(station) {}
     // m_sequenceNumber stays 0 until FutureEventList::schedule() stamps it.
@@ -17,3 +20,5 @@ bool EventNotice::operator>(const EventNotice& other) const {
     if (m_time != other.m_time) return m_time > other.m_time;
     return m_sequenceNumber > other.m_sequenceNumber;
 }
+
+}  // namespace des

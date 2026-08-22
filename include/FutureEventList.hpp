@@ -77,6 +77,9 @@
 #include "Common.hpp"
 #include "EventNotice.hpp"
 
+namespace des {
+
+
 class FutureEventList {
 private:
     std::priority_queue<EventNotice,
@@ -106,3 +109,4 @@ public:
     SimTime nextEventTime() const;
 };
 
+}  // namespace des

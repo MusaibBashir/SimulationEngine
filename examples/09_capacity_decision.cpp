@@ -16,8 +16,9 @@
 #include <iomanip>
 #include <memory>
 #include <vector>
-#include "SimulationSystem.hpp"
-#include "Experiment.hpp"
+#include "des.hpp"
+
+using namespace des;
 
 namespace {
 
@@ -36,11 +37,11 @@ struct Option {
 Option evaluate(int agents) {
     Experiment e("staffing", [agents](SimulationSystem& s) {
         Model& m = s.model();
-        m.setInterarrival(std::make_unique<Exponential>(1.0));       // a call/min
+        m.setInterarrival(exponential(1.0));       // a call/min
         m.addStation("Agents", agents, QueueDiscipline::FIFO,
-                     std::make_unique<Exponential>(3.5));            // 3.5 min/call
+                     exponential(3.5));            // 3.5 min/call
         m.setEntry("Agents");
-        s.setTermination(std::make_unique<TimeLimit>(RUN_MINUTES));
+        s.setTermination(timeLimit(RUN_MINUTES));
     });
     e.replications(10).baseSeed(11000u).warmUp(2000.0);
     e.run();

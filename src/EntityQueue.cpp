@@ -10,6 +10,9 @@
 #include "RandomStream.hpp"
 #include <cassert>
 
+namespace des {
+
+
 EntityQueue::EntityQueue(const std::string& name, QueueDiscipline discipline)
     : m_name(name), m_rule(makeQueueRule(discipline)) {}
 
@@ -52,3 +55,5 @@ Entity* EntityQueue::pop() {
     m_waiting.erase(m_waiting.begin() + static_cast<std::ptrdiff_t>(idx));
     return selected;
 }
+
+}  // namespace des

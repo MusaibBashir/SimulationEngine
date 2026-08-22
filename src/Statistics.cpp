@@ -60,6 +60,9 @@
 #include "Statistics.hpp"
 #include <utility>
 
+namespace des {
+
+
 Statistics::Statistics(std::string labelA, std::string labelB)
     : m_labelA(std::move(labelA)), m_labelB(std::move(labelB)) {}
 
@@ -126,3 +129,5 @@ double Statistics::utilisation(SimTime elapsed, int capacity) const {
     // Dimensionless and MUST land in [0,1]. Above 1 is double counting.
     return m_areaB / (elapsed * capacity);
 }
+
+}  // namespace des

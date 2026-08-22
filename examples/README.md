@@ -41,6 +41,13 @@ Or compile one directly, which is faster while you are experimenting:
 g++ -std=c++17 -Iinclude examples/01_hello_mm1.cpp src/*.cpp -o ex01 && ./ex01
 ```
 
+Everything lives in `namespace des`, and `des.hpp` pulls in the whole engine:
+
+```cpp
+#include "des.hpp"
+using namespace des;
+```
+
 Recompiling `src/*.cpp` every time is slow. Build the engine once into a static
 library and link against it:
 
@@ -78,26 +85,33 @@ using the tool correctly and producing confident nonsense.
 ## The shape of every program
 
 ```cpp
-#include "SimulationSystem.hpp"
+#include "des.hpp"
+using namespace des;
 
-SimulationSystem sim(12345u);          // 1. engine + seed
-Model& m = sim.model();                // 2. describe the system
+SimulationSystem sim(12345u);          // engine + seed
 
-m.setInterarrival(std::make_unique<Exponential>(1.0));
-m.addStation("Teller", 1, QueueDiscipline::FIFO,
-             std::make_unique<Exponential>(0.8));
-m.setEntry("Teller");
+sim.model()
+   .arrivals(exponential(1.0))                       // how often things arrive
+   .station("Teller", 1, FIFO, exponential(0.8))     // name, servers, rule, service
+   .entryAt("Teller");                               // where arrivals land
 
-sim.setTermination(std::make_unique<TimeLimit>(480.0));   // 3. when to stop
-sim.initialise();                                          // 4. run
-sim.run();
-sim.report();                                              // 5. results
+sim.stopAt(480.0);                     // when to stop
+sim.execute().report();                // initialise + run, then print
 ```
 
-Everything is `std::unique_ptr` because the engine takes ownership. Use
-`std::make_unique`.
+Eight lines, and every one of them is about the queueing system rather than
+about C++ memory management.
 
----
+To get numbers out instead of printing them:
+
+```cpp
+RunResults r = sim.results();
+r.averageWait;
+r.station("Teller").utilisation;
+r.station("Teller").maxQueueLength;
+```
+
+`results()` has already divided by the right thing — see the warm-up note below.
 
 ## API reference
 
@@ -107,17 +121,33 @@ Everything is `std::unique_ptr` because the engine takes ownership. Use
 |---|---|
 | `SimulationSystem sim(seed)` | Create the engine. Same seed ⇒ identical run. |
 | `sim.model()` | The `Model&` you configure. |
-| `sim.setTermination(rule)` | Required. See termination rules below. |
-| `sim.setWarmUp(t)` | Discard statistics collected before time `t`. |
-| `sim.setObservationInterval(dt)` | Sample number-in-system every `dt` (for Welch). |
-| `sim.enableTrace(path, level, markdown)` | Write an event log. |
-| `sim.initialise()` | Reset everything and schedule the first arrival. |
-| `sim.run()` | Process events until the termination rule fires. |
+| `sim.stopAt(t)` / `sim.stopAfter(n)` / `sim.stopWhen(rule)` | When to stop. Required. |
+| `sim.warmUpFor(t)` | Discard statistics collected before time `t`. |
+| `sim.traceTo(path)` | Write an event log. |
+| `sim.execute()` | `initialise()` then `run()`. |
 | `sim.report()` | Print a summary plus a per-station table. |
-| `sim.statistics()` | System-wide `Statistics`. |
+| `sim.results()` | **`RunResults`** — the same numbers, as data. |
 | `sim.clock().now()` | Current simulated time. |
-| `sim.measuredTime()` | Clock minus warm-up. **Divide by this, not the clock.** |
-| `sim.model().station("X")` | A `Station*` for per-station numbers. |
+| `sim.setObservationInterval(dt)` | Sample number-in-system every `dt` (for Welch). |
+
+All of these return `SimulationSystem&`, so they chain.
+
+### `RunResults` / `StationResults`
+
+```cpp
+RunResults r = sim.results();
+```
+
+`r`: `simulatedTime`, `warmUpDiscarded`, `measuredTime`, `arrived`, `exited`,
+`averageWait`, `averageTimeInSystem`, `maxWait`, `averageNumberInQueue` (Lq),
+`averageNumberInSystem` (L), `stillWaitingAtStop`, `stations`.
+
+`r.station("Teller")`: `capacity`, `served`, `averageWait`, `averageTimeHere`,
+`maxWait`, `averageQueueLength`, `maxQueueLength`, `utilisation`.
+
+Every time average in there is already divided by the **measured** period rather
+than the clock. That distinction matters the moment you use a warm-up, and it is
+the sort of thing an API should not leave to the caller.
 
 `initialise()` fully resets. Calling `initialise(); run();` twice gives the
 identical answer, not a continuation.
@@ -126,11 +156,16 @@ identical answer, not a continuation.
 
 | Call | Does |
 |---|---|
-| `setInterarrival(dist)` | How often entities arrive. Required. |
-| `addStation(name, capacity, discipline, serviceDist)` | Add a service point. Returns `Station*`. |
-| `connect("A", "B")` | After being served at A, go to B. |
-| `setEntry("A")` | Where arrivals land. Defaults to the first station added. |
-| `assignOnArrival("priority", dist)` | Give every arriving entity an attribute. |
+| `arrivals(dist)` | How often entities arrive. Required. |
+| `station(name, capacity, discipline, serviceDist)` | Add a service point. |
+| `route("A", "B")` | After being served at A, go to B. |
+| `entryAt("A")` | Where arrivals land. Defaults to the first station added. |
+| `attribute("priority", dist)` | Give every arriving entity an attribute. |
+| `offeredLoad(station)` | ρ for that station. Checked for you at `execute()`. |
+
+All return `Model&`, so they chain. (The older names — `setInterarrival`,
+`addStation`, `connect`, `setEntry`, `assignOnArrival` — still work and return
+`Station*` where useful, e.g. for `setServiceFromAttribute`.)
 
 A station with nothing `connect`ed after it is an **exit** — that is how entities
 leave the system.
@@ -148,11 +183,11 @@ leave the system.
 
 | Class | Use for |
 |---|---|
-| `Exponential(mean)` | Random arrivals; memoryless service. The default. |
-| `Constant(v)` | No variability. |
-| `Uniform(low, high)` | Equally likely across a range. |
-| `Triangular(low, mode, high)` | Min / most-likely / max. **Best when you have no data but do have an opinion** — which is most coursework. |
-| `Deterministic({a, b, c, ...})` | A fixed list, in order. For hand-checking. |
+| `exponential(mean)` | Random arrivals; memoryless service. The default. |
+| `constant(v)` | No variability. |
+| `uniform(low, high)` | Equally likely across a range. |
+| `triangular(low, mode, high)` | Min / most-likely / max. **Best when you have no data but do have an opinion** — which is most coursework. |
+| `fixedTimes({a, b, c})` | A fixed list, in order. For hand-checking. |
 
 > **`Exponential` takes the MEAN, not the rate.** `Exponential(4.0)` means "4
 > minutes on average". Passing `0.25` because "the rate is 0.25/min" gives a
@@ -160,14 +195,18 @@ leave the system.
 
 ### Queue disciplines
 
-| `QueueDiscipline::` | Serves next | Needs attribute |
+| Name | Serves next | Needs attribute |
 |---|---|---|
 | `FIFO` | longest waiting | — |
 | `LIFO` | most recent arrival | — |
-| `Priority` | highest `"priority"` | `"priority"` |
-| `SPT` | lowest `"serviceTime"` | `"serviceTime"` |
-| `EDD` | lowest `"dueDate"` | `"dueDate"` |
-| `Random` | uniformly at random | — |
+| `PRIORITY` | highest `attr::priority` | yes |
+| `SPT` | lowest `attr::serviceTime` | yes |
+| `EDD` | lowest `attr::dueDate` | yes |
+| `RANDOM` | uniformly at random | — |
+
+Use the `attr::` constants rather than string literals — the disciplines look
+attributes up **by string**, so a typo means "absent", which reads as `0.0` for
+every entity, which ties every comparison, which turns SPT into FIFO in silence.
 
 > **Priority, SPT and EDD read entity attributes.** If nothing calls
 > `assignOnArrival` with that exact name, every entity reads `0.0`, every
@@ -180,10 +219,10 @@ Ties break in favour of the earliest arrival (FIFO among equals).
 
 | Rule | Stops when |
 |---|---|
-| `TimeLimit(t)` | the clock reaches `t` |
-| `EntityLimit(n)` | `n` entities have **left** (exits, not arrivals) |
-| `DrainedRule()` | the system is empty |
-| `AnyOf` | any child rule fires — `add()` them |
+| `timeLimit(t)` | the clock reaches `t` |
+| `entityLimit(n)` | `n` entities have **left** (exits, not arrivals) |
+| `whenDrained()` | the system is empty |
+| `anyOf(a, b, ...)` | any of them fires |
 
 `DrainedRule` models a **terminating** system (a clinic that closes, a batch of
 jobs). Pair it with a `TimeLimit` as a safety net, since a system fed by endless
@@ -208,28 +247,39 @@ double h = Summary::halfWidth95(wq);
 For warm-up analysis: `.observeEvery(dt)`, then `e.suggestWarmUp()` (MSER) and
 `e.writeWelchSeries("welch.csv", 25)` to plot.
 
-### Reserved attribute names
+### Errors
 
-The engine uses `waitTime`, `waitHere` and `stationEntry`. `assignOnArrival`
-will assert if you try to use them.
+Mistakes **you** make throw `des::ModelError`, in every build:
+
+- a station that cannot keep up (ρ ≥ 1)
+- routing to, or entering at, a station that does not exist
+- a duplicate station name, a routing loop, capacity < 1
+- no arrival distribution, no entry station, no termination rule
+- using a reserved attribute name (`waitTime`, `waitHere`, `stationEntry`)
+
+They are exceptions rather than asserts on purpose: asserts compile to nothing
+under `-DNDEBUG`, so in a release build a typo'd station name would have silently
+done nothing. Anything that is *your* mistake must be checked in every build;
+`assert` is reserved for the engine's own invariants.
 
 ---
 
 ## Mistakes to avoid
 
-**Not checking ρ before running.** Compute the offered load by hand:
-`ρ = (mean service time) / (capacity × mean interarrival time)`. If ρ ≥ 1 the
-queue grows forever, every average is meaningless, and the simulator will print
-them to four decimal places anyway. This is the number-one error.
+**Not checking ρ.** `ρ = (mean service time) / (capacity × mean interarrival
+time)`. If ρ ≥ 1 the queue grows forever and every average is meaningless.
+As of v5 **the engine checks this for you** and throws rather than printing
+confident nonsense — but know the number anyway, because ρ = 0.95 is legal and
+still means very long queues.
 
 **Quoting one run.** A run is one sample from a random variable. Example 08.
 
 **Reading `Exponential` as a rate.** See above.
 
-**Using Priority/SPT/EDD without `assignOnArrival`.** Silently degenerates to
-FIFO.
+**Using PRIORITY/SPT/EDD without `attribute()`.** Silently degenerates to FIFO.
 
-**Dividing by `clock().now()` when you used a warm-up.** Use `measuredTime()`.
+**Dividing by `clock().now()` when you used a warm-up.** Use `results()`, which
+divides by `measuredTime()` for you.
 
 **Comparing two designs whose intervals overlap** and declaring a winner. You
 haven't shown one.
@@ -244,7 +294,8 @@ same range.
 
 ## A checklist for coursework
 
-1. Compute ρ by hand. Confirm ρ < 1.
+1. Know ρ for every station. The engine refuses ρ ≥ 1; you still want to know
+   whether you are at 0.5 or 0.95, because the difference is enormous.
 2. Build a `Deterministic` version first and check it by hand against a trace
    (example 02). Only then switch to random distributions.
 3. Sanity-check against theory where it exists — M/M/1 gives

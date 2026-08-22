@@ -16,28 +16,30 @@
 
 #include <iostream>
 #include <memory>
-#include "SimulationSystem.hpp"
+#include "des.hpp"
+
+using namespace des;
 
 int main() {
     SimulationSystem sim(7u);
     Model& m = sim.model();
 
     // A party arrives every ~15 minutes.
-    m.setInterarrival(std::make_unique<Exponential>(15.0));
+    m.setInterarrival(exponential(15.0));
 
     // One host, seating takes ~2 min.
     m.addStation("Host", 1, QueueDiscipline::FIFO,
-                 std::make_unique<Exponential>(2.0));
+                 exponential(2.0));
 
     // Three waiters. A meal takes 20 to 60 minutes, most often 35 --
     // Triangular is the right shape when you have a plausible minimum, maximum
     // and most-likely value but no data. Which is most coursework.
     m.addStation("Waiters", 3, QueueDiscipline::FIFO,
-                 std::make_unique<Triangular>(20.0, 35.0, 60.0));
+                 triangular(20.0, 35.0, 60.0));
 
     // One cashier, 1 to 4 minutes, uniformly.
     m.addStation("Cashier", 1, QueueDiscipline::FIFO,
-                 std::make_unique<Uniform>(1.0, 4.0));
+                 uniform(1.0, 4.0));
 
     // The routing. Without these two lines you have three unconnected queues
     // and every entity would leave straight after being seated.
@@ -53,7 +55,7 @@ int main() {
     // bound forever and every number below becomes meaningless -- while still
     // being printed to four decimal places.
 
-    sim.setTermination(std::make_unique<TimeLimit>(6000.0));
+    sim.setTermination(timeLimit(6000.0));
     sim.setWarmUp(600.0);
     sim.enableTrace("trace_05.md", TraceLevel::Events);
 

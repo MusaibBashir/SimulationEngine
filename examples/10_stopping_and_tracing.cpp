@@ -11,14 +11,16 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
-#include "SimulationSystem.hpp"
+#include "des.hpp"
+
+using namespace des;
 
 namespace {
 
 void build(SimulationSystem& s, QueueDiscipline rule = QueueDiscipline::FIFO) {
     Model& m = s.model();
-    m.setInterarrival(std::make_unique<Exponential>(2.0));
-    m.addStation("Desk", 1, rule, std::make_unique<Exponential>(1.6));
+    m.setInterarrival(exponential(2.0));
+    m.addStation("Desk", 1, rule, exponential(1.6));
     m.setEntry("Desk");
 }
 
@@ -43,11 +45,11 @@ int main() {
     std::cout << "--- termination rules ---------------------------------------\n";
 
     // Stop at a clock time. The usual choice for a steady-state study.
-    showStop("TimeLimit(500)", std::make_unique<TimeLimit>(500.0));
+    showStop("TimeLimit(500)", timeLimit(500.0));
 
     // Stop after N entities have LEFT the system. Use this when you want the
     // same amount of DATA from every run rather than the same duration.
-    showStop("EntityLimit(100)", std::make_unique<EntityLimit>(100));
+    showStop("EntityLimit(100)", entityLimit(100));
 
     // Stop when the system empties. This is how you model a TERMINATING system
     // -- a clinic that closes, a batch of jobs that finishes -- as opposed to a
@@ -55,16 +57,16 @@ int main() {
     // because a system fed by endless arrivals may never empty.
     {
         auto any = std::make_unique<AnyOf>();
-        any->add(std::make_unique<DrainedRule>());
-        any->add(std::make_unique<TimeLimit>(10000.0));   // safety net
+        any->add(whenDrained());
+        any->add(timeLimit(10000.0));   // safety net
         showStop("AnyOf[Drained | TimeLimit(10000)]", std::move(any));
     }
 
     // AnyOf stops when ANY child stops. Combine freely.
     {
         auto any = std::make_unique<AnyOf>();
-        any->add(std::make_unique<TimeLimit>(500.0));
-        any->add(std::make_unique<EntityLimit>(50));
+        any->add(timeLimit(500.0));
+        any->add(entityLimit(50));
         showStop("AnyOf[TimeLimit(500) | Entity(50)]", std::move(any));
     }
 
@@ -73,7 +75,7 @@ int main() {
     {
         SimulationSystem sim(3u);
         build(sim);
-        sim.setTermination(std::make_unique<EntityLimit>(12));
+        sim.setTermination(entityLimit(12));
 
         // markdown=true  -> a table that renders in a report or on GitHub
         // markdown=false -> aligned plain text, easier to diff and grep
@@ -94,16 +96,16 @@ int main() {
     {
         SimulationSystem sim(5u);
         Model& m = sim.model();
-        m.setInterarrival(std::make_unique<Exponential>(2.0));
+        m.setInterarrival(exponential(2.0));
 
         // QueueDiscipline::Priority serves the HIGHEST value of an attribute
         // called exactly "priority". Something must put it there:
-        m.assignOnArrival("priority", std::make_unique<Uniform>(1.0, 5.0));
+        m.assignOnArrival("priority", uniform(1.0, 5.0));
 
         m.addStation("Desk", 1, QueueDiscipline::Priority,
-                     std::make_unique<Exponential>(1.6));
+                     exponential(1.6));
         m.setEntry("Desk");
-        sim.setTermination(std::make_unique<TimeLimit>(5000.0));
+        sim.setTermination(timeLimit(5000.0));
         sim.setWarmUp(500.0);
         sim.initialise();
         sim.run();
@@ -118,19 +120,52 @@ int main() {
                      "  mean, when you use a priority rule.\n";
     }
 
-    // --- 4. seeds and reproducibility --------------------------------------
+    // --- 4. when you get the model wrong ----------------------------------
+    // Mistakes YOU make are reported as ModelError exceptions, not asserts.
+    // That matters: asserts vanish in a release build (-DNDEBUG), so a typo'd
+    // station name would have silently done nothing and the model would have
+    // run with entities leaving early. Exceptions are checked in every build.
+    std::cout << "\n--- model errors ---------------------------------------------\n";
+    {
+        // (a) a system that cannot keep up
+        try {
+            SimulationSystem bad(1u);
+            bad.model().arrivals(exponential(1.0))
+                       .station("Desk", 1, FIFO, exponential(1.4))
+                       .entryAt("Desk");
+            bad.stopAt(1000.0).execute();
+        } catch (const ModelError& e) {
+            std::cout << "  caught: " << e.what() << "\n\n";
+        }
+
+        // (b) a station name that does not exist
+        try {
+            SimulationSystem bad(1u);
+            bad.model().arrivals(exponential(2.0))
+                       .station("Desk", 1, FIFO, exponential(1.0))
+                       .route("Desk", "Cashier");     // never added
+        } catch (const ModelError& e) {
+            std::cout << "  caught: " << e.what() << "\n";
+        }
+
+        // (c) forgetting to say where arrivals go is caught the same way, as is
+        // a routing loop, a duplicate station name, and using a reserved
+        // attribute name. All at initialise(), before any events run.
+    }
+
+    // --- 5. seeds and reproducibility --------------------------------------
     std::cout << "\n--- seeds ----------------------------------------------------\n";
     {
         SimulationSystem a(999u); build(a);
-        a.setTermination(std::make_unique<TimeLimit>(2000.0));
+        a.setTermination(timeLimit(2000.0));
         a.initialise(); a.run();
 
         SimulationSystem b(999u); build(b);
-        b.setTermination(std::make_unique<TimeLimit>(2000.0));
+        b.setTermination(timeLimit(2000.0));
         b.initialise(); b.run();
 
         SimulationSystem c(1000u); build(c);
-        c.setTermination(std::make_unique<TimeLimit>(2000.0));
+        c.setTermination(timeLimit(2000.0));
         c.initialise(); c.run();
 
         std::cout << "  seed 999  : Wq = " << a.statistics().averageWaitingTime() << "\n";

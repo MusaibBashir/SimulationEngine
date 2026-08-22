@@ -16,16 +16,17 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
-#include "SimulationSystem.hpp"
-#include "Experiment.hpp"
+#include "des.hpp"
+
+using namespace des;
 
 namespace {
 void buildMM1(SimulationSystem& s) {
     Model& m = s.model();
-    m.setInterarrival(std::make_unique<Exponential>(1.0));
-    m.addStation("Server", 1, QueueDiscipline::FIFO, std::make_unique<Exponential>(0.8));
+    m.setInterarrival(exponential(1.0));
+    m.addStation("Server", 1, QueueDiscipline::FIFO, exponential(0.8));
     m.setEntry("Server");
-    s.setTermination(std::make_unique<TimeLimit>(20000.0));
+    s.setTermination(timeLimit(20000.0));
 }
 }  // namespace
 

@@ -26,6 +26,9 @@
 #include "Common.hpp"
 #include "SimulationSystem.hpp"
 
+namespace des {
+
+
 // What one replication produced. Everything here is a sample from a
 // distribution, which is the whole reason this struct exists rather than the
 // numbers being printed straight out.
@@ -102,6 +105,22 @@ public:
     // Pull one field out of every replication, ready for Summary.
     std::vector<double> column(double ReplicationResult::* field) const;
 
+    // v5: named accessors. `column(&ReplicationResult::averageWait)` is precise
+    // and also the sort of thing you have to look up every time. These are the
+    // four columns anyone actually wants.
+    std::vector<double> waits() const;
+    std::vector<double> timesInSystem() const;
+    std::vector<double> queueLengths() const;
+    std::vector<double> utilisations() const;
+
+    // mean and 95% half-width of one column, since that pair is always wanted
+    // together and separating them invites reporting the mean on its own.
+    struct Estimate { double mean{0.0}; double halfWidth{0.0};
+                      double low() const { return mean - halfWidth; }
+                      double high() const { return mean + halfWidth; }
+                      bool covers(double v) const { return v >= low() && v <= high(); } };
+    static Estimate estimate(const std::vector<double>& xs);
+
     // --- Welch's method ---------------------------------------------------
     // Average the observation series across replications, index by index, then
     // smooth with a moving average of half-width w. Averaging first is what
@@ -135,3 +154,5 @@ public:
 
     void report() const;
 };
+
+}  // namespace des
