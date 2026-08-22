@@ -48,11 +48,15 @@ namespace des {
 
 
 using SimTime=double;
-using EntityId=int;
+// v7: was int. A long run mints entities faster than you would think -- the
+// M/M/1 example alone makes 20,000 in 20,000 minutes -- and an overflowing id
+// would silently start colliding with live entities in the id-keyed maps. This
+// costing one line is the whole reason SimTime and EntityId were aliases in v1.
+using EntityId = long long;
 
 // v4 adds WarmUpEnd and Observe. The run() switch is now six cases -- see the
 // note at the bottom of SimulationSystem::run() for why it is still a switch.
-enum class EventType {Arrival, StartService, Departure, EndSimulation, WarmUpEnd, Observe};
+enum class EventType {Arrival, StartService, Departure, EndSimulation, WarmUpEnd, Observe, Renege};
 enum class QueueDiscipline {FIFO, LIFO, Priority, Random, SPT, EDD};
 enum class ResourceState {Idle, Busy};
 

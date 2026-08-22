@@ -3,11 +3,12 @@
 Written from the simulation theory table up, as a way of learning OOP and system
 design rather than as a way of getting a simulator.
 
-**Current state: v6.** A flowchart simulator in the spirit of Arena's Basic
+**Current state: v7.** A flowchart simulator in the spirit of Arena's Basic
 Process template — Process, Delay, Assign, Decide, Batch, Separate, Record,
-Dispose — with warm-up removal, replications and confidence intervals. Refuses
-to run an unstable model, and works out the offered load by walking the
-flowchart rather than assuming every block sees every entity. Builds clean under
+Dispose — with **shared resources**, balking and reneging, warm-up removal,
+replications and confidence intervals. Refuses to run an unstable model, working
+out the offered load by walking the flowchart and summing across every block that
+shares a resource. Builds clean under
 `-Wall -Wextra -Wpedantic` and ASan/UBSan; 160/160 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
@@ -142,6 +143,7 @@ need to read the engine's source to build a model with it.
 | `V4_READLOG.md` | Warm-up removal, Welch's method, confidence intervals |
 | `V5_READLOG.md` | The ergonomics pass: namespace, factories, ModelError, ρ check |
 | `V6_READLOG.md` | Flowchart blocks, INode, and why NodeContext beat a wider public interface |
+| `V7_READLOG.md` | Shared resources, balking, reneging, N-way Decide |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
 ## Layout
@@ -251,19 +253,20 @@ two and every time-average goes quietly wrong with no error.
 
 ---
 
-# v7 — the order to do it in
+# v8 — the order to do it in
 
-1. **Resource sets and transfer.** One Process currently owns its servers.
-   Real systems share an operator across three machines, and Arena models that
-   with a Resource that several blocks can seize.
-2. **Common random numbers**, then **antithetic variates.** Narrower intervals
-   for the same compute; `constant()` already draws nothing from the stream,
-   which is a precondition for the pairing.
-3. **Balking and reneging.** Customers who refuse a long queue, or give up
-   waiting. Now straightforward: they are node behaviour, and nodes carry state.
-4. **Config file input.** `ModelError` gave it a validation story in v5 and v6
-   gave it a graph to describe. This is finally worth building.
-5. **Conditional routing on more than two branches** — an N-way Decide with a
-   list of (condition, target).
-6. **Batch by attribute** — group only entities that match, e.g. same lot number.
-7. **Widen `EntityId`** — a plain `int` overflows on a very long run. One line.
+1. **Common random numbers**, then antithetic variates. Narrower intervals for
+   the same compute, and the last big statistical technique missing.
+   `constant()` already draws nothing from the stream, which is the precondition.
+2. **Resource schedules** — a nurse who goes off shift at 5pm. Arena has it and
+   it is genuinely useful; it needs a capacity that varies with time, which
+   interacts with every ρ calculation in the model.
+3. **Preemption** — a high-priority entity taking a resource off a low-priority
+   one mid-service. Note that lazy cancellation does *not* solve this one: the
+   interrupted entity has to go back into a queue carrying its remaining service
+   time.
+4. **Config file input.** The validation story has been in place since v5 and the
+   graph to describe since v6. Nothing is blocking it any more.
+5. **Batch by attribute** — group only entities that match, e.g. same lot number.
+6. **Batch means** — one long run split into batches, as an alternative to
+   independent replications when the warm-up is expensive to repeat.

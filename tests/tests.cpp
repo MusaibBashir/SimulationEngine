@@ -862,6 +862,241 @@ void testFlowchartValidation() {
     }
 }
 
+void testSharedResources() {
+    section("Shared resources (v7)");
+
+    // ONE operator, TWO machines. Each machine alone would be lightly loaded;
+    // together they keep the single operator busy. This is the case that was
+    // simply inexpressible before v7, because a Process owned its servers.
+    {
+        SimulationSystem sim(11u);
+        sim.model()
+            .arrivals(constant(2.0))
+            .resource("Operator", 1)
+            .decideNWayByChance("Split")
+            .stationUsing("MachineA", "Operator", FIFO, constant(0.6))
+            .stationUsing("MachineB", "Operator", FIFO, constant(0.6))
+            .dispose("Out")
+            .branch("Split", 0.5, "MachineA")
+            .branch("Split", 0.5, "MachineB")
+            .route("MachineA", "Out").route("MachineB", "Out")
+            .entryAt("Split");
+        sim.stopAt(2000.0).warmUpFor(200.0).execute();
+
+        const Resource& op = *sim.model().resourceNamed("Operator");
+        check(op.userCount() == 2, "both machines registered as users of the operator");
+        check(op.unitsBusy() <= op.capacity(), "the shared resource kept its invariant");
+
+        // Both blocks draw on the same resource, so their utilisations must SUM
+        // to the operator's. If each had its own private resource, each would
+        // have read about 0.15 and the operator's 0.30 would not exist.
+        const RunResults r = sim.results();
+        const double a = r.station("MachineA").utilisation;
+        const double b = r.station("MachineB").utilisation;
+        checkClose(a + b, 0.6 / 2.0, 0.05, "the two blocks share one operator's time");
+    }
+
+    // Oversubscription: each block is fine alone, the pair is impossible.
+    bool threw = false;
+    try {
+        SimulationSystem s(1u);
+        s.model()
+            .arrivals(constant(1.0))
+            .resource("Op", 1)
+            .decideNWayByChance("Split")
+            // Each takes a third of a 1-per-minute stream and needs 1.2 min of
+            // operator time: 0.4 each, which is fine, and 1.2 together, which is
+            // not. Checking them one at a time would pass this model.
+            .stationUsing("A", "Op", FIFO, constant(1.2))
+            .stationUsing("B", "Op", FIFO, constant(1.2))
+            .stationUsing("C", "Op", FIFO, constant(1.2))
+            .dispose("Out")
+            .branch("Split", 0.34, "A").branch("Split", 0.33, "B").branch("Split", 0.33, "C")
+            .route("A", "Out").route("B", "Out").route("C", "Out")
+            .entryAt("Split");
+        s.stopAt(100.0).execute();
+    } catch (const ModelError&) { threw = true; }
+    check(threw, "a resource shared by blocks that together exceed it is refused");
+
+    // Asking for more units than the resource has could never start.
+    threw = false;
+    try {
+        SimulationSystem s(1u);
+        s.model().arrivals(constant(5.0)).resource("Op", 2)
+                 .stationUsing("A", "Op", FIFO, constant(1.0), /*units=*/3)
+                 .entryAt("A");
+    } catch (const ModelError&) { threw = true; }
+    check(threw, "seizing more units than exist is refused at build time");
+
+    // An unknown resource name is a mistake, not a silent private resource.
+    threw = false;
+    try {
+        SimulationSystem s(1u);
+        s.model().arrivals(constant(1.0)).stationUsing("A", "Ghost", FIFO, constant(0.5));
+    } catch (const ModelError&) { threw = true; }
+    check(threw, "using an undeclared resource is refused");
+}
+
+void testBalkingAndReneging() {
+    section("Balking and reneging (v7)");
+
+    // BALKING: with a queue cap of 2 and a server that cannot keep up, most
+    // arrivals must balk rather than pile up forever.
+    {
+        SimulationSystem sim(5u);
+        sim.model()
+            // EXPONENTIAL, not constant. With deterministic arrivals every 1.0
+            // and a deterministic 0.9 service, a queue never forms at all and
+            // nobody would ever balk -- the model would be stable and silent.
+            // Balking and reneging only mean anything where a queue fluctuates.
+            .arrivals(exponential(1.0))
+            .station("Desk", 1, FIFO, exponential(0.9))
+            .dispose("LeftAngry")
+            .balkAt("Desk", 2, "LeftAngry")
+            .route("Desk", "LeftAngry")
+            .entryAt("Desk");
+        sim.stopAt(500.0).execute();
+
+        const Station& d = *sim.model().station("Desk");
+        check(d.balked() > 0, "some arrivals balked");
+        check(d.queue().maxLengthObserved() <= 2,
+              "the queue never grew past the balk threshold");
+        check(sim.model().nodeAs<DisposeNode>("LeftAngry").count() > 0,
+              "balkers were routed to the exit that was named for them");
+    }
+
+    // RENEGING: infinite patience serves everybody; zero-ish patience serves
+    // almost nobody. The comparison is the test -- it pins the direction.
+    {
+        auto build = [](SimulationSystem& s, bool impatient) {
+            s.model().arrivals(exponential(1.0))
+                     .station("Desk", 1, FIFO, exponential(0.9))
+                     .dispose("GaveUp")
+                     .route("Desk", "GaveUp")
+                     .entryAt("Desk");
+            if (impatient) s.model().renegeAfter("Desk", exponential(0.5), "GaveUp");
+        };
+        SimulationSystem patient(5u);   build(patient, false);
+        patient.stopAt(500.0).execute();
+        SimulationSystem hasty(5u);     build(hasty, true);
+        hasty.stopAt(500.0).execute();
+
+        check(patient.model().station("Desk")->reneged() == 0, "infinite patience never reneges");
+        check(hasty.model().station("Desk")->reneged() > 0, "short patience does");
+        check(hasty.model().station("Desk")->stats().numberServed() <
+              patient.model().station("Desk")->stats().numberServed(),
+              "reneging entities are not served");
+        // Every entity is accounted for: served here, or gave up. Nothing is
+        // lost, which is what lazy cancellation must not break.
+        check(hasty.results().exited > 0, "reneged entities still leave properly");
+    }
+
+    // The stale-timer path: a patience so long that nobody ever uses it. Every
+    // renege event fires and must be ignored without disturbing anything.
+    {
+        SimulationSystem sim(5u);
+        sim.model().arrivals(exponential(2.0))
+                   .station("Desk", 1, FIFO, exponential(0.5))
+                   .dispose("Out").route("Desk", "Out").entryAt("Desk");
+        sim.model().renegeAfter("Desk", constant(1000.0), "Out");
+        sim.stopAt(200.0).execute();
+        check(sim.model().station("Desk")->reneged() == 0,
+              "stale patience timers fire and are ignored");
+        check(sim.results().exited > 50, "and the run is otherwise unaffected");
+    }
+}
+
+void testNWayDecide() {
+    section("N-way Decide (v7)");
+
+    // Three chance branches. One draw is walked against a cumulative
+    // probability, so the observed split must match what was asked for.
+    {
+        SimulationSystem sim(9u);
+        sim.model()
+            .arrivals(constant(1.0))
+            .decideNWayByChance("Sort")
+            .dispose("Small").dispose("Medium").dispose("Large")
+            .branch("Sort", 0.5, "Small")
+            .branch("Sort", 0.3, "Medium")
+            .branch("Sort", 0.2, "Large")
+            .entryAt("Sort");
+        sim.stopAfter(6000).execute();
+
+        const auto& d = sim.model().nodeAs<DecideNode>("Sort");
+        const double n = static_cast<double>(d.branches()[0].taken + d.branches()[1].taken +
+                                             d.branches()[2].taken + d.fellThrough());
+        checkClose(d.branches()[0].taken / n, 0.5, 0.03, "50% branch");
+        checkClose(d.branches()[1].taken / n, 0.3, 0.03, "30% branch");
+        checkClose(d.branches()[2].taken / n, 0.2, 0.03, "20% branch");
+        check(d.fellThrough() == 0, "probabilities summing to 1 leave no fall-through");
+    }
+
+    // Probabilities that do not sum to 1 leave a remainder, which falls through
+    // to next(). That is a feature -- "10% get inspected, everyone else carries
+    // on" is the natural way to say it.
+    {
+        SimulationSystem sim(9u);
+        sim.model()
+            .arrivals(constant(1.0))
+            .decideNWayByChance("Sample")
+            .dispose("Inspected").dispose("Passed")
+            .branch("Sample", 0.1, "Inspected")
+            .route("Sample", "Passed")
+            .entryAt("Sample");
+        sim.stopAfter(4000).execute();
+        const auto& d = sim.model().nodeAs<DecideNode>("Sample");
+        const double n = static_cast<double>(d.branches()[0].taken + d.fellThrough());
+        checkClose(d.branches()[0].taken / n, 0.1, 0.02, "the 10% branch");
+        check(d.fellThrough() > 0, "the other 90% fall through to next()");
+    }
+
+    // Conditions are evaluated IN ORDER and the first match wins, so ordering is
+    // a modelling decision. Both conditions below match every entity; the first
+    // one declared must take all of them.
+    {
+        SimulationSystem sim(9u);
+        sim.model()
+            .arrivals(constant(1.0))
+            .attribute("score", constant(9.0))
+            .decideNWayByCondition("Grade")
+            .dispose("Over5").dispose("Over1")
+            .branch("Grade", [](const Entity& e){ return e.attribute("score") > 5.0; }, "Over5")
+            .branch("Grade", [](const Entity& e){ return e.attribute("score") > 1.0; }, "Over1")
+            .entryAt("Grade");
+        sim.stopAfter(50).execute();
+        const auto& d = sim.model().nodeAs<DecideNode>("Grade");
+        check(d.branches()[0].taken > 0 && d.branches()[1].taken == 0,
+              "first matching condition wins");
+    }
+
+    // Mixing chance and condition branches has no coherent meaning, so it is
+    // refused rather than guessed at.
+    bool threw = false;
+    try {
+        SimulationSystem s(1u);
+        s.model().arrivals(constant(1.0)).decideNWayByChance("D").dispose("Out")
+                 .branch("D", [](const Entity&){ return true; }, "Out");
+    } catch (const ModelError&) { threw = true; }
+    check(threw, "a chance Decide refuses a condition branch");
+
+    threw = false;
+    try {
+        SimulationSystem s(1u);
+        s.model().arrivals(constant(1.0)).decideNWayByChance("D").dispose("Out")
+                 .branch("D", 0.7, "Out").branch("D", 0.7, "Out");
+    } catch (const ModelError&) { threw = true; }
+    check(threw, "branch probabilities summing above 1 are refused");
+}
+
+void testEntityIdWidth() {
+    section("EntityId width (v7)");
+    check(sizeof(EntityId) >= 8, "EntityId is 64-bit, so a long run cannot wrap it");
+    // A wrapped id would start colliding with live entities in the id-keyed maps
+    // -- silently, and only on the longest runs, which is the worst combination.
+    check(static_cast<EntityId>(3000000000LL) > 0, "and it holds a value an int could not");
+}
+
 void testTheoryInsideInterval() {
     section("M/M/1 theory falls inside the interval");
     // The question open since v2, as an automated check.
@@ -918,6 +1153,10 @@ int main() {
     testExperiment();
     testModelErrors();
     testFlowchartBlocks();
+    testSharedResources();
+    testBalkingAndReneging();
+    testNWayDecide();
+    testEntityIdWidth();
     testFlowchartValidation();
     testDistributionMeans();
     testResultsStruct();

@@ -42,6 +42,13 @@ void EntityQueue::push(Entity* e) {
     }
 }
 
+bool EntityQueue::remove(Entity* e) {
+    for (auto it = m_waiting.begin(); it != m_waiting.end(); ++it) {
+        if (*it == e) { m_waiting.erase(it); return true; }
+    }
+    return false;
+}
+
 Entity* EntityQueue::pop() {
     if (isEmpty()) return nullptr;   // the documented contract
 

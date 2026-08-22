@@ -5,6 +5,60 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [7.0.0] — 2026-08-22 — "The servers stop belonging to one block"
+
+### Added
+
+- **Shared resources.** `Model::resource(name, capacity)` declares them and
+  `stationUsing(block, resource, discipline, service, units)` seizes them.
+  Several Process blocks can share one pool — "two nurses covering both triage
+  and the vaccination room" was inexpressible before. When a unit frees, it goes
+  to the block holding the **longest-waiting** entity (global FCFS); the rule is
+  documented in the header because the alternative (fixed block priority) is
+  equally defensible and gives different answers.
+- **Balking**: `balkAt(process, queueLength, target)` — refuse to join a queue
+  already that long.
+- **Reneging**: `renegeAfter(process, patience, target)` — join, wait, give up.
+  Implemented by **lazy cancellation**: the timer fires regardless and the block
+  asks whether the entity is still queued. A binary heap cannot remove an
+  arbitrary element, which `FutureEventList.hpp` has said since v1 — and it
+  turns out that file did not have to change.
+- **N-way Decide**: `decideNWayByChance/ByCondition` plus `branch()`. One draw
+  walked against a cumulative probability; leftover probability falls through to
+  `route()`; conditions are evaluated in order, first match wins. All-chance or
+  all-condition, never mixed — refused rather than guessed at.
+- `IResourceUser`, so a shared resource can ask its candidates who has waited
+  longest rather than guess.
+
+### Changed
+
+- `EntityId` is `long long` (was `int`). One line, because it was an alias from
+  v1 — which is the whole argument for those aliases.
+- `validate()` sums offered load across every block sharing a resource: two
+  blocks at ρ = 0.6 each are fine alone and impossible together.
+- `Model` owns the resources; `Station` holds a non-owning pointer, and the Model
+  resets them exactly once.
+
+### Fixed
+
+- **Per-station utilisation double-counted a shared resource.** Each block fed
+  `resource().unitsBusy()` into its statistics — this block's own usage for a
+  private resource, and the *total across every user* for a shared one, so two
+  blocks sharing an operator each reported the whole pool and the two summed to
+  twice the truth. A block now measures `unitsHeld()`. Caught by the very first
+  test written against shared resources.
+
+### Verified
+
+- **215/215 checks** (189 in v6); clean under `-Wall -Wextra -Wpedantic` and
+  `-fsanitize=address,undefined`; every v1–v6 example reproduces its numbers.
+- Three of the new balking/reneging tests failed first and the *tests* were
+  wrong: they used constant arrivals and constant service, a D/D/1 queue where
+  no queue ever forms, so nobody could balk. Balking and reneging only mean
+  anything where a queue fluctuates.
+
+---
+
 ## [6.0.0] — 2026-08-22 — "A model is a flowchart"
 
 A model is now a graph of blocks in the spirit of Arena's Basic Process template,
@@ -589,13 +643,15 @@ filling the bodies is v2.
 
 ---
 
-## [Unreleased] — v7
+## [Unreleased] — v8
 
-1. **Resource sets** — one operator shared across several Process blocks. The
-   biggest remaining modelling gap: a Process currently owns its servers.
-2. **Common random numbers**, then antithetic variates.
-3. **Balking and reneging** — now straightforward, since blocks carry state.
-4. **Config file input** — `ModelError` gave it a validation story, v6 gave it a
-   graph to describe.
-5. **N-way Decide** and **batch by attribute**.
-6. **Widen `EntityId`.**
+1. **Common random numbers**, then antithetic variates — narrower intervals for
+   the same compute. `constant()` already draws nothing from the stream.
+2. **Resource schedules** — a nurse who goes off shift at 5pm. Needs a capacity
+   that varies with time, which interacts with every rho calculation.
+3. **Preemption** — a high-priority entity taking a resource mid-service. Lazy
+   cancellation does not help: the interrupted entity must requeue with its
+   remaining service time.
+4. **Config file input** — the validation story has been in place since v5.
+5. **Batch by attribute** — group only entities that match.
+6. **Batch means** as an alternative to independent replications.

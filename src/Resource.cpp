@@ -26,6 +26,7 @@
 // [4] The const getters stayed inline in the header. Nothing else belongs here.
 
 #include "Resource.hpp"
+#include "Node.hpp"
 #include <cassert>
 #include <utility>
 
@@ -40,6 +41,29 @@ Resource::Resource(std::string name, int capacity)
 void Resource::reset() {
     m_unitsBusy = 0;
     // Name and capacity are model configuration, not run state -- they survive.
+}
+
+void Resource::addUser(IResourceUser* user) {
+    assert(user != nullptr);
+    m_users.push_back(user);
+}
+
+void Resource::offerFreedUnit(NodeContext& ctx) {
+    // Repeat while units remain and somebody is waiting: releasing several units
+    // at once, or a block whose start frees nothing, both need another pass.
+    while (isAvailable()) {
+        IResourceUser* best = nullptr;
+        SimTime earliest = 0.0;
+        for (IResourceUser* u : m_users) {
+            if (!u->hasWaiting()) continue;
+            const SimTime since = u->headOfLineSince();
+            if (best == nullptr || since < earliest) { best = u; earliest = since; }
+        }
+        if (best == nullptr) return;      // nobody waiting anywhere
+        const int before = m_unitsBusy;
+        best->startFromQueue(ctx);
+        if (m_unitsBusy == before) return;   // it declined; stop rather than spin
+    }
 }
 
 void Resource::seize(int units) {

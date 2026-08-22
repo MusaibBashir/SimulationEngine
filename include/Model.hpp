@@ -51,6 +51,11 @@ public:
 
 private:
     std::vector<std::unique_ptr<INode>> m_nodes;      // the Model OWNS them
+
+    // v7: the Model owns the resources, not the Process blocks. That is what
+    // makes "one operator shared across three machines" expressible -- several
+    // blocks can point at the same Resource and compete for it.
+    std::vector<std::unique_ptr<Resource>> m_resources;
     std::vector<Station*> m_processes;                // non-owning, for reports
     std::vector<ArrivalAttribute> m_arrivalAttributes;
     std::unique_ptr<IDistribution> m_interarrival;
@@ -76,8 +81,37 @@ public:
     // Each returns *this so a whole flowchart reads as one statement. Where you
     // need the node itself (to configure it further) the typed accessors below
     // fetch it by name.
+    // Declare a shared resource. Several Process blocks may then seize it.
+    Model& resource(const std::string& name, int capacity);
+    Resource* resourceNamed(const std::string& name);
+    const Resource* resourceNamed(const std::string& name) const;
+
+    // A Process with its OWN private resource of the given capacity -- the v3
+    // through v6 behaviour, and still the right thing for a plain queue.
     Model& station(const std::string& name, int capacity,
                    QueueDiscipline discipline, std::unique_ptr<IDistribution> service);
+
+    // A Process that seizes `units` of an already-declared SHARED resource.
+    Model& stationUsing(const std::string& name, const std::string& resourceName,
+                        QueueDiscipline discipline, std::unique_ptr<IDistribution> service,
+                        int units = 1);
+
+    // v7: balking and reneging, configured on an existing Process block.
+    //   balk    -- refuse to join a queue already this long
+    //   renege  -- join, then give up after a random patience
+    // Passing an empty target name means "leaves the system".
+    Model& balkAt(const std::string& processName, std::size_t queueLength,
+                  const std::string& balkTo = "");
+    Model& renegeAfter(const std::string& processName,
+                       std::unique_ptr<IDistribution> patience,
+                       const std::string& renegeTo = "");
+
+    // v7: N-way Decide. Start one, then add branches in order.
+    Model& decideNWayByChance(const std::string& name);
+    Model& decideNWayByCondition(const std::string& name);
+    Model& branch(const std::string& decideName, double probability, const std::string& to);
+    Model& branch(const std::string& decideName, DecideNode::Condition condition,
+                  const std::string& to);
     Model& process(const std::string& name, int capacity,
                    QueueDiscipline discipline, std::unique_ptr<IDistribution> service) {
         return station(name, capacity, discipline, std::move(service));

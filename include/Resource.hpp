@@ -59,16 +59,38 @@
 
 #pragma once
 #include <string>
+#include <vector>
+#include <cstddef>
 #include "Common.hpp"
 
 namespace des {
 
+
+class NodeContext;
+
+// v7: something that seizes this resource and may have entities waiting for it.
+// A shared resource must decide WHICH waiting queue gets the freed unit, and it
+// cannot do that without asking the candidates.
+class IResourceUser {
+public:
+    virtual ~IResourceUser() = default;
+    virtual bool hasWaiting() const = 0;
+    // When the longest-waiting entity in this user's queue started waiting.
+    virtual SimTime headOfLineSince() const = 0;
+    // Take the resource and begin serving. Only called when a unit is free.
+    virtual void startFromQueue(NodeContext& ctx) = 0;
+};
 
 class Resource{
     private:
         std::string m_name;
         int m_capacity;
         int m_unitsBusy; // INVARIANT: 0 <= m_unitsBusy <= m_capacity
+
+        // v7: the blocks that seize this resource. Non-owning -- the Model owns
+        // both. Empty for a resource used by exactly one block, which is every
+        // model written before v7.
+        std::vector<IResourceUser*> m_users;
     
     public:
         // Sink parameter: taken BY VALUE (no const!) so std::move in the
@@ -87,6 +109,21 @@ class Resource{
         // previous replication -- and if capacity is 1, the server is busy
         // forever and the second run serves NOBODY.
         void reset();
+
+        // v7: register a block as a user of this resource.
+        void addUser(IResourceUser* user);
+        std::size_t userCount() const { return m_users.size(); }
+
+        // v7: a unit has just been freed. Offer it to whichever waiting block
+        // has the entity that has been waiting LONGEST -- global first-come
+        // first-served across every queue that shares this resource.
+        //
+        // That rule is a MODELLING DECISION, not an implementation detail. The
+        // alternative -- fixed block priority, so machine A always beats machine
+        // B -- is equally defensible and gives different answers. FCFS is chosen
+        // because it is the one people assume when they do not say, and it is
+        // documented here so nobody has to read the code to find out.
+        void offerFreedUnit(NodeContext& ctx);
 
         void seize(int units = 1);
         void release(int units = 1);

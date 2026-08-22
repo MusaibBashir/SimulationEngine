@@ -68,6 +68,11 @@ public:
     // asserts -- a discipline that cannot choose must not silently lose an
     // entity, which is exactly the bug v2 shipped.
     Entity* pop();
+
+    // v7: pull one specific entity out, wherever it is in the line. Returns
+    // false if it is not there -- which is the normal case for a renege timer
+    // that fired after the entity was already served.
+    bool remove(Entity* e);
 };
 
 }  // namespace des

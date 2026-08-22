@@ -77,6 +77,7 @@ directory. Run them from a directory you don't mind cluttering.
 | 09 | `09_capacity_decision.cpp` | Using all of it to actually decide something. |
 | 10 | `10_stopping_and_tracing.cpp` | Termination rules, trace files, priorities, seeds. |
 | 11 | `11_flowchart_line.cpp` | **The full block set**: Assign, Delay, Decide, Batch, Separate, Record, Dispose. Branching and batching. |
+| 12 | `12_shared_resources.cpp` | **Shared resources**, balking, reneging, N-way Decide. |
 
 If you are short of time: **01, 02, 08**. Those three are the difference between
 using the tool correctly and producing confident nonsense. Then **11** if your
@@ -160,11 +161,15 @@ A model is a **flowchart**. Each block does one job and passes the entity on.
 
 | Block | Does | Takes time? |
 |---|---|---|
-| `station(name, capacity, discipline, service)` | **Process**: seize a resource, delay, release. Also spelled `process()`. | yes, and queues |
+| `resource(name, capacity)` | Declare people or machines that blocks can share. | — |
+| `station(name, capacity, discipline, service)` | **Process** with its own private resource. Also spelled `process()`. | yes, and queues |
+| `stationUsing(name, resource, discipline, service, units)` | **Process** that seizes a **shared** resource. | yes, and queues |
 | `delay(name, duration)` | Hold for a time, **no resource** — transport, curing, paperwork. No queue, no contention. | yes, never queues |
 | `assign(name, attribute, value)` | Set an attribute. Call again with the same block name to add more. | no |
-| `decideByChance(name, p)` | Branch with probability `p` to the true side. | no |
-| `decideByCondition(name, pred)` | Branch on a `bool(const Entity&)` predicate. | no |
+| `decideByChance(name, p)` | Two-way branch with probability `p`. | no |
+| `decideByCondition(name, pred)` | Two-way branch on a `bool(const Entity&)` predicate. | no |
+| `decideNWayByChance(name)` + `branch(name, p, to)` | N-way. Leftover probability falls through to `route()`. | no |
+| `decideNWayByCondition(name)` + `branch(name, pred, to)` | N-way. **First match wins, so order matters.** | no |
 | `batch(name, size, permanent)` | Accumulate `size` entities into one. | holds them |
 | `separate(name)` | Split a temporary batch back into members. | no |
 | `duplicate(name, copies)` | Send the original plus `copies` clones onward. | no |
@@ -178,6 +183,8 @@ A model is a **flowchart**. Each block does one job and passes the entity on.
 | `route("A", "B")` | After A, go to B. For a Decide this is the **false** branch. |
 | `routeTrue("Decide", "B")` | A Decide's **true** branch. |
 | `entryAt("A")` | Where arrivals land. Defaults to the first block added. |
+| `balkAt(process, length, to)` | Refuse to join a queue already this long. |
+| `renegeAfter(process, patience, to)` | Join, wait, then give up. |
 | `nodeAs<T>("name")` | Fetch a block back to read its counters. Throws if absent or the wrong kind. |
 | `visitRatios()` | How many times an average entity reaches each block. |
 | `offeredLoad(station)` | ρ for that block, **following the flowchart**. |
@@ -190,6 +197,22 @@ sim.model().nodeAs<BatchNode>("Packing").batchesFormed();
 sim.model().nodeAs<RecordNode>("Age").average();
 sim.model().nodeAs<DisposeNode>("Shipped").count();
 ```
+
+**Sharing a resource.** Declare it once, then point several blocks at it:
+
+```cpp
+.resource("Nurse", 2)
+.stationUsing("Triage",      "Nurse", PRIORITY, exponential(3.0))
+.stationUsing("Vaccination", "Nurse", FIFO,     exponential(5.0))
+```
+
+When a nurse frees up she goes to whichever queue holds the **longest-waiting**
+entity — global first-come first-served across the pool. Each block reports the
+fraction of the *pool* it consumed, so the two shares **sum** to the pool's
+utilisation. Neither figure alone tells you whether to hire a third nurse.
+
+The stability check sums across the pool too: two blocks at ρ = 0.6 each are fine
+alone and impossible together.
 
 **Permanent vs temporary `batch`** is the decision to get right. *Permanent*
 consumes the members — ten parts become one assembly, and there is nothing to
@@ -303,6 +326,14 @@ done nothing. Anything that is *your* mistake must be checked in every build;
 ---
 
 ## Mistakes to avoid
+
+**Reading one block's utilisation as its resource's.** With a shared pool, each
+block reports only the share *it* consumed. Add them up.
+
+**Testing balking or reneging with constant arrivals and service.** A D/D/1 queue
+with ρ < 1 never forms a queue at all, so nobody ever balks and nothing reneges.
+Those behaviours only mean anything where a queue **fluctuates** — use
+`exponential`. (Three of the engine's own tests got this wrong first.)
 
 **Assuming every block sees every entity.** It doesn't, once you branch or
 batch. `offeredLoad()` walks the flowchart — a station behind a 10% branch sees a

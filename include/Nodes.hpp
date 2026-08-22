@@ -75,22 +75,38 @@ public:
 class DecideNode : public INode {
 public:
     using Condition = std::function<bool(const Entity&)>;
+
+    // v7: a Decide is now N-way. Each branch is either a probability or a
+    // predicate; whatever matches no branch falls through to next().
+    struct Branch {
+        double probability{-1.0};   // < 0 means this is a condition branch
+        Condition condition;
+        INode* target{nullptr};
+        long long taken{0};
+    };
+
 private:
     bool m_byChance{true};
-    double m_probability{0.5};   // probability of taking the TRUE branch
-    Condition m_condition;
-    INode* m_ifTrue{nullptr};
-    long long m_tookTrue{0}, m_tookFalse{0};
-public:
-    // byChance: `probability` of going to the true branch.
-    DecideNode(std::string name, double probability);
-    // byCondition: predicate decides.
-    DecideNode(std::string name, Condition condition);
+    std::vector<Branch> m_branches;
+    long long m_fellThrough{0};
 
-    void setTrueBranch(INode* n) { m_ifTrue = n; }
-    INode* trueBranch() const { return m_ifTrue; }
-    // setNext() is the FALSE branch, so a Decide with only a true branch set
-    // falls through to whatever comes next -- which reads the way people expect.
+public:
+    // Two-way shorthands, unchanged from v6.
+    DecideNode(std::string name, double probability);
+    DecideNode(std::string name, Condition condition);
+    // N-way: start empty and add branches.
+    explicit DecideNode(std::string name, bool byChance);
+
+    // *** A Decide is all-chance or all-condition, never mixed. ***
+    // Mixing them has no coherent meaning: chance branches must share one draw
+    // to sum correctly, conditions are evaluated in order, and a reader could
+    // not tell which rule applied to which branch. Refused rather than guessed.
+    DecideNode& addBranch(double probability, INode* target);
+    DecideNode& addBranch(Condition condition, INode* target);
+
+    // The two-way spelling: branch 0 is "true".
+    void setTrueBranch(INode* n);
+    INode* trueBranch() const { return m_branches.empty() ? nullptr : m_branches[0].target; }
 
     void enter(NodeContext& ctx, Entity* e) override;
     void reset() override;
@@ -98,9 +114,11 @@ public:
     std::string describe() const override;
 
     bool isByChance() const { return m_byChance; }
-    double probability() const { return m_probability; }
-    long long tookTrue() const { return m_tookTrue; }
-    long long tookFalse() const { return m_tookFalse; }
+    double probability() const { return m_branches.empty() ? 0.0 : m_branches[0].probability; }
+    const std::vector<Branch>& branches() const { return m_branches; }
+    long long fellThrough() const { return m_fellThrough; }
+    long long tookTrue() const { return m_branches.empty() ? 0 : m_branches[0].taken; }
+    long long tookFalse() const;
 };
 
 // ---------------------------------------------------------------------------

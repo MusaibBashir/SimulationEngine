@@ -79,6 +79,10 @@ void NodeContext::scheduleReturn(SimTime at, Entity* e, INode* node) {
     m_sim.scheduleEvent(EventType::Departure, at, e, node);
 }
 
+void NodeContext::scheduleRenegeCheck(SimTime at, Entity* e, INode* node) {
+    m_sim.scheduleEvent(EventType::Renege, at, e, node);
+}
+
 // ------------------------------------------------------------------ state --
 
 std::size_t SimulationSystem::stillWaitingCount() const {
@@ -106,9 +110,11 @@ void SimulationSystem::refreshState() {
 void SimulationSystem::updateAllIntegrals(SimTime upTo) {
     for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
         Station& s = m_model.stationAt(i);
+        // unitsHeld(), not resource().unitsBusy(): with a shared resource the
+        // latter is the total across every block using it.
         s.stats().updateTimeIntegrals(upTo,
                                       static_cast<int>(s.queue().length()),
-                                      s.resource().unitsBusy());
+                                      s.unitsHeld());
     }
     m_stats.updateTimeIntegrals(upTo, m_state.numberInQueue(), m_state.numberInSystem());
 }
@@ -196,6 +202,16 @@ void SimulationSystem::run() {
             case EventType::EndSimulation: return;
             case EventType::WarmUpEnd:     handleWarmUpEnd();       break;
             case EventType::Observe:       handleObservation();     break;
+            case EventType::Renege: {
+                // A patience timer. It fires whether or not the entity is still
+                // waiting -- the block checks and ignores it if stale. See
+                // Station::onRenegeTimeout for why nothing is ever cancelled.
+                NodeContext ctx(*this);
+                if (notice.node() && notice.entity())
+                    notice.node()->onRenegeTimeout(ctx, notice.entity());
+                refreshState();
+                break;
+            }
             case EventType::StartService:  break;   // reserved
         }
     }

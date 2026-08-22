@@ -73,6 +73,9 @@ public:
     // end of service without ever seeing the future event list.
     void scheduleReturn(SimTime at, Entity* e, INode* node);
 
+    // v7: come back at `at` to check whether this entity is still waiting.
+    void scheduleRenegeCheck(SimTime at, Entity* e, INode* node);
+
     Entity* createEntity();
     void destroy(Entity* e);
 };
@@ -103,6 +106,11 @@ public:
     // A previously scheduled return has come due (end of a service or delay).
     // Nodes that never schedule anything never need this.
     virtual void onScheduledEvent(NodeContext& ctx, Entity* e);
+
+    // v7: a patience timer has expired for an entity that was queued here.
+    // Default: ignore. See Station::onRenegeTimeout for why "ignore" is the
+    // right default rather than an error -- these events are LAZILY CANCELLED.
+    virtual void onRenegeTimeout(NodeContext& /*ctx*/, Entity* /*e*/) {}
 
     // Back to the t=0 condition. Configuration survives, run state does not --
     // the rule every reset() in this project follows.

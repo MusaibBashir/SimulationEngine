@@ -110,44 +110,110 @@ std::string AssignNode::describe() const {
 // ------------------------------------------------------------------ Decide --
 
 DecideNode::DecideNode(std::string name, double probability)
-    : INode(std::move(name)), m_byChance(true), m_probability(probability) {
+    : INode(std::move(name)), m_byChance(true) {
     if (probability < 0.0 || probability > 1.0)
         throw ModelError("decide '" + m_name + "': probability must be in [0,1]");
+    m_branches.push_back(Branch{probability, nullptr, nullptr, 0});
 }
 
 DecideNode::DecideNode(std::string name, Condition condition)
-    : INode(std::move(name)), m_byChance(false), m_condition(std::move(condition)) {
-    if (!m_condition) throw ModelError("decide '" + m_name + "': null condition");
+    : INode(std::move(name)), m_byChance(false) {
+    if (!condition) throw ModelError("decide '" + m_name + "': null condition");
+    m_branches.push_back(Branch{-1.0, std::move(condition), nullptr, 0});
+}
+
+DecideNode::DecideNode(std::string name, bool byChance)
+    : INode(std::move(name)), m_byChance(byChance) {}
+
+DecideNode& DecideNode::addBranch(double probability, INode* target) {
+    if (!m_byChance)
+        throw ModelError("decide '" + m_name + "': this block branches by condition; "
+                         "a Decide is all-chance or all-condition, never mixed");
+    if (probability < 0.0 || probability > 1.0)
+        throw ModelError("decide '" + m_name + "': probability must be in [0,1]");
+    double total = probability;
+    for (const auto& b : m_branches) total += b.probability;
+    if (total > 1.0 + 1e-9)
+        throw ModelError("decide '" + m_name + "': branch probabilities sum to more than 1");
+    m_branches.push_back(Branch{probability, nullptr, target, 0});
+    return *this;
+}
+
+DecideNode& DecideNode::addBranch(Condition condition, INode* target) {
+    if (m_byChance)
+        throw ModelError("decide '" + m_name + "': this block branches by chance; "
+                         "a Decide is all-chance or all-condition, never mixed");
+    if (!condition) throw ModelError("decide '" + m_name + "': null condition");
+    m_branches.push_back(Branch{-1.0, std::move(condition), target, 0});
+    return *this;
+}
+
+void DecideNode::setTrueBranch(INode* n) {
+    if (m_branches.empty())
+        throw ModelError("decide '" + m_name + "': no branch to attach a target to");
+    m_branches[0].target = n;
+}
+
+long long DecideNode::tookFalse() const {
+    long long other = m_fellThrough;
+    for (std::size_t i = 1; i < m_branches.size(); ++i) other += m_branches[i].taken;
+    return other;
 }
 
 void DecideNode::enter(NodeContext& ctx, Entity* e) {
-    const bool takeTrue = m_byChance
-                        ? (ctx.rng().uniform(0.0, 1.0) < m_probability)
-                        : m_condition(*e);
-    if (takeTrue) ++m_tookTrue; else ++m_tookFalse;
+    Branch* chosen = nullptr;
 
-    INode* target = takeTrue ? m_ifTrue : m_next;
+    if (m_byChance) {
+        // ONE draw, walked against a cumulative probability. Drawing once per
+        // branch would burn several random numbers and, worse, would not give
+        // the branch probabilities you actually asked for.
+        const double u = ctx.rng().uniform(0.0, 1.0);
+        double cumulative = 0.0;
+        for (auto& b : m_branches) {
+            cumulative += b.probability;
+            if (u < cumulative) { chosen = &b; break; }
+        }
+    } else {
+        // First matching condition wins, so ORDER IS MEANINGFUL. Put the most
+        // specific condition first.
+        for (auto& b : m_branches) {
+            if (b.condition(*e)) { chosen = &b; break; }
+        }
+    }
+
+    INode* target = m_next;
+    if (chosen) { ++chosen->taken; target = chosen->target; }
+    else        { ++m_fellThrough; }
+
     if (ctx.trace().isOn()) {
         ctx.trace().event(ctx.now(), "Decide", e->id(), m_name,
-                          std::string(takeTrue ? "true -> " : "false -> ") +
+                          std::string(chosen ? "branch -> " : "fell through -> ") +
                           (target ? target->name() : std::string("exit")), 0, 0);
     }
     ctx.route(e, target);
 }
 
 void DecideNode::resetStatistics(SimTime now) {
-    (void)now; m_tookTrue = 0; m_tookFalse = 0;
+    (void)now;
+    for (auto& b : m_branches) b.taken = 0;
+    m_fellThrough = 0;
 }
 
-void DecideNode::reset() { m_tookTrue = 0; m_tookFalse = 0; }
+void DecideNode::reset() {
+    for (auto& b : m_branches) b.taken = 0;
+    m_fellThrough = 0;
+}
 
 std::string DecideNode::describe() const {
     std::ostringstream os;
-    os << "Decide " << m_name << " [";
-    if (m_byChance) os << "chance " << m_probability;
-    else            os << "condition";
-    os << " ? " << (m_ifTrue ? m_ifTrue->name() : std::string("exit"))
-       << " : " << (m_next ? m_next->name() : std::string("exit")) << "]";
+    os << "Decide " << m_name << " [" << (m_byChance ? "chance" : "condition");
+    for (const auto& b : m_branches) {
+        os << ", ";
+        if (m_byChance) os << b.probability << " -> ";
+        else            os << "when -> ";
+        os << (b.target ? b.target->name() : std::string("exit"));
+    }
+    os << ", else -> " << (m_next ? m_next->name() : std::string("exit")) << "]";
     return os.str();
 }
 

@@ -38,15 +38,97 @@ Model& Model::attribute(const std::string& name, std::unique_ptr<IDistribution> 
     return *this;
 }
 
+Model& Model::resource(const std::string& name, int capacity) {
+    if (resourceNamed(name) != nullptr)
+        throw ModelError("a resource named '" + name + "' already exists");
+    if (capacity < 1) throw ModelError("resource '" + name + "' needs capacity >= 1");
+    m_resources.push_back(std::make_unique<Resource>(name, capacity));
+    return *this;
+}
+
+Resource* Model::resourceNamed(const std::string& name) {
+    for (auto& r : m_resources) if (r->name() == name) return r.get();
+    return nullptr;
+}
+const Resource* Model::resourceNamed(const std::string& name) const {
+    for (const auto& r : m_resources) if (r->name() == name) return r.get();
+    return nullptr;
+}
+
 Model& Model::station(const std::string& name, int capacity,
                       QueueDiscipline discipline, std::unique_ptr<IDistribution> service) {
+    // A private resource named after the block. Every model written before v7
+    // takes this path and behaves exactly as it did.
     requireUnique(name);
     if (capacity < 1) throw ModelError("process '" + name + "' needs capacity >= 1");
-    if (!service)     throw ModelError("process '" + name + "': null service distribution");
-    auto s = std::make_unique<Station>(name, capacity, makeQueueRule(discipline), std::move(service));
+    const std::string resName = name;
+    if (resourceNamed(resName) == nullptr) resource(resName, capacity);
+    return stationUsing(name, resName, discipline, std::move(service), 1);
+}
+
+Model& Model::stationUsing(const std::string& name, const std::string& resourceName,
+                           QueueDiscipline discipline, std::unique_ptr<IDistribution> service,
+                           int units) {
+    requireUnique(name);
+    if (!service) throw ModelError("process '" + name + "': null service distribution");
+    Resource* r = resourceNamed(resourceName);
+    if (r == nullptr)
+        throw ModelError("process '" + name + "': no resource named '" + resourceName +
+                         "' -- declare it with resource() first");
+    auto s = std::make_unique<Station>(name, r, units, makeQueueRule(discipline), std::move(service));
     Station* raw = s.get();
     add(std::move(s));
     m_processes.push_back(raw);
+    return *this;
+}
+
+Model& Model::balkAt(const std::string& processName, std::size_t queueLength,
+                     const std::string& balkTo) {
+    INode* target = nullptr;
+    if (!balkTo.empty()) {
+        target = node(balkTo);
+        if (!target) throw ModelError("balkAt: no block named '" + balkTo + "'");
+    }
+    nodeAs<Station>(processName).setBalking(queueLength, target);
+    return *this;
+}
+
+Model& Model::renegeAfter(const std::string& processName,
+                          std::unique_ptr<IDistribution> patience,
+                          const std::string& renegeTo) {
+    INode* target = nullptr;
+    if (!renegeTo.empty()) {
+        target = node(renegeTo);
+        if (!target) throw ModelError("renegeAfter: no block named '" + renegeTo + "'");
+    }
+    nodeAs<Station>(processName).setReneging(std::move(patience), target);
+    return *this;
+}
+
+Model& Model::decideNWayByChance(const std::string& name) {
+    requireUnique(name);
+    add(std::make_unique<DecideNode>(name, true));
+    return *this;
+}
+
+Model& Model::decideNWayByCondition(const std::string& name) {
+    requireUnique(name);
+    add(std::make_unique<DecideNode>(name, false));
+    return *this;
+}
+
+Model& Model::branch(const std::string& decideName, double probability, const std::string& to) {
+    INode* target = node(to);
+    if (!target) throw ModelError("branch: no block named '" + to + "'");
+    nodeAs<DecideNode>(decideName).addBranch(probability, target);
+    return *this;
+}
+
+Model& Model::branch(const std::string& decideName, DecideNode::Condition condition,
+                     const std::string& to) {
+    INode* target = node(to);
+    if (!target) throw ModelError("branch: no block named '" + to + "'");
+    nodeAs<DecideNode>(decideName).addBranch(std::move(condition), target);
     return *this;
 }
 
@@ -171,6 +253,11 @@ const Station* Model::station(const std::string& name) const {
 }
 
 void Model::reset() {
+    // The resources are reset HERE and only here. They are shared, so leaving it
+    // to the blocks would mean several blocks each resetting the same resource
+    // -- harmless today, and exactly the sort of thing that becomes a bug the
+    // moment reset() does more than zero a counter.
+    for (auto& r : m_resources) r->reset();
     for (auto& n : m_nodes) n->reset();
     if (m_interarrival) m_interarrival->reset();
     for (auto& a : m_arrivalAttributes) a.distribution->reset();
@@ -212,11 +299,26 @@ Model::VisitRatios Model::visitRatios() const {
         if (auto* b = dynamic_cast<const BatchNode*>(it.node))
             out = it.weight / static_cast<double>(b->size());
         if (auto* d = dynamic_cast<const DecideNode*>(it.node)) {
-            double p = 0.5;
-            if (d->isByChance()) p = d->probability();
-            else vr.exact = false;
-            stack.push_back({d->trueBranch(), it.weight * p, it.depth + 1});
-            stack.push_back({d->next(), it.weight * (1.0 - p), it.depth + 1});
+            // v7: N branches. Chance branches carry their own probability and
+            // whatever is left over falls through to next(). Condition branches
+            // cannot be weighted at all -- the split is an OUTPUT of the run --
+            // so the ratios are split evenly and flagged inexact.
+            const auto& bs = d->branches();
+            double assigned = 0.0;
+            if (d->isByChance()) {
+                for (const auto& b : bs) {
+                    stack.push_back({b.target, it.weight * b.probability, it.depth + 1});
+                    assigned += b.probability;
+                }
+            } else {
+                vr.exact = false;
+                const double share = bs.empty() ? 0.0 : 1.0 / static_cast<double>(bs.size() + 1);
+                for (const auto& b : bs) {
+                    stack.push_back({b.target, it.weight * share, it.depth + 1});
+                    assigned += share;
+                }
+            }
+            stack.push_back({d->next(), it.weight * (1.0 - assigned), it.depth + 1});
             continue;
         }
         if (dynamic_cast<const DisposeNode*>(it.node)) continue;
@@ -254,7 +356,7 @@ double Model::offeredLoad(const Station& s) const {
     const auto it = vr.visits.find(&s);
     const double visits = (it == vr.visits.end()) ? 1.0 : it->second;
 
-    return lambda * visits * meanService / s.resource().capacity();
+    return lambda * visits * meanService * s.unitsNeeded() / s.resource().capacity();
 }
 
 void Model::validate() const {
@@ -300,7 +402,30 @@ void Model::validate() const {
     // reaching it. rho >= 1 is not a warning, it is a broken model -- the queue
     // grows for as long as you run, so "average wait" is a function of run
     // length rather than a property of the system.
+    // v7: a SHARED resource must be judged on the TOTAL work reaching every
+    // block that uses it. Two machines each at rho = 0.6 are fine on their own
+    // and impossible if they share one operator -- checking them separately
+    // would pass a model that cannot run.
     const VisitRatios vr = visitRatios();
+    for (const auto& res : m_resources) {
+        double total = 0.0;
+        int users = 0;
+        for (const Station* st : m_processes) {
+            if (&st->resource() != res.get()) continue;
+            if (vr.visits.find(st) == vr.visits.end()) continue;
+            total += offeredLoad(*st);
+            ++users;
+        }
+        if (users > 1 && total >= 1.0) {
+            std::ostringstream os;
+            os << "resource '" << res->name() << "' is oversubscribed: the "
+               << users << " blocks sharing it need a combined offered load of "
+               << total << " (>= 1). Each may look fine alone; together they "
+                  "cannot keep up.";
+            throw ModelError(os.str());
+        }
+    }
+
     for (const Station* st : m_processes) {
         if (vr.visits.find(st) == vr.visits.end()) continue;   // unreachable block
         const double rho = offeredLoad(*st);
