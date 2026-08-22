@@ -1,228 +1,182 @@
 // ============================================================================
-// main.cpp  --  the v1 acceptance test
+// main.cpp  --  v3 demonstrations and acceptance checks
 // ============================================================================
-// Its ONLY job is to prove the objects exist and can be built. Nothing
-// simulates. If this prints, v1 is DONE -- resist adding more.
-//
-// [1] Includes: <iostream>, "SimulationSystem.hpp", "Common.hpp".
-//     (SimulationSystem.hpp already drags in Entity, Resource, EntityQueue.)
-//
-// [2] int main()
-//
-//     [2a] Build a TerminationCondition: 480.0 minutes (an eight-hour day) and
-//          1000 entities.
-//
-//     [2b] Construct a SimulationSystem from it.
-//          // If you accidentally write `SimulationSystem sim2 = sim;` here, you
-//          // should get a COMPILE ERROR -- that is the deleted copy constructor
-//          // from SimulationSystem.hpp [6] doing its job. Try it once on purpose
-//          // and read the error message; then delete the line.
-//
-//     [2c] Resource* teller = sim.addResource("Teller", 1);
-//     [2d] EntityQueue* line = sim.addQueue("TellerQueue", QueueDiscipline::FIFO);
-//
-//     [2e] Entity* a = sim.createEntity();
-//          Entity* b = sim.createEntity();
-//          a->setAttribute("priority", 2.0);
-//          b->setAttribute("priority", 5.0);
-//
-//     [2f] Build one EventNotice: (EventType::Arrival, 5.0, a, teller).
-//
-//     [2g] Print, one per line with std::cout:
-//            a->id() and b->id()             -> expect 1 and 2
-//            a->attribute("priority")        -> expect 2
-//            b->hasAttribute("dueDate")      -> expect 0/false
-//            teller->name(), teller->capacity(), teller->unitsAvailable()
-//                                            -> expect Teller, 1, 1
-//            line->length(), line->isEmpty() -> expect 0, true
-//            notice.time()                   -> expect 5
-//            sim.clock().now()               -> expect 0
-//
-//     [2h] return 0;
-//
-// [3] THE ONE EXTRA CHECK WORTH DOING IN v1 -- it validates the FEL comparator
-//     before any simulation depends on it:
-//       - build three EventNotices with times 10.0, 3.0, 7.0
-//       - schedule all three into a FutureEventList
-//       - popImminent() three times, printing each time
-//       - you MUST see 3, 7, 10.
-//     If you see 10, 7, 3 your operator> is backwards, or you passed std::less.
-//     Finding that here costs two minutes. Finding it in v2, through wrong
-//     statistics, costs an evening.
-//     (This needs popImminent() implemented, so it is technically v2 work --
-//     it is the one stub worth filling early.)
-//
-// ---------------- v1 IS COMPLETE WHEN ----------------
-//   - it compiles with -Wall -Wextra and no warnings
-//   - it prints the expected values above
-//   - nothing simulates
-//
-// ---------------- v2 ADDITION ----------------
-// The v1 storage check above is kept (it is fast and catches structural
-// breakage). Below it, main now:
-//   - re-checks FEL ordering, and adds a TIE-BREAK check for equal event times
-//   - builds and runs an actual M/M/1 model
-//   - prints the report and validates it against Little's Law and against the
-//     closed-form M/M/1 steady-state result
+// Five scenarios, each one checking something the previous version could not:
+//   1. M/M/1        -- validated against Little's Law and closed-form theory
+//   2. M/M/3        -- validated against Erlang-C
+//   3. Deterministic -- hand-checkable, and writes a full trace file
+//   4. Restaurant    -- a CHAIN of stations: host -> waiters -> cashier
+//   5. Replication   -- same seed twice, identical output
+// ============================================================================
 
 #include <iostream>
 #include <iomanip>
 #include <cmath>
+#include <memory>
 #include "SimulationSystem.hpp"
-#include "Common.hpp"
+
+namespace {
+
+void heading(const char* text) {
+    std::cout << "\n############ " << text << " ############\n";
+}
+
+// Build a plain single-queue model. Returns nothing -- it configures `sim`.
+void buildSingleServer(SimulationSystem& sim,
+                       int capacity,
+                       std::unique_ptr<IDistribution> interarrival,
+                       std::unique_ptr<IDistribution> service) {
+    Model& m = sim.model();
+    m.setInterarrival(std::move(interarrival));
+    m.addStation("Server", capacity, QueueDiscipline::FIFO, std::move(service));
+    m.setEntry("Server");
+}
+
+}  // namespace
 
 int main() {
+    std::cout << std::fixed << std::setprecision(4);
+
     // ---------------------------------------------------------------------
-    // v1 acceptance test: the objects exist and store what they were given.
+    // 1. M/M/1.  lambda = 1.0, mu = 1.25, rho = 0.8
+    //    Theory: Wq = rho/(mu-lambda) = 3.2000, Lq = 3.2000, util = 0.8000
     // ---------------------------------------------------------------------
+    heading("1. M/M/1");
     {
-        TerminationCondition term(480.0, 1000);
-        SimulationSystem sim(term);
-
-        Resource*    teller = sim.addResource("Teller", 1);
-        EntityQueue* line   = sim.addQueue("TellerQueue", QueueDiscipline::FIFO);
-
-        Entity* a = sim.createEntity();
-        Entity* b = sim.createEntity();
-        a->setAttribute("priority", 2.0);
-        b->setAttribute("priority", 5.0);
-
-        const EventNotice notice(EventType::Arrival, 5.0, a, teller);
-
-        std::cout << "--- v1 storage check --------------------------------------\n";
-        std::cout << "entity ids               : " << a->id() << ", " << b->id() << "\n";
-        std::cout << "a.priority               : " << a->attribute("priority") << "\n";
-        std::cout << "b.hasAttribute(dueDate)  : " << std::boolalpha << b->hasAttribute("dueDate") << "\n";
-        std::cout << "resource                 : " << teller->name() << ", cap "
-                  << teller->capacity() << ", free " << teller->unitsAvailable() << "\n";
-        std::cout << "queue                    : len " << line->length()
-                  << ", empty " << line->isEmpty() << "\n";
-        std::cout << "notice time              : " << notice.time() << "\n";
-        std::cout << "clock                    : " << sim.clock().now() << "\n";
-    }
-
-    // ---------------------------------------------------------------------
-    // FEL ordering check. Pushed as 10, 3, 7 -- must come back 3, 7, 10.
-    // If this is wrong, operator> is inverted and nothing below can be trusted.
-    // ---------------------------------------------------------------------
-    {
-        FutureEventList fel;
-        fel.schedule(EventNotice(EventType::Arrival, 10.0));
-        fel.schedule(EventNotice(EventType::Arrival,  3.0));
-        fel.schedule(EventNotice(EventType::Arrival,  7.0));
-
-        std::cout << "\n--- FEL ordering check ------------------------------------\n";
-        std::cout << "expect 3 7 10            : ";
-        while (!fel.isEmpty()) std::cout << fel.popImminent().time() << " ";
-        std::cout << "\n";
-    }
-
-    // ---------------------------------------------------------------------
-    // v2: FEL TIE-BREAK check. Three events at the SAME time must come back in
-    // the order they were scheduled. Without this, two runs with the same seed
-    // can diverge and "reproducible" is a claim you cannot make.
-    // ---------------------------------------------------------------------
-    {
-        FutureEventList fel;
-        fel.schedule(EventNotice(EventType::Arrival,   5.0));
-        fel.schedule(EventNotice(EventType::Departure, 5.0));
-        fel.schedule(EventNotice(EventType::Arrival,   5.0));
-
-        std::cout << "expect Arr Dep Arr       : ";
-        while (!fel.isEmpty()) {
-            const EventNotice n = fel.popImminent();
-            std::cout << (n.type() == EventType::Arrival ? "Arr " : "Dep ");
-        }
-        std::cout << "\n";
-    }
-
-    // ---------------------------------------------------------------------
-    // v2: an actual M/M/1 run.
-    //   mean interarrival 1.0 -> lambda = 1.00
-    //   mean service      0.8 -> mu     = 1.25
-    //   rho = lambda/mu = 0.8
-    // Steady-state M/M/1 theory:
-    //   Wq = rho / (mu - lambda) = 0.8 / 0.25 = 3.20
-    //   Lq = lambda * Wq         = 3.20
-    //   utilisation = rho        = 0.80
-    // A finite run will not match exactly -- that is sampling error, not a bug.
-    // ---------------------------------------------------------------------
-    {
-        TerminationCondition term(20000.0, 1000000);
-        SimulationSystem sim(term, /*seed=*/12345u);
-
-        sim.addResource("Teller", 1);
-        sim.addQueue("TellerQueue", QueueDiscipline::FIFO);
-        sim.setModel("Teller", "TellerQueue");
-        sim.setMeanInterarrival(1.0);
-        sim.setMeanService(0.8);
-
+        SimulationSystem sim(12345u);
+        buildSingleServer(sim, 1,
+                          std::make_unique<Exponential>(1.0),
+                          std::make_unique<Exponential>(0.8));
+        sim.setTermination(std::make_unique<TimeLimit>(20000.0));
         sim.initialise();
         sim.run();
-
-        std::cout << "\n";
         sim.report();
 
-        // -----------------------------------------------------------------
-        // LITTLE'S LAW: Lq = lambda_eff * Wq. The single most useful test in
-        // the project. Disagreement means the accumulators are wrong.
-        // -----------------------------------------------------------------
-        const Statistics& st   = sim.statistics();
-        const SimTime total    = sim.clock().now();
-        const double lambdaEff = st.numberArrived() / total;
-        const double Lq        = st.timeAverageQueueLength(total);
-        const double Wq        = st.averageWaitingTime();
-
-        std::cout << std::fixed << std::setprecision(4);
-        std::cout << "\n--- Little's Law check ------------------------------------\n";
-        std::cout << "lambda_eff               : " << lambdaEff << "\n";
-        std::cout << "Lq measured              : " << Lq << "\n";
-        std::cout << "lambda_eff * Wq          : " << lambdaEff * Wq << "\n";
-        std::cout << "relative error           : "
-                  << (Lq > 0.0 ? std::fabs(Lq - lambdaEff * Wq) / Lq : 0.0) << "\n";
-        std::cout << "theory rho=0.8           : Wq 3.2000  Lq 3.2000  util 0.8000\n";
-        std::cout << "-----------------------------------------------------------\n";
+        // LITTLE'S LAW: Lq = lambda_eff * Wq. Holds for ANY queueing system,
+        // which makes it a far better check than comparing to M/M/1 theory.
+        const Station& st  = sim.model().stationAt(0);
+        const SimTime  T   = sim.clock().now();
+        const double lam   = st.stats().numberArrived() / T;
+        const double Lq    = st.stats().timeAverageQueueLength(T);
+        const double Wq    = st.stats().averageWaitingTime();
+        std::cout << "Little's Law   : Lq " << Lq << " vs lambda*Wq " << lam * Wq
+                  << "  (rel err " << (Lq > 0 ? std::fabs(Lq - lam * Wq) / Lq : 0.0) << ")\n";
+        std::cout << "theory         : Wq 3.2000  Lq 3.2000  util 0.8000\n";
     }
 
     // ---------------------------------------------------------------------
-    // v2.1: REPLICATION REPRODUCIBILITY.
-    //
-    // Two runs of the same model, same seed, in the same process, must produce
-    // identical numbers. In v2 they did not: initialise() reset the clock,
-    // stats, state, RNG and delays, but NOT the FEL, the resources or the
-    // queues. The server stayed seized from the first run, so with capacity 1
-    // it was busy forever -- the second replication served ZERO entities while
-    // the queue grew without bound, and printed a plausible-looking report.
-    //
-    // This check is cheap and it guards the whole reset path. Keep it.
+    // 2. M/M/3.  lambda = 1.0, mu = 0.5, c = 3, a = 2, rho = 0.6667
+    //    Erlang-C: P(wait) = 0.4444, Wq = 0.8889, Lq = 0.8889
     // ---------------------------------------------------------------------
+    heading("2. M/M/3 -- multiple servers at one station");
     {
-        TerminationCondition term(2000.0, 1000000);
-        SimulationSystem sim(term, /*seed=*/12345u);
-        sim.addResource("Teller", 1);
-        sim.addQueue("TellerQueue", QueueDiscipline::FIFO);
-        sim.setModel("Teller", "TellerQueue");
-        sim.setMeanInterarrival(1.0);
-        sim.setMeanService(0.8);
-
-        sim.initialise(); sim.run();
-        const int    served1 = sim.statistics().numberServed();
-        const double wait1   = sim.statistics().averageWaitingTime();
-
-        sim.initialise(); sim.run();
-        const int    served2 = sim.statistics().numberServed();
-        const double wait2   = sim.statistics().averageWaitingTime();
-
-        std::cout << "\n--- replication reproducibility ---------------------------\n";
-        std::cout << "rep 1                    : served " << served1
-                  << ", avg wait " << wait1 << "\n";
-        std::cout << "rep 2                    : served " << served2
-                  << ", avg wait " << wait2 << "\n";
-        std::cout << "identical                : "
-                  << std::boolalpha
-                  << (served1 == served2 && wait1 == wait2) << "\n";
-        std::cout << "-----------------------------------------------------------\n";
+        SimulationSystem sim(2024u);
+        buildSingleServer(sim, 3,
+                          std::make_unique<Exponential>(1.0),
+                          std::make_unique<Exponential>(2.0));
+        sim.setTermination(std::make_unique<TimeLimit>(100000.0));
+        sim.initialise();
+        sim.run();
+        sim.report();
+        std::cout << "theory (Erlang-C): Wq 0.8889  Lq 0.8889  util 0.6667\n";
     }
 
+    // ---------------------------------------------------------------------
+    // 3. DETERMINISTIC -- the run you can check by hand.
+    //
+    //    interarrival : 2, 4, 1, 3, 5, ...   (first arrival is at t = 0)
+    //    service      : 3, 2, 4, 1, 2, ...
+    //
+    //    Worked by hand, single server, FIFO:
+    //      t=0  C1 arrives, free       -> service 3, departs t=3
+    //      t=2  C2 arrives, busy       -> queues
+    //      t=3  C1 exits (wait 0)      -> C2 starts, waited 1, service 2
+    //      t=5  C2 exits (wait 1)
+    //      t=6  C3 arrives, free       -> service 4, departs t=10
+    //      t=7  C4 arrives, busy       -> queues
+    //      t=10 C3 exits (wait 0)      -> C4 starts, waited 3, service 1
+    //           C5 also arrives at t=10 -- the FEL TIE-BREAK decides the order,
+    //           and the departure wins because it was scheduled first
+    //      t=11 C4 exits (wait 3)      -> C5 starts, waited 1, service 2
+    //      t=13 C5 exits (wait 1)
+    //    => 5 served, waits 0,1,0,3,1, average 1.0000
+    // ---------------------------------------------------------------------
+    heading("3. Deterministic -- hand-checkable, with a trace file");
+    {
+        SimulationSystem sim(1u);
+        buildSingleServer(sim, 1,
+                          std::make_unique<Deterministic>(std::vector<SimTime>{2, 4, 1, 3, 5}),
+                          std::make_unique<Deterministic>(std::vector<SimTime>{3, 2, 4, 1, 2}));
+        sim.setTermination(std::make_unique<EntityLimit>(5));
+        sim.enableTrace("trace_deterministic.md", TraceLevel::Events);
+        sim.initialise();
+        sim.run();
+        sim.report();
+        std::cout << "hand-worked    : 5 served, waits 0,1,0,3,1, average 1.0000\n";
+        std::cout << "trace written  : trace_deterministic.md\n";
+    }
+
+    // ---------------------------------------------------------------------
+    // 4. A RESTAURANT -- a chain of stations, which v2 could not express.
+    //      Host (1)  ->  Waiters (3)  ->  Cashier (1)
+    //    Each has its own capacity, its own queue discipline and its own
+    //    service distribution. The engine knows none of that.
+    // ---------------------------------------------------------------------
+    heading("4. Restaurant -- Host -> Waiters(3) -> Cashier");
+    {
+        SimulationSystem sim(7u);
+        Model& m = sim.model();
+        m.setInterarrival(std::make_unique<Exponential>(15.0));  // a party every ~15 min
+        // Stability check BEFORE running: waiters mean ~38.3 min over 3 servers
+        // is 12.8 min of work per party, against 15 min between parties, so
+        // rho ~ 0.85. Push arrivals to every 4 min and rho ~ 3.2 -- the queue
+        // grows without bound and every average is meaningless. Always do this
+        // arithmetic first; the simulator will happily model an unstable system
+        // and report confident numbers about it.
+        m.addStation("Host",    1, QueueDiscipline::FIFO,     std::make_unique<Exponential>(2.0));
+        m.addStation("Waiters", 3, QueueDiscipline::FIFO,     std::make_unique<Triangular>(20.0, 35.0, 60.0));
+        m.addStation("Cashier", 1, QueueDiscipline::Priority, std::make_unique<Uniform>(1.0, 4.0));
+        m.connect("Host", "Waiters");
+        m.connect("Waiters", "Cashier");
+        m.setEntry("Host");
+
+        // Composite stopping rule -- the v1 hardcoded OR, now an object.
+        auto stop = std::make_unique<AnyOf>();
+        stop->add(std::make_unique<TimeLimit>(6000.0));     // a long service period
+        stop->add(std::make_unique<EntityLimit>(100000));
+        sim.setTermination(std::move(stop));
+
+        sim.enableTrace("trace_restaurant.md", TraceLevel::Events);
+        sim.initialise();
+        sim.run();
+        sim.report();
+        std::cout << "trace written  : trace_restaurant.md\n";
+    }
+
+    // ---------------------------------------------------------------------
+    // 5. Replication reproducibility. Same seed, same process, twice.
+    // ---------------------------------------------------------------------
+    heading("5. Replication reproducibility");
+    {
+        SimulationSystem sim(12345u);
+        buildSingleServer(sim, 1,
+                          std::make_unique<Exponential>(1.0),
+                          std::make_unique<Exponential>(0.8));
+        sim.setTermination(std::make_unique<TimeLimit>(2000.0));
+
+        sim.initialise(); sim.run();
+        const int    n1 = sim.statistics().numberServed();
+        const double w1 = sim.statistics().averageWaitingTime();
+
+        sim.initialise(); sim.run();
+        const int    n2 = sim.statistics().numberServed();
+        const double w2 = sim.statistics().averageWaitingTime();
+
+        std::cout << "rep 1: served " << n1 << ", avg wait " << w1 << "\n";
+        std::cout << "rep 2: served " << n2 << ", avg wait " << w2 << "\n";
+        std::cout << "identical: " << std::boolalpha << (n1 == n2 && w1 == w2) << "\n";
+    }
+
+    std::cout << "\n";
     return 0;
 }

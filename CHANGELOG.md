@@ -5,6 +5,77 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [3.0.0] — 2026-08-22 — "Abstraction, earned"
+
+The engine no longer knows what it is simulating. `SimulationSystem.cpp` contains
+no station name, no capacity and no distribution — it owns a `Model` and runs it.
+A three-stage restaurant and a single-server queue are the same code path.
+
+Full narrative in `V3_READLOG.md`.
+
+### Added
+
+- **`IDistribution`** + `Exponential`, `Constant`, `Uniform`, `Triangular`,
+  `Deterministic`. `Deterministic` is what makes a run hand-checkable.
+- **`IQueueRule`** + `FifoRule`, `LifoRule`, `HighestAttributeRule`,
+  `LowestAttributeRule`, `RandomRule`. Five classes for six disciplines: SPT and
+  EDD differ by a string, not a class. `makeQueueRule()` bridges the old enum.
+- **`Station`** — a `Resource`, a queue, a service distribution, and where
+  entities go next. The last field is what turns a queue into a network.
+- **`Model`** — owns the stations, the interarrival distribution and the entry
+  point. `validate()` catches routing loops before the run instead of hanging
+  during it.
+- **`ITerminationRule`** + `TimeLimit`, `EntityLimit`, `DrainedRule`, `AnyOf`.
+  Rules receive the whole `SimulationSystem`, so a rule can query anything.
+- **`Trace`** — markdown or plain-text event log to file. `TraceLevel::Off`
+  opens no file and returns immediately, so tracing is free when disabled; a
+  failed open degrades to `Off` rather than taking the simulation down.
+- **Routing**: `SimulationSystem::admit(Entity*, Station*)`, used by both arrival
+  and station-to-station transfer. One function for both paths is what makes
+  chains work.
+- **Per-station statistics** — utilisation and queue length are station
+  properties. The restaurant run shows Waiters at 82% and Host at 13%; one
+  system-wide number would hide the bottleneck.
+- **`tests/tests.cpp`** — 85 checks, no external framework, plus a `ctest`
+  target. Includes two end-to-end tests compared against hand-worked numbers,
+  not tolerances.
+- `main.cpp` now runs five scenarios: M/M/1, M/M/3, a deterministic
+  hand-checkable run with a trace, a three-station restaurant, and replication
+  reproducibility.
+
+### Changed / breaking
+
+- `TerminationCondition` **deleted**; `SimulationSystem`'s constructor takes only
+  a seed and `setTermination()` takes an `ITerminationRule`.
+- `EventNotice` names a `Station*`, not a `Resource*`.
+- `SimulationSystem::addResource` / `addQueue` / `setModel` /
+  `setMeanInterarrival` / `setMeanService` removed — build a `Model`.
+- `EntityQueue` holds a `unique_ptr<IQueueRule>` and is no longer copyable.
+
+### Deliberately not built
+
+- **Step 5, `IEventHandler`.** The `run()` switch is four cases on one screen.
+  Virtual dispatch would add a hierarchy and an ownership question and *lose* the
+  `-Wswitch` warning that flags a new `EventType`. Same judgement v1 made about
+  termination rules: wait until the third case hurts.
+- **Step 7, config file input.** I/O plumbing rather than design, and it wants
+  the `Model` API to settle first. The interesting part — that `assert` is the
+  wrong tool for external data, since asserts vanish under `NDEBUG` — is a
+  paragraph, not a subsystem.
+
+### Verified
+
+- Clean under `-Wall -Wextra -Wpedantic` and under `-fsanitize=address,undefined`.
+- **85/85 unit checks pass.**
+- Deterministic run reproduces the hand-worked table exactly: 5 served, waits
+  0/1/0/3/1, average 1.0000, last exit t=13.0000 — and the trace file matches
+  event for event, including the FEL tie-break at t=10.
+- M/M/1: Little's Law relative error 0.0000, utilisation 0.8022 (theory 0.8000).
+- M/M/3: utilisation 0.6651 (Erlang-C 0.6667).
+- Two replications with the same seed produce identical output.
+
+---
+
 ## [2.1.0] — 2026-08-22 — "It runs twice"
 
 Defect pass over v2. No new features; these are all things that should have been
@@ -261,18 +332,20 @@ filling the bodies is v2.
 
 ---
 
-## [Unreleased] — v3, "abstraction, earned"
+## [Unreleased] — v4, "how confident are we?"
 
-Ordered plan with rationale in `README.md`. Summary:
+Wq still reads 3-5% above closed-form theory in every run. Not a bug — no warm-up
+removal and a single replication — and v4 is where that finally gets an honest
+answer.
 
-1. `IDistribution` — exponential/uniform/triangular/constant behind an interface
-2. Queue disciplines become strategy objects
-3. Multi-server, then multi-resource
-4. A `Model` object separate from the engine  ← the real architecture step
-5. `IEventHandler` — polymorphic event dispatch
-6. `ITerminationCondition`
-7. Config file input (and the assert-vs-validation distinction)
-8. `Trace` output
-9. Unit tests — deliberately last, once the interfaces stop moving
-
-Then v4: replications, warm-up removal, confidence intervals, entity lifetime.
+1. **Replications** — run N times with different seeds, collect per-run results.
+2. **Warm-up removal** (Welch's method) — discard the transient start-up period.
+3. **Confidence intervals** — report a range, not a number. Then check whether
+   3.2000 falls inside it.
+4. **`Statistics` member names** — `areaUnderQueueLength` / `areaUnderServerBusy`
+   became misleading once the system-level object started holding L_q and L.
+   Rename to `areaUnderA` / `areaUnderB` with meaning supplied by the caller.
+5. **Remove the `EventNotice` sequence-number static** — let `FutureEventList`
+   stamp it, which needs a friend declaration rather than a public setter.
+6. **`IEventHandler`** — revisit once v4 pre-emption needs handlers with state.
+7. **Config file input** — once the `Model` API has settled.

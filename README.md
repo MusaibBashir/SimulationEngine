@@ -1,260 +1,225 @@
 # DES Engine — a discrete-event simulator, built version by version
 
-A single-server queueing simulator written from the theory table up, as a way of
-learning OOP and system design rather than as a way of getting a simulator.
+Written from the simulation theory table up, as a way of learning OOP and system
+design rather than as a way of getting a simulator.
 
-**Current state: v2.1 — it runs, twice.** Builds clean under
-`-Wall -Wextra -Wpedantic`, clean under ASan/UBSan, simulates an M/M/1 queue,
-passes Little's Law to four decimal places, and produces identical output when
-the same seed is run twice.
+**Current state: v3 — a network simulator.** The engine no longer knows what it
+is simulating: it owns a `Model` and runs it. Multi-server stations, chains of
+stations, pluggable distributions and queue disciplines, event tracing to file.
+Builds clean under `-Wall -Wextra -Wpedantic`, clean under ASan/UBSan, 85/85 unit
+checks pass, and a deterministic run reproduces a hand-worked table exactly.
 
 ## Build and run
 
 ```
-cmake -S . -B build
-cmake --build build
-./build/des
+cmake -S . -B build && cmake --build build
+./build/des          # five demonstration scenarios
+./build/des_tests    # the unit suite
+cd build && ctest
 ```
 
-Or, without CMake:
+Without CMake:
 
 ```
 g++ -std=c++17 -Wall -Wextra -Wpedantic -Iinclude main.cpp src/*.cpp -o des
 ```
 
-`main` runs five checks: v1 storage, FEL ordering, FEL tie-breaking, a
-20,000-minute M/M/1 run validated against Little's Law and closed-form theory,
-and a replication-reproducibility check (two runs, same seed, identical output).
-
-Worth running occasionally, and before any refactor:
+Before and after any refactor — entities are destroyed at departure, so a
+routing mistake becomes a use-after-free, and this is what proves it hasn't:
 
 ```
 g++ -std=c++17 -g -O1 -fsanitize=address,undefined -Iinclude main.cpp src/*.cpp -o des_asan && ./des_asan
 ```
 
-Entities are destroyed on departure, so a use-after-free is now a thing that
-*can* happen. The sanitizer is what proves it doesn't.
+## Writing a model
+
+The engine takes a `Model`. Nothing else about your system reaches it.
+
+```
+SimulationSystem sim(seed);
+Model& m = sim.model();
+
+m.setInterarrival( <IDistribution> );
+m.addStation(name, capacity, discipline, <IDistribution> service);
+m.connect("From", "To");        // omit and the station is an exit
+m.setEntry("First");
+
+sim.setTermination( <ITerminationRule> );
+sim.enableTrace("trace.md", TraceLevel::Events);   // optional
+sim.initialise();
+sim.run();
+sim.report();
+```
+
+A restaurant is three `addStation` calls and two `connect` calls:
+
+```
+Host(1) ──▶ Waiters(3) ──▶ Cashier(1) ──▶ exit
+```
+
+**Distributions**: `Exponential(mean)`, `Constant(v)`, `Uniform(a,b)`,
+`Triangular(a,mode,b)`, `Deterministic({...})`.
+Exponential takes a **mean**, not a rate — the 1/λ conversion happens in exactly
+one line inside `RandomStream`.
+
+**Disciplines**: `FIFO`, `LIFO`, `Priority`, `SPT`, `EDD`, `Random` — or build an
+`IQueueRule` directly for anything else.
+
+**Termination**: `TimeLimit(t)`, `EntityLimit(n)`, `DrainedRule()`, or `AnyOf`
+composing several.
+
+## Checking a run by hand
+
+Use `Deterministic` for both interarrival and service times, cap it with
+`EntityLimit`, and turn the trace on. You get a markdown table you can compare
+line by line against a worked example from your notes:
+
+| t | event | entity | detail |
+|---:|---|---:|---|
+| 0.0000 | Seize | 1 | server free, service 3.0000 until 3.0000 |
+| 2.0000 | Queue | 2 | all 1 busy, queued at position 1 |
+| 3.0000 | Exit | 1 | exits; total wait 0.0000, time in system 3.0000 |
+| 3.0000 | Seize | 2 | pulled from queue after waiting 1.0000 |
+
+Traces also `diff`. A refactor that changes behaviour shows up as a diff rather
+than as a slightly-off average — which is a far stronger statement.
 
 ## Documents
 
 | File | What it is |
 |---|---|
-| `README.md` | This file — layout, design rules, v3 plan |
 | `CHANGELOG.md` | What changed in each version |
-| `V2_READLOG.md` | Detailed review of v2 and v2.1: every bug found and why it mattered |
+| `V2_READLOG.md` | Review of v2 and v2.1: every bug found and why it mattered |
+| `V3_READLOG.md` | What each v3 abstraction bought, what it cost, what was skipped |
 
 ## Layout
 
 ```
 sim/
-├── CMakeLists.txt      README.md      CHANGELOG.md      V2_READLOG.md
-├── main.cpp            acceptance checks + the M/M/1 run
-├── include/            14 headers
-└── src/                13 sources
+├── CMakeLists.txt   README.md   CHANGELOG.md   V2_READLOG.md   V3_READLOG.md
+├── main.cpp         five scenarios
+├── tests/           85 unit checks
+├── include/         19 headers
+└── src/             18 sources
 ```
 
-Headers declare, sources define. One-line getters stay inline in the header.
-Every `.cpp` includes its own header first — a free self-test that the header is
-complete on its own.
+Headers declare, sources define. One-line getters stay inline. Every `.cpp`
+includes its own header first — a free self-test that the header stands alone.
 
 ## Theory table → file
 
 | Theory term | Where it lives |
 |---|---|
-| System | `SimulationSystem` |
+| System | `SimulationSystem` (engine) + `Model` (what is simulated) |
 | Entity | `Entity` |
 | Attribute | `Entity::m_attributes` |
-| Resource | `Resource` |
-| State ★ | `SystemState` (snapshot, refreshed by `refreshState()`) |
+| Resource | `Resource`, owned by a `Station` |
+| State ★ | `SystemState`, a snapshot summed across stations |
 | Event ★ | `EventType` + `EventNotice` |
 | Queue | `EntityQueue` |
-| Queue discipline | `QueueDiscipline` enum + `EntityQueue::pop()` |
+| Queue discipline | `IQueueRule` and its subclasses |
 | Clock ★ | `Clock` |
 | Future Event List ★ | `FutureEventList` |
 | Event notice | `EventNotice` |
 | Activity | `Activity` — duration known at construction |
 | Delay | `Delay` — duration decided later, by the system |
-| Statistical accumulators ★ | `Statistics` |
-| Termination condition | `TerminationCondition` |
+| Statistical accumulators ★ | `Statistics`, per station and system-wide |
+| Termination condition | `ITerminationRule` and its subclasses |
 | Initialization | `SimulationSystem::initialise()` |
-| *(not in the table)* | `RandomStream` — the one source of randomness |
+| *(not in the table)* | `RandomStream`, `Distribution`, `Station`, `Trace` |
 
-## How the simulation actually runs
+## How a run actually works
 
 ```
 initialise()
-  reset clock, stats, state, RNG
-  resolve the model (server + queue) ONCE, cache the pointers
+  validate the model (routing loops caught HERE, not as a hang)
+  reset everything holding run state; configuration survives
   schedule Arrival at t=0            <- carries NO entity
-  schedule EndSimulation at maxTime  <- unless maxTime is infinite
 
 run()
-  while FEL not empty and not terminated:
-      notice = popImminent()                 <- earliest event
-      stats.updateTimeIntegrals(...)         <- OLD state, interval just ended
-      clock.advanceTo(notice.time())         <- the clock JUMPS
+  while FEL not empty and no termination rule is met:
+      notice = popImminent()               <- earliest event
+      updateAllIntegrals(notice.time())    <- OLD state, interval just ended
+      clock.advanceTo(notice.time())       <- the clock JUMPS
       dispatch on notice.type()
 
 handleArrival
   create the entity HERE (so creationTime is correct)
-  record the arrival
-  schedule the NEXT arrival            <- forget this and the run stops at one
-  server free?  seize, draw an Activity, schedule its Departure
-  server busy?  push to the queue, open a Delay
+  schedule the NEXT arrival        <- forget this and the run stops at one
+  admit(entity, model.entry())
 
 handleDeparture
-  release the server
-  record the departure (wait time comes from the entity's Delay)
-  queue non-empty?  pop per discipline, close its Delay, seize, schedule Departure
+  release the server at this station
+  station has a next?  startNextService(here); admit(entity, next)
+  otherwise            record exit stats; startNextService(here); destroy entity
+
+admit(entity, station)
+  server free?  seize, draw an Activity, schedule its Departure
+  server busy?  push to the station queue, open a Delay
 ```
 
-**The order inside `run()` is not negotiable.** Accumulate the integrals for the
-interval that just ended, *then* move the clock, *then* let the handler change
-state. Swap any two and every time-average goes quietly wrong with no error.
+**The order inside `run()` is not negotiable.** Close the integrals for the
+interval that just ended, *then* move the clock, *then* change state. Swap any
+two and every time-average goes quietly wrong with no error.
 
-## Recurring design rules
-
-These show up in nearly every file, and they are most of the point of the
-exercise:
+## Design rules, accumulated across three versions
 
 - **Derive, never duplicate.** `unitsAvailable()`, `Activity::endTime()`, every
-  average — computed on demand. A second stored copy of a fact eventually
-  disagrees with the first, and no amount of reading tells you which is right.
+  average. A second stored copy of a fact eventually disagrees with the first.
 - **Wrap a value in a class only when there is an invariant to protect.** `Clock`
   qualifies: time never goes backwards, and `advanceTo` is the only door.
-- **`unique_ptr` = I own this. Raw pointer = I observe this.** One owner
-  (`SimulationSystem`), many observers.
-- **Forward-declare when you only store a pointer.** `EntityQueue.hpp`
-  forward-declares `Entity` and `RandomStream`; the includes land in the `.cpp`.
-- **Internal steps are `private`.** `handleArrival`, `handleDeparture` and
-  `refreshState` are steps of `run()`, not interface.
+- **`unique_ptr` = I own this. Raw pointer = I observe this.**
+- **Forward-declare when you only store a pointer.** The include lands in the
+  `.cpp`.
+- **Internal steps are `private`.** `admit`, `handleArrival`, `refreshState`.
 - **A function that cannot do its job must assert, not return a plausible
-  value.** Returning `nullptr` from an unimplemented queue discipline lost
-  entities silently for a whole version.
+  value.** Returning `nullptr` from an unimplemented discipline lost entities
+  silently for a whole version.
 - **One source of randomness.** Same seed, same run, or you cannot debug it.
 - **Every object holding run state needs a `reset()`, and `initialise()` must
-  call all of them.** Configuration (names, capacities, disciplines) survives a
-  reset; run state does not. Missing two of these made the second replication
-  serve zero entities while printing a plausible report.
-- **A default return value is a place for a bug to hide.** `Entity::attribute()`
-  returns 0.0 for a missing key, which is convenient right up until a typo turns
-  into a silently wrong average. Assert at the call sites that matter.
-- **`std::move` on anything `const` is a silent no-op.** It compiles, it warns
-  about nothing, and it copies.
+  call all of them.** Missing two made a second replication serve zero entities.
+- **A default return value is a place for a bug to hide.** `attribute()` returns
+  0.0 for a missing key; assert at the call sites that matter.
+- **`std::move` on anything `const` is a silent no-op.**
+- **Write the virtual destructor.** Without it, `delete` through a base pointer
+  leaks the derived part, with no warning.
+- **Don't abstract until the third case hurts.** Every hierarchy here was built
+  only after the duplication was written out longhand and felt.
 
-## Known and deliberate
+## Known / still open
 
+- Wq reads 3-5% above closed-form theory in every run. **Not a bug** — no warm-up
+  removal, single replication. v4.
+- The system-level `Statistics` object holds L_q and L in members named
+  `areaUnderQueueLength` / `areaUnderServerBusy`. Works; the names now lie.
 - `EventNotice::s_nextSequenceNumber` is a mutable static. Reset between
-  replications as of v2.1, but still not thread-safe, and constructing an event
-  notice still has a side effect. Removing it needs `FutureEventList` to stamp
-  the number, which means a setter on a class meant to be immutable — v3.
-- `Wq` measured 3.2864 against M/M/1 theory 3.2000. Not a bug: no warm-up
-  removal and a single replication. v4 addresses both.
-- `resource()` / `queue()` are linear scans, now called once in `initialise()`
-  rather than per event. Leave them alone.
+  replications, still not thread-safe.
+- `IEventHandler` and config-file input were deliberately skipped — reasons in
+  `V3_READLOG.md`.
 
 ---
 
-# v3 — the order to do it in
+# v4 — the order to do it in
 
-v3 is where abstraction is finally *earned*. Every item below exists because v2
-made the problem concrete: you have felt the duplication, so the fix will mean
-something. Do them in this order — each step is safe to stop at, and each one
-leaves the program working.
+Wq has read a few percent high since v2 and every version has said "that's v4".
+This is v4. Commit after each step; `des_tests` must stay at 85/85 throughout.
 
-**Commit after every numbered step, and re-run `main` every time. Little's Law
-must still hold to four decimals after each one. That check is your regression
-suite until step 9 gives you a real one.**
-
-### 1. Extract `IDistribution` — the easiest abstraction to get right
-
-`RandomStream::exponential(mean)` is hardcoded into both handlers. Real models
-need uniform, normal, triangular, and empirical service times.
-
-- Abstract base `IDistribution` with `virtual SimTime draw(RandomStream&) const = 0`
-  and a virtual destructor (**write the virtual destructor — a base class without
-  one deletes derived objects wrongly, and it is silent**).
-- Concretes: `Exponential`, `Uniform`, `Triangular`, `Constant`.
-- `SimulationSystem` holds `std::unique_ptr<IDistribution>` for interarrival and
-  service instead of two `SimTime` means.
-- Start here because it is small, the interface is obvious, and it teaches the
-  virtual-destructor rule before anything depends on it.
-
-### 2. Queue disciplines become strategies
-
-`EntityQueue::pop()`'s switch, and the `extractBest` helper you now have, are the
-motivation. You have written the duplication and then collapsed it once — this is
-the principled version.
-
-- `IQueueDiscipline` with `virtual std::size_t selectIndex(const std::deque<Entity*>&) const = 0`.
-- `Fifo`, `Lifo`, `PriorityRule`, `ShortestProcessingTime`, `EarliestDueDate`,
-  `RandomOrder`.
-- `EntityQueue` holds a `unique_ptr<IQueueDiscipline>` instead of an enum.
-- **Note what this buys and what it costs**: adding a discipline no longer means
-  editing `EntityQueue`, but you can no longer `switch` exhaustively and let
-  `-Wswitch` remind you. That trade is the actual lesson.
-
-### 3. Multiple servers, then multiple resources
-
-- Let `Resource` capacity > 1 actually work end-to-end (`seize`/`release` already
-  support it; the handlers assume one).
-- Then more than one resource, each with its own queue.
-- This is where `m_server` / `m_line` as single cached pointers finally break,
-  which is the point — it motivates step 4.
-
-### 4. A model description, separate from the engine
-
-`setModel("Teller", "TellerQueue")` is a placeholder for this.
-
-- A `Model` object holding resources, queues, distributions, and the routing
-  between them.
-- `SimulationSystem` takes a `Model` and stops knowing any names at all.
-- **This is the real system-design step in the project**: separating *what is
-  being simulated* from *the machinery that simulates it*. Everything before it
-  is object-oriented programming; this is architecture.
-
-### 5. Events become polymorphic
-
-Only now — the `run()` switch is still readable at four cases, so doing this
-earlier would be abstraction for its own sake.
-
-- `IEventHandler` with `virtual void handle(SimulationSystem&, const EventNotice&) = 0`.
-- A dispatch table from `EventType` to handler.
-- Adding an event type stops meaning "edit `run()`".
-
-### 6. `ITerminationCondition`
-
-The abstract base that `TerminationCondition.hpp` has been flagging since v1.
-
-- `TimeBased`, `CountBased`, `SteadyStateDetected`, `CompositeOr`.
-- Do it *after* you have a third real condition, not before.
-
-### 7. Config file input
-
-- Read the model from JSON or a simple key-value file.
-- The moment external data enters, `assert` is the **wrong** tool — asserts vanish
-  under `NDEBUG`. Validation of untrusted input needs real checks and real error
-  reporting. Good place to learn the difference between an invariant and a
-  validation.
-
-### 8. `Trace` output
-
-- A `Trace` class that logs every event with a verbosity level.
-- Diff two traces to find where a refactor changed behaviour. This becomes your
-  main debugging tool for the rest of the project.
-
-### 9. Unit tests
-
-- Catch2 or doctest, single-header, added to `CMakeLists.txt`.
-- Test the pieces that are pure functions of their inputs first: `Statistics`
-  accumulators against hand-computed rectangles, each queue discipline against a
-  known ordering, `FutureEventList` ordering and tie-breaks, `Delay` and
-  `Activity` arithmetic.
-- **Deliberately last.** Writing tests against the v2 interfaces would mean
-  rewriting them through steps 1–5. Test the shape once it stops moving.
-
-### Then v4
-
-Replications, warm-up removal (Welch's method), confidence intervals, and entity
-lifetime management. Only then will the 3.2864-against-3.2000 question have an
-honest answer.
+1. **Replications.** Run the model N times with different seeds, collecting one
+   result per run. The API already supports it — `initialise()` fully resets —
+   so this is a loop plus a results container.
+2. **Warm-up removal (Welch's method).** Discard the transient start-up period.
+   Plot the moving average of queue length against time, find where it flattens,
+   drop everything before it. This is most of the 3-5% gap.
+3. **Confidence intervals.** Report `3.24 ± 0.11` instead of `3.2864`. Then ask
+   whether 3.2000 falls inside — which is the first time that question has an
+   honest answer.
+4. **Rename the `Statistics` integral members** to `areaUnderA` / `areaUnderB`
+   with meaning supplied by the caller. Small, and it removes a lie.
+5. **Remove the `EventNotice` sequence static.** Let `FutureEventList::schedule`
+   stamp it via a `friend` declaration rather than a public setter, so the class
+   stays immutable to everyone else.
+6. **`IEventHandler`** — by now pre-emption and balking will have pushed the
+   `run()` switch past the point where it fits on a screen. *Then* it is earned.
+7. **Config file input** — once the `Model` API has settled. Note that `assert`
+   is the wrong tool here: asserts vanish under `NDEBUG`, and external data needs
+   validation that survives a release build.

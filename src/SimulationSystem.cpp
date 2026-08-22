@@ -1,211 +1,82 @@
 // ============================================================================
-// SimulationSystem.cpp  --  the biggest file in v1, and still only storage
+// SimulationSystem.cpp  --  the engine
 // ============================================================================
-// [1] Include "SimulationSystem.hpp" first, then <algorithm> and <iostream>.
-//
-// [2] IMPLEMENT FOR REAL IN v1 (these are the factories -- no simulation logic):
-//
-//     [2a] SimulationSystem::SimulationSystem(TerminationCondition t)
-//          Member-init list: m_termination from the parameter, m_nextEntityId
-//          to 1. The five by-value members default-construct themselves; do not
-//          list them.
-//
-//     [2b] Entity* SimulationSystem::createEntity()
-//          Four lines:
-//            auto e = std::make_unique<Entity>(m_nextEntityId, m_clock.now());
-//            ++m_nextEntityId;
-//            Entity* raw = e.get();          <- grab the address BEFORE moving
-//            m_entities.push_back(std::move(e));
-//            return raw;
-//          The order matters: after std::move the local unique_ptr is null, so
-//          calling .get() on it afterwards returns nullptr. Try it wrong once
-//          and watch it happen -- that is the clearest possible demonstration of
-//          what "move" actually does.
-//
-//     [2c] Resource* SimulationSystem::addResource(const std::string& name, int capacity)
-//          Identical four-line pattern into m_resources.
-//     [2d] EntityQueue* SimulationSystem::addQueue(const std::string& name, QueueDiscipline d)
-//          Identical pattern into m_queues.
-//          (Three copies of the same four lines. Notice it. A templated
-//          helper could collapse them -- that is a v3 exercise, not a v1 one.)
-//
-//     [2e] Resource* SimulationSystem::resource(const std::string& name)
-//          Range-for over m_resources; if the name matches, return .get();
-//          after the loop, return nullptr.
-//     [2f] EntityQueue* SimulationSystem::queue(const std::string& name)
-//          Same shape.
-//
-//     [2g] The const accessors are one-liners; leave them inline in the header.
-//
-// [3] v1 STUBS -- write each signature with an EMPTY body and its TODO comment.
-//     Getting all of these to compile as empty functions IS the v1 finish line.
-//
-//     [3a] void SimulationSystem::initialise()
-//          // TODO v2 -- the "Initialization" row of the theory table:
-//          //   m_clock.reset(); m_stats.reset(); m_state.reset();
-//          //   create the first entity and schedule its Arrival at t=0
-//          //   schedule EndSimulation at m_termination.maxTime()
-//
-//     [3b] void SimulationSystem::scheduleEvent(EventType type, SimTime t, Entity* e, Resource* r)
-//          // TODO v2: construct an EventNotice from the four arguments and pass
-//          // it to m_fel.schedule(). Two lines. This wrapper exists so that no
-//          // other code ever touches the FEL directly.
-//
-//     [3c] void SimulationSystem::run()
-//          // TODO v2 -- THE MAIN LOOP, about eight lines:
-//          //   while (!m_fel.isEmpty() &&
-//          //          !m_termination.isMet(m_clock.now(), m_stats.numberServed()))
-//          //     EventNotice notice = m_fel.popImminent();
-//          //     m_stats.updateTimeIntegrals(notice.time(),
-//          //                                 <current queue length>,
-//          //                                 <current servers busy>);   // BEFORE
-//          //     m_clock.advanceTo(notice.time());
-//          //     switch (notice.type()) { Arrival -> handleArrival(notice);
-//          //                              Departure -> handleDeparture(notice);
-//          //                              EndSimulation -> break out; }
-//          //
-//          // The clock JUMPS from event to event. Nothing is simulated in
-//          // between, because by definition nothing happens in between. That
-//          // single idea is what makes discrete-event simulation fast, and it
-//          // is why the FEL had to be sorted.
-//          //
-//          // v3: this switch becomes virtual dispatch on an IEventHandler.
-//          // Write the switch first and let it get ugly -- the ugliness is the
-//          // argument for the refactor, and an argument you have felt is worth
-//          // more than one you were told.
-//
-//     [3d] void SimulationSystem::handleArrival(const EventNotice& notice)
-//          // TODO v2:
-//          //   record the arrival in m_stats
-//          //   CREATE THE NEXT ENTITY AND SCHEDULE ITS ARRIVAL at
-//          //     now + interarrivalDraw   <- this self-feeding step is how a DES
-//          //     keeps running; forget it and the simulation stops after one
-//          //     customer, which is the classic first-run bug
-//          //   if the resource has a free unit: seize it, build an Activity for
-//          //     the service, schedule a Departure at activity.endTime()
-//          //   else: push the entity into the queue and start a Delay
-//          //   update m_state
-//
-//     [3e] void SimulationSystem::handleDeparture(const EventNotice& notice)
-//          // TODO v2:
-//          //   release the resource
-//          //   record the departure: wait time and time-in-system, computed
-//          //     from the entity's creationTime and the current clock
-//          //   if the queue is non-empty: pop the next entity per the discipline,
-//          //     end its Delay, seize the resource, schedule its Departure
-//          //   update m_state
-//
-//     [3f] void SimulationSystem::report() const
-//          // TODO v2: print number served, average wait, average time in system,
-//          // time-average queue length, utilisation, max queue length.
-//          // v4: this becomes a Report object that can emit text or CSV. For now
-//          // std::cout is honest and sufficient.
 
 #include "SimulationSystem.hpp"
-#include "Activity.hpp"   // v2: service durations are Activities
+#include "Activity.hpp"
 #include <iostream>
 #include <iomanip>
-#include <utility>        // std::move
+#include <sstream>
+#include <utility>
 #include <cassert>
-#include <cmath>          // std::isinf
-#include <limits>         // std::numeric_limits
 
-SimulationSystem::SimulationSystem(TerminationCondition termination, unsigned seed)
-    : m_termination(termination), m_rng(seed) {}
-// m_nextEntityId and the model parameters are initialised by their in-class
-// initialisers in the header. Repeating them here would be a second place that
-// knows the starting values.
+SimulationSystem::SimulationSystem(unsigned seed) : m_rng(seed) {}
 
-// ---------------------------------------------------------------- factories --
+// ------------------------------------------------------------------- setup --
+
+void SimulationSystem::setTermination(std::unique_ptr<ITerminationRule> rule) {
+    assert(rule != nullptr);
+    m_termination = std::move(rule);
+}
+
+bool SimulationSystem::enableTrace(const std::string& path, TraceLevel level, bool markdown) {
+    return m_trace.open(path, level, markdown);
+}
+
+// --------------------------------------------------------- entity lifetime --
 
 Entity* SimulationSystem::createEntity() {
     const EntityId id = m_nextEntityId++;
     auto e = std::make_unique<Entity>(id, m_clock.now());
-    Entity* raw = e.get();               // grab the address BEFORE the move --
-    m_entities.emplace(id, std::move(e));// after std::move the local is null
+    Entity* raw = e.get();                // address BEFORE the move: after
+    m_entities.emplace(id, std::move(e)); // std::move the local is null
     return raw;
 }
 
 void SimulationSystem::destroyEntity(EntityId id) {
-    // See the safety invariant in the header. In debug builds, prove the
-    // entity is not still parked in a delay before freeing it.
     assert(m_activeDelays.find(id) == m_activeDelays.end() &&
            "destroying an entity that is still inside a Delay");
     m_entities.erase(id);
 }
 
-Resource* SimulationSystem::addResource(const std::string& name, int capacity) {
-    auto r = std::make_unique<Resource>(name, capacity);
-    Resource* raw = r.get();
-    m_resources.push_back(std::move(r));
-    return raw;
-}
-
-EntityQueue* SimulationSystem::addQueue(const std::string& name, QueueDiscipline d) {
-    auto q = std::make_unique<EntityQueue>(name, d);
-    EntityQueue* raw = q.get();
-    m_queues.push_back(std::move(q));
-    return raw;
-}
-
-void SimulationSystem::setModel(const std::string& serverName, const std::string& queueName) {
-    m_serverName = serverName;
-    m_queueName  = queueName;
-}
-
-void SimulationSystem::setMeanInterarrival(SimTime mean) {
-    assert(mean > 0.0);
-    m_meanInterarrival = mean;
-}
-
-void SimulationSystem::setMeanService(SimTime mean) {
-    assert(mean > 0.0);
-    m_meanService = mean;
-}
-
-// ------------------------------------------------------------------ lookup --
-
-Resource* SimulationSystem::resource(const std::string& name) {
-    for (const auto& r : m_resources) {
-        if (r->name() == name) return r.get();
-    }
-    return nullptr;
-}
-
-EntityQueue* SimulationSystem::queue(const std::string& name) {
-    for (const auto& q : m_queues) {
-        if (q->name() == name) return q.get();
-    }
-    return nullptr;
-}
-
-// ----------------------------------------------------------------- running --
+// ------------------------------------------------------------------ state --
 
 void SimulationSystem::refreshState() {
-    // SystemState is treated as a SNAPSHOT, refreshed from the authoritative
-    // objects after every state change -- resolution (b) of the duplication
-    // flagged in SystemState.hpp. Resource and EntityQueue remain the single
-    // source of truth; SystemState never decides anything, it only reports.
-    const int inQueue = static_cast<int>(m_line->length());
-    m_state.setNumberInQueue(inQueue);
-    m_state.setNumberInSystem(inQueue + m_server->unitsBusy());
-    m_state.setServerStatus(m_server->state());
+    // SystemState is a SNAPSHOT summed across every station -- resolution (b) of
+    // the duplication flagged back in v1. The stations remain the single source
+    // of truth; SystemState never decides anything, it only reports.
+    int queued = 0;
+    int busy   = 0;
+    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
+        const Station& s = m_model.stationAt(i);
+        queued += static_cast<int>(s.queue().length());
+        busy   += s.resource().unitsBusy();
+    }
+    m_state.setNumberInQueue(queued);
+    m_state.setNumberInSystem(queued + busy);
+    m_state.setServerStatus(busy > 0 ? ResourceState::Busy : ResourceState::Idle);
 }
 
+void SimulationSystem::updateAllIntegrals(SimTime upTo) {
+    // Per station, because utilisation and queue length are station properties.
+    // A restaurant can have an idle host and a swamped kitchen; one system-wide
+    // number would hide precisely the thing you are trying to see.
+    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
+        Station& s = m_model.stationAt(i);
+        s.stats().updateTimeIntegrals(upTo,
+                                      static_cast<int>(s.queue().length()),
+                                      s.resource().unitsBusy());
+    }
+    m_stats.updateTimeIntegrals(upTo, m_state.numberInQueue(), m_state.numberInSystem());
+}
+
+// --------------------------------------------------------------- lifecycle --
+
 void SimulationSystem::initialise() {
-    // The "Initialization" row of the theory table: state and FEL at t = 0.
-    //
-    // *** v2.1: THIS MUST RESET EVERYTHING THAT CARRIES RUN STATE. ***
-    // v2 reset the clock, stats, state, RNG and delays -- but not the FEL, not
-    // the resources, and not the queues. Calling initialise() a second time
-    // therefore left the server still seized from the previous replication, and
-    // with capacity 1 that server was busy forever: the second run served
-    // ZERO entities while the queue grew without bound. It looked like a
-    // plausible simulation and it was nothing of the sort.
-    //
-    // The rule this teaches: every object that holds run state needs a reset(),
-    // and initialise() must call all of them. Configuration (names, capacities,
-    // disciplines, distributions) survives; run state does not.
+    m_model.validate();          // catch modelling mistakes BEFORE the run
+    assert(m_termination != nullptr && "no termination rule set");
+
+    // Everything holding RUN STATE gets reset. Configuration survives.
     m_clock.reset();
     m_stats.reset();
     m_state.reset();
@@ -213,168 +84,254 @@ void SimulationSystem::initialise() {
     m_fel.clear();
     m_activeDelays.clear();
     m_entities.clear();
-    m_nextEntityId = 1;                    // so entity ids reproduce too
-    EventNotice::resetSequenceCounter();   // so FEL tie-breaks reproduce too
+    m_nextEntityId = 1;
+    EventNotice::resetSequenceCounter();
+    m_model.reset();
 
-    for (auto& r : m_resources) r->reset();
-    for (auto& q : m_queues)    q->reset();
-
-    // A run with no finite limit at all would loop until the machine gives up.
-    assert((!std::isinf(m_termination.maxTime()) ||
-            m_termination.maxEntities() < std::numeric_limits<int>::max()) &&
-           "TerminationCondition has neither a time limit nor a count limit");
-
-    // Resolve the model ONCE, here, instead of doing a string lookup inside
-    // every event handler.
-    m_server = resource(m_serverName);
-    m_line   = queue(m_queueName);
-    assert(m_server != nullptr && "initialise(): no such resource -- call addResource first");
-    assert(m_line   != nullptr && "initialise(): no such queue -- call addQueue first");
-
-    m_line->setRandomStream(&m_rng);   // only the Random discipline uses it
-
-    // The first arrival carries NO entity. See handleArrival for why.
-    scheduleEvent(EventType::Arrival, 0.0);
-
-    // Only schedule the stop event if there is a finite time limit. Putting
-    // infinity on the FEL would let advanceTo() move the clock to infinity if
-    // the list ever drained.
-    if (!std::isinf(m_termination.maxTime())) {
-        scheduleEvent(EventType::EndSimulation, m_termination.maxTime());
+    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
+        m_model.stationAt(i).queue().setRandomStream(&m_rng);
     }
+
+    if (m_trace.isOn()) {
+        std::ostringstream os;
+        os << "**Seed** " << m_rng.seed() << "  \n"
+           << "**Termination** " << m_termination->describe() << "  \n"
+           << "**Model**\n\n```\n" << m_model.describe() << "\n```";
+        m_trace.note(os.str());
+    }
+
+    scheduleEvent(EventType::Arrival, 0.0);   // carries no entity -- see handleArrival
+    m_initialised = true;
+    refreshState();
 }
 
-void SimulationSystem::scheduleEvent(EventType type, SimTime t, Entity* e, Resource* r) {
-    // Scheduling into the PAST is the most common DES bug. Catch it at the
-    // moment of the mistake, not ten thousand events later.
+void SimulationSystem::scheduleEvent(EventType type, SimTime t, Entity* e, Station* s) {
+    // Scheduling into the PAST is the most common DES bug. Catch it where the
+    // mistake is made, not ten thousand events later.
     assert(t >= m_clock.now());
-    m_fel.schedule(EventNotice(type, t, e, r));
-    // Default arguments (= nullptr) live in the HEADER only, never here.
+    m_fel.schedule(EventNotice(type, t, e, s));
 }
 
 void SimulationSystem::run() {
-    assert(m_server != nullptr && "run(): call initialise() first");
+    assert(m_initialised && "call initialise() before run()");
 
-    while (!m_fel.isEmpty() &&
-           !m_termination.isMet(m_clock.now(), m_stats.numberServed()))
-    {
+    while (!m_fel.isEmpty() && !m_termination->isMet(*this)) {
         EventNotice notice = m_fel.popImminent();
 
-        // ORDER IS EVERYTHING. Close the integral for the interval that just
+        // ORDER IS EVERYTHING: close the integrals for the interval that just
         // ended -- using the OLD state -- then move the clock, then let the
-        // handler change the state. Swap any two of these three and every time
-        // average in the report goes quietly wrong.
-        m_stats.updateTimeIntegrals(notice.time(),
-                                    static_cast<int>(m_line->length()),
-                                    m_server->unitsBusy());
+        // handler change state. Swap any two and every time average is wrong.
+        updateAllIntegrals(notice.time());
         m_clock.advanceTo(notice.time());
 
         switch (notice.type()) {
             case EventType::Arrival:       handleArrival(notice);   break;
             case EventType::Departure:     handleDeparture(notice); break;
             case EventType::EndSimulation: return;
-            case EventType::StartService:  /* v3: seize/release as its own event */ break;
+            case EventType::StartService:  break;   // reserved
         }
     }
-    // The clock JUMPS from event to event. Nothing is simulated in between,
-    // because by definition nothing happens in between -- which is why
-    // discrete-event simulation is fast, and why the FEL had to be sorted.
+    // The clock JUMPS event to event. Nothing is simulated in between because
+    // nothing happens in between -- that is why DES is fast, and why the FEL
+    // had to be sorted.
     //
-    // v3: this switch becomes virtual dispatch on an IEventHandler.
+    // NOT abstracted into an IEventHandler hierarchy, deliberately: four cases
+    // that fit on a screen do not need virtual dispatch, and -Wswitch still
+    // tells us when a new EventType appears. Revisit when there are eight.
 }
 
+// ------------------------------------------------------------------ routing --
+
+void SimulationSystem::admit(Entity* e, Station* station) {
+    assert(e != nullptr && station != nullptr);
+
+    // Per-station bookkeeping. "stationEntry" is when this entity reached THIS
+    // station; "waitHere" is how long it waited here. Both are stamped as
+    // attributes rather than kept in a side table because they are single
+    // values with the same lifetime as the entity's visit.
+    station->stats().recordArrival(m_clock.now());
+    e->setAttribute("stationEntry", m_clock.now());
+
+    if (station->resource().isAvailable()) {
+        e->setAttribute("waitHere", 0.0);   // served immediately
+        station->resource().seize();
+        // An Activity: the duration is drawn NOW, so its end can be scheduled
+        // NOW. That is exactly what distinguishes an activity from a delay.
+        const Activity service(station->name(),
+                               m_clock.now(),
+                               station->serviceDistribution().draw(m_rng));
+        scheduleEvent(EventType::Departure, service.endTime(), e, station);
+
+        if (m_trace.isOn()) {
+            std::ostringstream os;
+            os << "server free, service " << std::fixed << std::setprecision(4)
+               << service.duration() << " until " << service.endTime();
+            m_trace.event(m_clock.now(), "Seize", e->id(), station->name(), os.str(),
+                          station->queue().length(), station->resource().unitsBusy());
+        }
+    } else {
+        station->queue().push(e);
+        // A Delay: its end is unknown now and will be decided by the system,
+        // whenever a server here frees up.
+        m_activeDelays.emplace(e->id(), Delay(m_clock.now()));
+
+        if (m_trace.isOn()) {
+            std::ostringstream os;
+            os << "all " << station->resource().capacity() << " busy, queued at position "
+               << station->queue().length();
+            m_trace.event(m_clock.now(), "Queue", e->id(), station->name(), os.str(),
+                          station->queue().length(), station->resource().unitsBusy());
+        }
+    }
+}
+
+void SimulationSystem::startNextService(Station* station) {
+    if (station->queue().isEmpty()) return;
+
+    Entity* next = station->queue().pop();   // obeys the station's discipline
+    assert(next != nullptr);
+
+    // End that entity's Delay. Its waiting time falls out of this, which is the
+    // whole reason Delay is a class rather than a bare timestamp.
+    auto it = m_activeDelays.find(next->id());
+    assert(it != m_activeDelays.end());
+    it->second.end(m_clock.now());
+    const SimTime waited = it->second.duration();
+    m_activeDelays.erase(it);
+
+    // "waitTime" accumulates across every station the entity visits; "waitHere"
+    // is just this visit, and is consumed when service here completes.
+    next->setAttribute("waitTime", next->attribute("waitTime") + waited);
+    next->setAttribute("waitHere", waited);
+
+    station->resource().seize();
+    const Activity service(station->name(), m_clock.now(),
+                           station->serviceDistribution().draw(m_rng));
+    scheduleEvent(EventType::Departure, service.endTime(), next, station);
+
+    if (m_trace.isOn()) {
+        std::ostringstream os;
+        os << "pulled from queue after waiting " << std::fixed << std::setprecision(4)
+           << waited << ", service until " << service.endTime();
+        m_trace.event(m_clock.now(), "Seize", next->id(), station->name(), os.str(),
+                      station->queue().length(), station->resource().unitsBusy());
+    }
+}
+
+// ----------------------------------------------------------------- handlers --
+
 void SimulationSystem::handleArrival(const EventNotice& /*notice*/) {
-    // *** THE ARRIVAL EVENT CARRIES NO ENTITY, AND THE ENTITY IS BORN HERE. ***
-    // The obvious alternative -- create the next entity now and attach it to a
-    // future Arrival -- stamps it with creationTime = now even though it will
-    // not arrive until later, so every time-in-system comes out inflated by one
-    // interarrival gap. Creating on arrival makes the timestamp correct by
-    // construction rather than by remembering to fix it up.
+    // *** THE ARRIVAL EVENT CARRIES NO ENTITY; THE ENTITY IS BORN HERE. ***
+    // Creating it earlier and attaching it to a future Arrival would stamp
+    // creationTime before it actually arrived, inflating every time-in-system.
     Entity* arriving = createEntity();
+    arriving->setAttribute("waitTime", 0.0);
     m_stats.recordArrival(m_clock.now());
 
-    // *** FEED THE SIMULATION. *** Schedule the next arrival. Forget this line
-    // and the run stops after one customer -- the classic first-run bug.
-    scheduleEvent(EventType::Arrival, m_clock.now() + m_rng.exponential(m_meanInterarrival));
-
-    if (m_server->isAvailable()) {
-        m_server->seize();
-        // An Activity: its duration is drawn NOW, so its end can be scheduled
-        // NOW. That is exactly what distinguishes an activity from a delay.
-        const Activity service("Service", m_clock.now(), m_rng.exponential(m_meanService));
-        arriving->setAttribute("waitTime", 0.0);   // served immediately
-        scheduleEvent(EventType::Departure, service.endTime(), arriving, m_server);
-    } else {
-        m_line->push(arriving);
-        // A Delay: its end is unknown right now and will be decided by the
-        // system, in handleDeparture, whenever a server frees up.
-        m_activeDelays.emplace(arriving->id(), Delay(m_clock.now()));
+    if (m_trace.isOn()) {
+        m_trace.event(m_clock.now(), "Arrival", arriving->id(),
+                      m_model.entry()->name(), "enters the system",
+                      m_model.entry()->queue().length(),
+                      m_model.entry()->resource().unitsBusy());
     }
 
+    // *** FEED THE SIMULATION. *** Forget this and the run stops after one
+    // customer -- the classic first-run bug.
+    scheduleEvent(EventType::Arrival, m_clock.now() + m_model.interarrival().draw(m_rng));
+
+    admit(arriving, m_model.entry());
     refreshState();
 }
 
 void SimulationSystem::handleDeparture(const EventNotice& notice) {
-    Entity*   finished = notice.entity();
-    Resource* server   = notice.resource();
-    assert(finished != nullptr && server != nullptr);
+    Entity*  finished = notice.entity();
+    Station* here     = notice.station();
+    assert(finished != nullptr && here != nullptr);
 
-    server->release();
+    here->resource().release();
 
-    // v2.1: Entity::attribute() returns 0.0 for a missing key, so a typo or a
-    // path that forgot to set this would silently report a zero wait and skew
-    // every average. Assert that the value was actually put there.
-    assert(finished->hasAttribute("waitTime") &&
-           "waitTime was never set for this entity");
-    const SimTime wait     = finished->attribute("waitTime");
-    const SimTime inSystem = m_clock.now() - finished->creationTime();
-    m_stats.recordDeparture(m_clock.now(), wait, inSystem);
+    // Service at THIS station is complete: record it against this station.
+    const SimTime waitHere  = finished->attribute("waitHere");
+    const SimTime timeHere  = m_clock.now() - finished->attribute("stationEntry");
+    here->stats().recordDeparture(m_clock.now(), waitHere, timeHere);
 
-    if (!m_line->isEmpty()) {
-        Entity* nextInLine = m_line->pop();   // obeys the queue discipline
-        assert(nextInLine != nullptr);
+    Station* next = here->next();
 
-        // End that entity's Delay. Its waiting time falls out of this, which is
-        // the whole reason the Delay class exists rather than a bare timestamp.
-        auto it = m_activeDelays.find(nextInLine->id());
-        assert(it != m_activeDelays.end());
-        it->second.end(m_clock.now());
-        nextInLine->setAttribute("waitTime", it->second.duration());
-        m_activeDelays.erase(it);
+    if (next != nullptr) {
+        // A CHAIN. The entity is not done -- it moves to the next station and
+        // is admitted there exactly as if it had just arrived. One function for
+        // both paths is what makes networks work.
+        if (m_trace.isOn()) {
+            m_trace.event(m_clock.now(), "Move", finished->id(), here->name(),
+                          "service done, routing to " + next->name(),
+                          here->queue().length(), here->resource().unitsBusy());
+        }
+        startNextService(here);       // free server, so pull the next one here
+        admit(finished, next);
+    } else {
+        // EXIT. The entity leaves the system.
+        assert(finished->hasAttribute("waitTime") && "waitTime was never set");
+        const SimTime wait     = finished->attribute("waitTime");
+        const SimTime inSystem = m_clock.now() - finished->creationTime();
+        m_stats.recordDeparture(m_clock.now(), wait, inSystem);
 
-        server->seize();
-        const Activity service("Service", m_clock.now(), m_rng.exponential(m_meanService));
-        scheduleEvent(EventType::Departure, service.endTime(), nextInLine, server);
+        if (m_trace.isOn()) {
+            std::ostringstream os;
+            os << std::fixed << std::setprecision(4)
+               << "exits; total wait " << wait << ", time in system " << inSystem;
+            m_trace.event(m_clock.now(), "Exit", finished->id(), here->name(), os.str(),
+                          here->queue().length(), here->resource().unitsBusy());
+        }
+
+        startNextService(here);
+        const EntityId id = finished->id();
+        refreshState();
+        // Destroy LAST: everything above still reads through `finished`, and
+        // after this line that pointer dangles.
+        destroyEntity(id);
+        return;
     }
-
-    // v2.1: the entity has left the system. Destroy it LAST -- everything above
-    // still reads through `finished`, and after this line that pointer dangles.
-    destroyEntity(finished->id());
 
     refreshState();
 }
 
+// ------------------------------------------------------------------ report --
+
 void SimulationSystem::report() const {
     const SimTime total = m_clock.now();
-
     std::cout << std::fixed << std::setprecision(4);
-    std::cout << "--- simulation report -------------------------------------\n";
+    std::cout << "=== simulation report =====================================\n";
     std::cout << "seed                     : " << m_rng.seed() << "\n";
+    std::cout << "termination              : "
+              << (m_termination ? m_termination->describe() : "<none>") << "\n";
     std::cout << "total simulated time     : " << total << "\n";
     std::cout << "entities arrived         : " << m_stats.numberArrived() << "\n";
-    std::cout << "entities served          : " << m_stats.numberServed() << "\n";
-    // Ask Statistics for the derived values instead of recomputing them here.
-    // Doing the division at the call site would put the same formula in two
-    // places -- and the guarded versions live in Statistics for a reason.
-    std::cout << "average waiting time     : " << m_stats.averageWaitingTime() << "\n";
+    std::cout << "entities exited          : " << m_stats.numberServed() << "\n";
+    std::cout << "average total wait       : " << m_stats.averageWaitingTime() << "\n";
     std::cout << "average time in system   : " << m_stats.averageTimeInSystem() << "\n";
-    std::cout << "max waiting time         : " << m_stats.maxWaitingTime() << "\n";
-    std::cout << "time-average queue length: " << m_stats.timeAverageQueueLength(total) << "\n";
-    std::cout << "max queue length observed: " << (m_line ? m_line->maxLengthObserved() : 0) << "\n";
-    std::cout << "server utilisation       : "
-              << m_stats.serverUtilisation(total, m_server ? m_server->capacity() : 0) << "\n";
+    std::cout << "max total wait           : " << m_stats.maxWaitingTime() << "\n";
+    // The system-level Statistics object was fed (numberInQueue, numberInSystem)
+    // rather than (queueLength, serversBusy), so its two integrals mean L_q and
+    // L. Reusing the class this way is a small abuse of its member NAMES -- and
+    // a fair sign that in v4 those should become areaUnder[A] / areaUnder[B]
+    // with the meaning supplied by the caller.
+    std::cout << "time-avg in queue (Lq)   : " << m_stats.timeAverageQueueLength(total) << "\n";
+    std::cout << "time-avg in system (L)   : " << m_stats.serverUtilisation(total, 1) << "\n";
     std::cout << "still waiting at stop    : " << m_activeDelays.size() << "\n";
     std::cout << "live entity objects      : " << m_entities.size() << "\n";
-    std::cout << "-----------------------------------------------------------\n";
-    // v4: this becomes a Report object that can emit text or CSV.
+    std::cout << "\n";
+    std::cout << "  station        cap   served    avg wait   time-avg Q    util   maxQ\n";
+    std::cout << "  -----------------------------------------------------------------\n";
+    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
+        const Station& s = m_model.stationAt(i);
+        std::cout << "  " << std::setw(12) << std::left << s.name() << std::right
+                  << std::setw(5)  << s.resource().capacity()
+                  << std::setw(9)  << s.stats().numberArrived()
+                  << std::setw(12) << s.stats().averageWaitingTime()
+                  << std::setw(13) << s.stats().timeAverageQueueLength(total)
+                  << std::setw(8)  << s.stats().serverUtilisation(total, s.resource().capacity())
+                  << std::setw(7)  << s.queue().maxLengthObserved()
+                  << "\n";
+    }
+    std::cout << "===========================================================\n";
 }
