@@ -28,7 +28,7 @@ int main() {
         std::vector<SimTime>{2, 4, 1, 3, 5}));
 
     // Service times, in order, for the 1st, 2nd, 3rd... customer SERVED.
-    m.addStation("Server", 1, QueueDiscipline::FIFO,
+    m.station("Server", 1, QueueDiscipline::FIFO,
                  std::make_unique<Deterministic>(
                      std::vector<SimTime>{3, 2, 4, 1, 2}));
     m.setEntry("Server");

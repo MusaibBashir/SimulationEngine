@@ -5,6 +5,65 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [6.0.0] — 2026-08-22 — "A model is a flowchart"
+
+A model is now a graph of blocks in the spirit of Arena's Basic Process template,
+not a chain of stations. Narrative in `V6_READLOG.md`.
+
+### Added
+
+- **Blocks**: `Process` (the old Station: seize-delay-release), `Delay` (time
+  without a resource), `Assign`, `Decide` (by chance or by condition), `Batch`
+  (permanent or temporary), `Separate` (split a batch, or duplicate), `Record`
+  (count / attribute / time in system), `Dispose`.
+- **`INode` and `NodeContext`.** After five versions of declining to build an
+  event-handler hierarchy, v6 builds it — because blocks must live outside the
+  engine and `Batch` is exactly the "handler that carries state" named as the
+  trigger. The resolution was *not* to widen `SimulationSystem`'s public
+  interface: `NodeContext` is a narrow facade with the six operations a block may
+  perform and nothing else.
+- **Visit ratios.** `Model::visitRatios()` walks the flowchart carrying a weight
+  — chance branches split it, a batch of *n* divides it by *n*, a duplicate of
+  *k* multiplies it by *k+1*. The ρ check uses them, so a station behind a 10%
+  branch is no longer judged as if it saw every entity. Where the split depends
+  on entity state (a condition-based Decide) the result is flagged inexact and
+  the check relaxes rather than inventing a number.
+- `Entity` batching support: `addMember`, `members`, `isBatch`,
+  `copyAttributesFrom`, and `setCreationTime` (used only so a batch inherits its
+  oldest member's birth time).
+- `Model::nodeAs<T>(name)`, `route`/`routeTrue`, and per-block counters.
+- Example 11: the full block set as a manufacturing line, plus a second model
+  showing temporary batching, `Separate`, and a condition-based Decide.
+
+### Changed
+
+- **The engine no longer knows how service works.** `admit()` and
+  `startNextService()` moved into `Station`; the engine advances the clock, hands
+  entities to blocks, and keeps statistics. The `m_activeDelays` map moved to the
+  queue the entity is waiting in.
+- `EventNotice` names an `INode*`, not a `Station*`.
+- `Model::addStation` is now `Model::station` / `process` and returns `Model&`.
+
+### Fixed
+
+- **Block counters ignored the warm-up** while `Statistics` respected it — two
+  numbers in one report measuring different periods. Added
+  `INode::resetStatistics(now)`, called for every block at warm-up. Caught by
+  example 11 reporting more parts inspected than entities arrived.
+- **`typeinfo for des::INode` undefined at link time.** Every virtual was inline
+  in the header, so the class had no key function and nothing emitted its vtable
+  or typeinfo, which `dynamic_cast` needs. `src/Node.cpp` exists to define one
+  virtual out of line.
+
+### Verified
+
+- **189/189 checks** (160 in v5); clean under `-Wall -Wextra -Wpedantic` and
+  `-fsanitize=address,undefined`.
+- All v1–v5 tests pass unchanged and every existing example reproduces its v5
+  numbers.
+
+---
+
 ## [5.0.0] — 2026-08-22 — "The same engine, easier to hold"
 
 **No simulation logic changed.** Every example produces byte-identical output to
@@ -530,20 +589,13 @@ filling the bodies is v2.
 
 ---
 
-## [Unreleased] — v6
+## [Unreleased] — v7
 
-1. **Probabilistic routing** — an entity leaving a station picks its next by
-   probability, or by a rule. This is the biggest modelling gap left, and it is
-   also what breaks the v5 stability check: offered load then needs visit ratios
-   rather than assuming one visit per station.
-2. **Common random numbers and antithetic variates** — narrower intervals for the
-   same compute. `constant()` already consumes nothing from the stream, which is
-   a precondition.
-3. **Batch means** — an alternative to independent replications when the warm-up
-   is expensive to repeat.
-4. **Config file input** — now that `ModelError` exists, the validation story is
-   in place and this is finally worth building.
-5. **Balking and reneging** — customers who refuse to join a long queue, or leave
-   after waiting too long. These need handlers that carry state, which is the
-   long-standing trigger for `IEventHandler`.
-6. **Widen `EntityId`** — a plain `int` overflows on a very long run. One line.
+1. **Resource sets** — one operator shared across several Process blocks. The
+   biggest remaining modelling gap: a Process currently owns its servers.
+2. **Common random numbers**, then antithetic variates.
+3. **Balking and reneging** — now straightforward, since blocks carry state.
+4. **Config file input** — `ModelError` gave it a validation story, v6 gave it a
+   graph to describe.
+5. **N-way Decide** and **batch by attribute**.
+6. **Widen `EntityId`.**

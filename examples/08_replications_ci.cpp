@@ -24,7 +24,7 @@ namespace {
 void buildMM1(SimulationSystem& s) {
     Model& m = s.model();
     m.setInterarrival(exponential(1.0));
-    m.addStation("Server", 1, QueueDiscipline::FIFO, exponential(0.8));
+    m.station("Server", 1, QueueDiscipline::FIFO, exponential(0.8));
     m.setEntry("Server");
     s.setTermination(timeLimit(20000.0));
 }

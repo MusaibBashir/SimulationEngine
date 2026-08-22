@@ -1,89 +1,90 @@
 // ============================================================================
-// Station.hpp  --  v3 step 3/4: one place where service happens
+// Station.hpp  --  the PROCESS node: seize, delay, release
 // ============================================================================
-// v2 had a single cached m_server and m_line inside SimulationSystem. That was
-// fine for one server and broke the moment you wanted a restaurant: host, then
-// waiter, then cashier. A Station bundles the four things a service point owns:
+// Arena calls this Process; this project has called it Station since v3 and the
+// name is kept so existing models still compile. `Process` is an alias.
 //
-//     a Resource (capacity c)  +  a queue  +  a service distribution
-//     +  where entities go NEXT
+// It bundles the four things a service point owns:
+//     a Resource (capacity c) + a queue + a service time + where entities go next
 //
-// The last one is the whole point. Routing is what turns a queue into a network.
+// v6: it is now an INode, and the seize/queue/release logic lives HERE rather
+// than in SimulationSystem. That is the real structural change of this version.
+// The engine used to know how service worked; now it only knows how to move time
+// forward, and every behaviour is a node.
 
 #pragma once
 
-#include <string>
+#include <map>
 #include <memory>
+#include <string>
 #include "Common.hpp"
+#include "Node.hpp"
 #include "Resource.hpp"
 #include "EntityQueue.hpp"
 #include "Statistics.hpp"
 #include "Distribution.hpp"
+#include "Delay.hpp"
 
 namespace des {
 
-
-class Entity;
-class RandomStream;
-
-class Station {
+class Station : public INode {
 private:
-    std::string m_name;
     Resource    m_resource;    // by value: the station OWNS its servers
-    EntityQueue m_queue;       // by value: and its waiting line
+    EntityQueue m_queue;       // and its waiting line
     std::unique_ptr<IDistribution> m_service;
 
-    // Where an entity goes after being served here. nullptr means "leaves the
-    // system". A raw pointer because the Model owns every Station -- same
-    // owner/observer rule as everywhere else in this project.
-    Station* m_next{nullptr};
-
-    // v4.1: if non-empty, service duration is READ FROM THE ENTITY'S ATTRIBUTE
-    // of this name instead of drawn from m_service. Job-shop models need this:
-    // a job carries its own processing time, and SPT sequences on the same
-    // number that is actually used, rather than on an unrelated estimate.
+    // v4.1: if non-empty, service duration is read from the entity's attribute
+    // of this name. Job shops need it -- a job carries its own processing time,
+    // and SPT then sequences on the number that is actually used.
     std::string m_serviceAttribute;
 
-    // Per-station statistics. Utilisation and queue length are properties of a
-    // station, not of the system: a restaurant can have an idle host and a
-    // swamped kitchen, and one system-wide number would hide exactly that.
     Statistics m_stats;
+
+    // v6: the Delay each queued entity is inside now lives with the QUEUE it is
+    // waiting in, rather than in one map on the engine. A delay is a fact about
+    // this queue, and moving it here is what let SimulationSystem stop knowing
+    // anything about waiting.
+    std::map<EntityId, Delay> m_waitingSince;
 
 public:
     Station(std::string name, int capacity,
             std::unique_ptr<IQueueRule> rule,
             std::unique_ptr<IDistribution> service);
 
-    Station(const Station&) = delete;
-    Station& operator=(const Station&) = delete;
+    // --- INode ---
+    void enter(NodeContext& ctx, Entity* e) override;
+    void onScheduledEvent(NodeContext& ctx, Entity* e) override;
+    void reset() override;
+    void resetStatistics(SimTime now) override;
+    std::string describe() const override;
+    double loadPerVisit() const override;
 
-    const std::string& name() const { return m_name; }
+    // --- configuration ---
+    void setServiceFromAttribute(const std::string& attributeName);
+    bool usesServiceAttribute() const { return !m_serviceAttribute.empty(); }
+    const std::string& serviceAttributeName() const { return m_serviceAttribute; }
+    void setRandomStream(RandomStream* rng) { m_queue.setRandomStream(rng); }
+
+    // --- access ---
     Resource&    resource()       { return m_resource; }
     const Resource& resource() const { return m_resource; }
     EntityQueue& queue()          { return m_queue; }
     const EntityQueue& queue() const { return m_queue; }
     Statistics&  stats()          { return m_stats; }
     const Statistics& stats() const { return m_stats; }
-
     IDistribution& serviceDistribution() { return *m_service; }
     const IDistribution& serviceDistribution() const { return *m_service; }
+    std::size_t stillWaiting() const { return m_waitingSince.size(); }
 
-    // v4.1. Pass an empty string to go back to drawing from the distribution.
-    void setServiceFromAttribute(const std::string& attributeName);
-    bool usesServiceAttribute() const { return !m_serviceAttribute.empty(); }
-    const std::string& serviceAttributeName() const { return m_serviceAttribute; }
-
-    // The one place a service duration comes from, whichever source is in use.
     SimTime drawService(const Entity& e, RandomStream& rng);
 
-    Station* next() const { return m_next; }
-    void setNext(Station* next) { m_next = next; }
-    bool isExit() const { return m_next == nullptr; }
-
-    // Run state resets; name, capacity, rule and distribution survive.
-    void reset();
-
-    std::string describe() const;
+private:
+    // Pull the next waiting entity into service, if any and if a server is free.
+    void startNextService(NodeContext& ctx);
+    void beginService(NodeContext& ctx, Entity* e, SimTime waited);
 };
+
+// Arena's name for the same block.
+using Process = Station;
 
 }  // namespace des

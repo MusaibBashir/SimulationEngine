@@ -5,6 +5,7 @@
 #include "SimulationSystem.hpp"
 #include "Activity.hpp"
 #include "Build.hpp"
+#include "Nodes.hpp"
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -48,17 +49,48 @@ Entity* SimulationSystem::createEntity() {
 }
 
 void SimulationSystem::destroyEntity(EntityId id) {
-    assert(m_activeDelays.find(id) == m_activeDelays.end() &&
-           "destroying an entity that is still inside a Delay");
     m_entities.erase(id);
 }
 
 // ------------------------------------------------------------------ state --
 
+// ---------------------------------------------------------- NodeContext --
+// The narrow facade a node sees. Six operations, and nothing else: a node
+// cannot reach the event list, the statistics, the entity table or the clock.
+// That is the whole reason this class exists rather than making the engine's
+// members public.
+
+SimTime NodeContext::now() const { return m_sim.m_clock.now(); }
+RandomStream& NodeContext::rng() { return m_sim.m_rng; }
+Trace& NodeContext::trace() { return m_sim.m_trace; }
+Entity* NodeContext::createEntity() { return m_sim.createEntity(); }
+void NodeContext::destroy(Entity* e) { m_sim.destroyEntity(e->id()); }
+
+void NodeContext::route(Entity* e, INode* to) {
+    if (to == nullptr) { m_sim.disposeEntity(e); return; }
+    // Direct call, not an event: moving between blocks takes no simulated time
+    // unless a block says otherwise. A long chain of Assign/Decide/Record blocks
+    // therefore recurses -- fine for any sane flowchart, and the alternative
+    // (a zero-delay event for every hop) would bloat the FEL for no benefit.
+    to->enter(*this, e);
+}
+
+void NodeContext::scheduleReturn(SimTime at, Entity* e, INode* node) {
+    m_sim.scheduleEvent(EventType::Departure, at, e, node);
+}
+
+// ------------------------------------------------------------------ state --
+
+std::size_t SimulationSystem::stillWaitingCount() const {
+    std::size_t n = 0;
+    for (std::size_t i = 0; i < m_model.stationCount(); ++i)
+        n += m_model.stationAt(i).stillWaiting();
+    return n;
+}
+
 void SimulationSystem::refreshState() {
-    // SystemState is a SNAPSHOT summed across every station -- resolution (b) of
-    // the duplication flagged back in v1. The stations remain the single source
-    // of truth; SystemState never decides anything, it only reports.
+    // SystemState is a SNAPSHOT summed across every process block. The blocks
+    // remain the single source of truth; SystemState never decides anything.
     int queued = 0;
     int busy   = 0;
     for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
@@ -72,9 +104,6 @@ void SimulationSystem::refreshState() {
 }
 
 void SimulationSystem::updateAllIntegrals(SimTime upTo) {
-    // Per station, because utilisation and queue length are station properties.
-    // A restaurant can have an idle host and a swamped kitchen; one system-wide
-    // number would hide precisely the thing you are trying to see.
     for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
         Station& s = m_model.stationAt(i);
         s.stats().updateTimeIntegrals(upTo,
@@ -84,7 +113,28 @@ void SimulationSystem::updateAllIntegrals(SimTime upTo) {
     m_stats.updateTimeIntegrals(upTo, m_state.numberInQueue(), m_state.numberInSystem());
 }
 
-// --------------------------------------------------------------- lifecycle --
+void SimulationSystem::disposeEntity(Entity* e) {
+    // The entity has left the system. Record it against the system-wide
+    // statistics, then destroy it -- LAST, because everything above reads
+    // through the pointer and after destruction it dangles.
+    const SimTime wait     = e->attribute("waitTime");
+    const SimTime inSystem = m_clock.now() - e->creationTime();
+    m_stats.recordDeparture(m_clock.now(), wait, inSystem);
+
+    if (m_trace.isOn()) {
+        std::ostringstream os;
+        os << std::fixed << std::setprecision(4)
+           << "exits; total wait " << wait << ", time in system " << inSystem;
+        m_trace.event(m_clock.now(), "Exit", e->id(), "-", os.str(), 0, 0);
+    }
+
+    // A temporary batch that reaches an exit without being separated takes its
+    // members with it -- they are still in the system in every sense that
+    // matters, and leaking them would grow the entity table forever.
+    for (Entity* member : e->members()) destroyEntity(member->id());
+    destroyEntity(e->id());
+    refreshState();
+}
 
 void SimulationSystem::initialise() {
     m_model.validate();          // catch modelling mistakes BEFORE the run
@@ -96,7 +146,6 @@ void SimulationSystem::initialise() {
     m_state.reset();
     m_rng.reset();
     m_fel.clear();
-    m_activeDelays.clear();
     m_entities.clear();
     m_nextEntityId = 1;
     m_model.reset();
@@ -122,11 +171,11 @@ void SimulationSystem::initialise() {
     refreshState();
 }
 
-void SimulationSystem::scheduleEvent(EventType type, SimTime t, Entity* e, Station* s) {
+void SimulationSystem::scheduleEvent(EventType type, SimTime t, Entity* e, INode* node) {
     // Scheduling into the PAST is the most common DES bug. Catch it where the
     // mistake is made, not ten thousand events later.
     assert(t >= m_clock.now());
-    m_fel.schedule(EventNotice(type, t, e, s));
+    m_fel.schedule(EventNotice(type, t, e, node));
 }
 
 void SimulationSystem::run() {
@@ -154,112 +203,35 @@ void SimulationSystem::run() {
     // nothing happens in between -- that is why DES is fast, and why the FEL
     // had to be sorted.
     //
-    // STILL NOT an IEventHandler hierarchy, and v4 sharpened the reason rather
-    // than weakening it. The switch is six cases now, but the cost of the
-    // abstraction is not the hierarchy -- it is that handler objects living
-    // outside this class would need admit(), startNextService(), createEntity()
-    // and refreshState() made public, or five friend declarations. Widening the
-    // public interface to satisfy an abstraction is a worse trade than a switch
-    // that fits on a screen, and -Wswitch still flags a new EventType for free.
+    // The switch stays -- it dispatches on the KIND OF EVENT, of which there are
+    // six, and that is genuinely all this loop does now.
     //
-    // The thing that would actually change the answer: handlers that carry
-    // STATE (pre-emption, balking, reneging). A switch cannot hold state; an
-    // object can. Build it then, not before.
+    // What v6 changed is the other axis. Five versions running, this project
+    // declined to build an IEventHandler hierarchy because handler objects
+    // outside this class would have needed its internals made public. v6 builds
+    // it anyway, because nodes must live outside the engine and Batch is exactly
+    // the "handler that carries state" that was named as the trigger.
+    //
+    // The resolution was not to widen this class's public interface. It was
+    // NodeContext: a narrow, role-specific facade holding the six operations a
+    // node may perform. The general lesson -- when an abstraction says it needs
+    // your internals, publish an interface for its ROLE, not your whole class.
 }
 
 // ------------------------------------------------------------------ routing --
 
-void SimulationSystem::admit(Entity* e, Station* station) {
-    assert(e != nullptr && station != nullptr);
-
-    // Per-station bookkeeping. "stationEntry" is when this entity reached THIS
-    // station; "waitHere" is how long it waited here. Both are stamped as
-    // attributes rather than kept in a side table because they are single
-    // values with the same lifetime as the entity's visit.
-    station->stats().recordArrival(m_clock.now());
-    e->setAttribute("stationEntry", m_clock.now());
-
-    if (station->resource().isAvailable()) {
-        e->setAttribute("waitHere", 0.0);   // served immediately
-        station->resource().seize();
-        // An Activity: the duration is drawn NOW, so its end can be scheduled
-        // NOW. That is exactly what distinguishes an activity from a delay.
-        const Activity service(station->name(),
-                               m_clock.now(),
-                               station->drawService(*e, m_rng));
-        scheduleEvent(EventType::Departure, service.endTime(), e, station);
-
-        if (m_trace.isOn()) {
-            std::ostringstream os;
-            os << "server free, service " << std::fixed << std::setprecision(4)
-               << service.duration() << " until " << service.endTime();
-            m_trace.event(m_clock.now(), "Seize", e->id(), station->name(), os.str(),
-                          station->queue().length(), station->resource().unitsBusy());
-        }
-    } else {
-        station->queue().push(e);
-        // A Delay: its end is unknown now and will be decided by the system,
-        // whenever a server here frees up.
-        m_activeDelays.emplace(e->id(), Delay(m_clock.now()));
-
-        if (m_trace.isOn()) {
-            std::ostringstream os;
-            os << "all " << station->resource().capacity() << " busy, queued at position "
-               << station->queue().length();
-            m_trace.event(m_clock.now(), "Queue", e->id(), station->name(), os.str(),
-                          station->queue().length(), station->resource().unitsBusy());
-        }
-    }
-}
-
-void SimulationSystem::startNextService(Station* station) {
-    if (station->queue().isEmpty()) return;
-
-    Entity* next = station->queue().pop();   // obeys the station's discipline
-    assert(next != nullptr);
-
-    // End that entity's Delay. Its waiting time falls out of this, which is the
-    // whole reason Delay is a class rather than a bare timestamp.
-    auto it = m_activeDelays.find(next->id());
-    assert(it != m_activeDelays.end());
-    it->second.end(m_clock.now());
-    const SimTime waited = it->second.duration();
-    m_activeDelays.erase(it);
-
-    // "waitTime" accumulates across every station the entity visits; "waitHere"
-    // is just this visit, and is consumed when service here completes.
-    next->setAttribute("waitTime", next->attribute("waitTime") + waited);
-    next->setAttribute("waitHere", waited);
-
-    station->resource().seize();
-    const Activity service(station->name(), m_clock.now(),
-                           station->drawService(*next, m_rng));
-    scheduleEvent(EventType::Departure, service.endTime(), next, station);
-
-    if (m_trace.isOn()) {
-        std::ostringstream os;
-        os << "pulled from queue after waiting " << std::fixed << std::setprecision(4)
-           << waited << ", service until " << service.endTime();
-        m_trace.event(m_clock.now(), "Seize", next->id(), station->name(), os.str(),
-                      station->queue().length(), station->resource().unitsBusy());
-    }
-}
-
-// ----------------------------------------------------------------- handlers --
-
 void SimulationSystem::handleWarmUpEnd() {
-    // *** WELCH'S METHOD, the whole of it. ***
+    // *** WARM-UP REMOVAL, the whole of it. ***
     // Throw away every measurement taken so far and start again from now. The
     // SYSTEM STATE is deliberately untouched: entities in service stay in
-    // service, queues keep their contents. That is the point -- measurement now
-    // begins from a realistically loaded system rather than an empty one, and
-    // the start-up transient never enters an average.
+    // service, queues keep their contents. Measurement now begins from a
+    // realistically loaded system rather than an empty one.
     m_stats.restartAt(m_clock.now());
-    for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
-        Station& s = m_model.stationAt(i);
-        s.stats().restartAt(m_clock.now());
-        s.queue().resetStatistics();
-    }
+    // EVERY block, not just the process ones -- a Record or Decide counter that
+    // spanned the warm-up while the utilisation next to it did not would be two
+    // numbers in one report meaning different periods.
+    for (std::size_t i = 0; i < m_model.nodeCount(); ++i)
+        m_model.nodeAt(i).resetStatistics(m_clock.now());
     m_warmUpEnded = m_clock.now();
 
     if (m_trace.isOn()) {
@@ -270,9 +242,9 @@ void SimulationSystem::handleWarmUpEnd() {
 }
 
 void SimulationSystem::handleObservation() {
-    // Sample on a FIXED GRID, not at events. Welch's method averages replication
-    // i's observation k with replication j's observation k, so the observations
-    // have to line up -- and event times never do.
+    // Sample on a FIXED GRID, not at events, so replication i's observation k
+    // can be averaged with replication j's observation k. Event times never
+    // line up; grid points do.
     m_observations.push_back(static_cast<double>(m_state.numberInSystem()));
     scheduleEvent(EventType::Observe, m_clock.now() + m_observeInterval);
 }
@@ -283,76 +255,36 @@ void SimulationSystem::handleArrival(const EventNotice& /*notice*/) {
     // creationTime before it actually arrived, inflating every time-in-system.
     Entity* arriving = createEntity();
     arriving->setAttribute("waitTime", 0.0);
-    // v4.1: stamp the model's arrival attributes -- priority, due date,
-    // processing time, whatever this model says an entity carries.
     for (const auto& a : m_model.arrivalAttributes())
         arriving->setAttribute(a.name, a.distribution->draw(m_rng));
     m_stats.recordArrival(m_clock.now());
 
     if (m_trace.isOn()) {
         m_trace.event(m_clock.now(), "Arrival", arriving->id(),
-                      m_model.entry()->name(), "enters the system",
-                      m_model.entry()->queue().length(),
-                      m_model.entry()->resource().unitsBusy());
+                      m_model.entry()->name(), "enters the system", 0, 0);
     }
 
     // *** FEED THE SIMULATION. *** Forget this and the run stops after one
-    // customer -- the classic first-run bug.
+    // entity -- the classic first-run bug.
     scheduleEvent(EventType::Arrival, m_clock.now() + m_model.interarrival().draw(m_rng));
 
-    admit(arriving, m_model.entry());
+    // Hand it to the first block. From here the FLOWCHART decides everything;
+    // the engine's only remaining job is to move the clock.
+    NodeContext ctx(*this);
+    ctx.route(arriving, m_model.entry());
     refreshState();
 }
 
 void SimulationSystem::handleDeparture(const EventNotice& notice) {
-    Entity*  finished = notice.entity();
-    Station* here     = notice.station();
-    assert(finished != nullptr && here != nullptr);
+    // A block asked to be called back at this time -- a service or a delay has
+    // finished. Which block, and what that means, is entirely the block's
+    // business. v5's engine knew how service worked; this one does not.
+    Entity* e    = notice.entity();
+    INode*  node = notice.node();
+    assert(e != nullptr && node != nullptr);
 
-    here->resource().release();
-
-    // Service at THIS station is complete: record it against this station.
-    const SimTime waitHere  = finished->attribute("waitHere");
-    const SimTime timeHere  = m_clock.now() - finished->attribute("stationEntry");
-    here->stats().recordDeparture(m_clock.now(), waitHere, timeHere);
-
-    Station* next = here->next();
-
-    if (next != nullptr) {
-        // A CHAIN. The entity is not done -- it moves to the next station and
-        // is admitted there exactly as if it had just arrived. One function for
-        // both paths is what makes networks work.
-        if (m_trace.isOn()) {
-            m_trace.event(m_clock.now(), "Move", finished->id(), here->name(),
-                          "service done, routing to " + next->name(),
-                          here->queue().length(), here->resource().unitsBusy());
-        }
-        startNextService(here);       // free server, so pull the next one here
-        admit(finished, next);
-    } else {
-        // EXIT. The entity leaves the system.
-        assert(finished->hasAttribute("waitTime") && "waitTime was never set");
-        const SimTime wait     = finished->attribute("waitTime");
-        const SimTime inSystem = m_clock.now() - finished->creationTime();
-        m_stats.recordDeparture(m_clock.now(), wait, inSystem);
-
-        if (m_trace.isOn()) {
-            std::ostringstream os;
-            os << std::fixed << std::setprecision(4)
-               << "exits; total wait " << wait << ", time in system " << inSystem;
-            m_trace.event(m_clock.now(), "Exit", finished->id(), here->name(), os.str(),
-                          here->queue().length(), here->resource().unitsBusy());
-        }
-
-        startNextService(here);
-        const EntityId id = finished->id();
-        refreshState();
-        // Destroy LAST: everything above still reads through `finished`, and
-        // after this line that pointer dangles.
-        destroyEntity(id);
-        return;
-    }
-
+    NodeContext ctx(*this);
+    node->onScheduledEvent(ctx, e);
     refreshState();
 }
 
@@ -401,7 +333,7 @@ RunResults SimulationSystem::results() const {
     r.maxWait               = m_stats.maxWaitingTime();
     r.averageNumberInQueue  = m_stats.timeAverageA(measured);
     r.averageNumberInSystem = m_stats.timeAverageB(measured);
-    r.stillWaitingAtStop    = m_activeDelays.size();
+    r.stillWaitingAtStop    = stillWaitingCount();
 
     for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
         const Station& s = m_model.stationAt(i);

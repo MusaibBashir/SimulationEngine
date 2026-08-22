@@ -5,161 +5,315 @@
 #include "Model.hpp"
 #include "QueueRule.hpp"
 #include <cassert>
-#include <sstream>
 #include <set>
+#include <sstream>
 
 namespace des {
 
+// ------------------------------------------------------------- building --
 
-Station* Model::addStation(const std::string& name, int capacity,
-                           QueueDiscipline discipline,
-                           std::unique_ptr<IDistribution> service) {
-    return addStation(name, capacity, makeQueueRule(discipline), std::move(service));
+void Model::requireUnique(const std::string& name) const {
+    if (node(name) != nullptr)
+        throw ModelError("a block named '" + name + "' already exists");
+}
+
+INode* Model::add(std::unique_ptr<INode> n) {
+    INode* raw = n.get();
+    m_nodes.push_back(std::move(n));
+    if (m_entry == nullptr) m_entry = raw;   // first block added is the default entry
+    return raw;
 }
 
 Model& Model::arrivals(std::unique_ptr<IDistribution> d) {
-    setInterarrival(std::move(d));
+    if (!d) throw ModelError("arrivals: null distribution");
+    m_interarrival = std::move(d);
+    return *this;
+}
+
+Model& Model::attribute(const std::string& name, std::unique_ptr<IDistribution> d) {
+    if (!d) throw ModelError("attribute '" + name + "': null distribution");
+    if (name == "waitTime" || name == "stationEntry" || name == "waitHere")
+        throw ModelError("attribute: '" + name + "' is reserved by the engine");
+    m_arrivalAttributes.push_back(ArrivalAttribute{name, std::move(d)});
     return *this;
 }
 
 Model& Model::station(const std::string& name, int capacity,
                       QueueDiscipline discipline, std::unique_ptr<IDistribution> service) {
-    addStation(name, capacity, discipline, std::move(service));
+    requireUnique(name);
+    if (capacity < 1) throw ModelError("process '" + name + "' needs capacity >= 1");
+    if (!service)     throw ModelError("process '" + name + "': null service distribution");
+    auto s = std::make_unique<Station>(name, capacity, makeQueueRule(discipline), std::move(service));
+    Station* raw = s.get();
+    add(std::move(s));
+    m_processes.push_back(raw);
     return *this;
 }
 
+Model& Model::delay(const std::string& name, std::unique_ptr<IDistribution> duration) {
+    requireUnique(name);
+    add(std::make_unique<DelayNode>(name, std::move(duration)));
+    return *this;
+}
+
+Model& Model::assign(const std::string& name, const std::string& attributeName,
+                     std::unique_ptr<IDistribution> value) {
+    // Calling assign() twice with the same block name adds a second attribute to
+    // the SAME block rather than erroring -- which is how people expect an
+    // Assign block with several fields to be written.
+    if (INode* existing = node(name)) {
+        auto* a = dynamic_cast<AssignNode*>(existing);
+        if (!a) throw ModelError("block '" + name + "' exists and is not an Assign");
+        a->set(attributeName, std::move(value));
+        return *this;
+    }
+    auto a = std::make_unique<AssignNode>(name);
+    a->set(attributeName, std::move(value));
+    add(std::move(a));
+    return *this;
+}
+
+Model& Model::decideByChance(const std::string& name, double p) {
+    requireUnique(name);
+    add(std::make_unique<DecideNode>(name, p));
+    return *this;
+}
+
+Model& Model::decideByCondition(const std::string& name, DecideNode::Condition c) {
+    requireUnique(name);
+    add(std::make_unique<DecideNode>(name, std::move(c)));
+    return *this;
+}
+
+Model& Model::batch(const std::string& name, std::size_t size, bool permanent) {
+    requireUnique(name);
+    add(std::make_unique<BatchNode>(name, size, permanent));
+    return *this;
+}
+
+Model& Model::separate(const std::string& name) {
+    requireUnique(name);
+    add(std::make_unique<SeparateNode>(name));
+    return *this;
+}
+
+Model& Model::duplicate(const std::string& name, int copies) {
+    requireUnique(name);
+    add(std::make_unique<SeparateNode>(name, copies));
+    return *this;
+}
+
+Model& Model::record(const std::string& name) {
+    requireUnique(name);
+    add(std::make_unique<RecordNode>(name));
+    return *this;
+}
+
+Model& Model::recordAttribute(const std::string& name, const std::string& attributeName) {
+    requireUnique(name);
+    add(std::make_unique<RecordNode>(name, attributeName));
+    return *this;
+}
+
+Model& Model::recordTimeInSystem(const std::string& name) {
+    requireUnique(name);
+    add(RecordNode::timeInSystem(name));
+    return *this;
+}
+
+Model& Model::dispose(const std::string& name) {
+    requireUnique(name);
+    add(std::make_unique<DisposeNode>(name));
+    return *this;
+}
+
+// -------------------------------------------------------------- wiring --
+
 Model& Model::route(const std::string& from, const std::string& to) {
-    connect(from, to);
+    INode* f = node(from);
+    INode* t = node(to);
+    if (!f) throw ModelError("route: no block named '" + from + "'");
+    if (!t) throw ModelError("route: no block named '" + to + "'");
+    if (f == t) throw ModelError("route: '" + from + "' cannot route to itself");
+    f->setNext(t);
+    return *this;
+}
+
+Model& Model::routeTrue(const std::string& decideName, const std::string& to) {
+    INode* t = node(to);
+    if (!t) throw ModelError("routeTrue: no block named '" + to + "'");
+    nodeAs<DecideNode>(decideName).setTrueBranch(t);
     return *this;
 }
 
 Model& Model::entryAt(const std::string& name) {
-    setEntry(name);
+    INode* n = node(name);
+    if (!n) throw ModelError("entryAt: no block named '" + name + "'");
+    m_entry = n;
     return *this;
 }
 
-Model& Model::attribute(const std::string& name, std::unique_ptr<IDistribution> d) {
-    assignOnArrival(name, std::move(d));
-    return *this;
+// -------------------------------------------------------------- access --
+
+INode* Model::node(const std::string& name) {
+    for (auto& n : m_nodes) if (n->name() == name) return n.get();
+    return nullptr;
+}
+const INode* Model::node(const std::string& name) const {
+    for (const auto& n : m_nodes) if (n->name() == name) return n.get();
+    return nullptr;
+}
+Station* Model::station(const std::string& name) {
+    return dynamic_cast<Station*>(node(name));
+}
+const Station* Model::station(const std::string& name) const {
+    return dynamic_cast<const Station*>(node(name));
+}
+
+void Model::reset() {
+    for (auto& n : m_nodes) n->reset();
+    if (m_interarrival) m_interarrival->reset();
+    for (auto& a : m_arrivalAttributes) a.distribution->reset();
+}
+
+// ------------------------------------------------------------ analysis --
+
+Model::VisitRatios Model::visitRatios() const {
+    // Walk the flowchart from the entry, carrying a weight that says how many
+    // times an average arriving entity reaches each block.
+    //
+    //   Decide by chance p : true branch gets w*p, false branch w*(1-p)
+    //   Decide by condition: unknown -- flagged, and the split is assumed even
+    //   Batch of n         : n entities in, 1 out, so the outflow is w/n
+    //   Duplicate x k      : 1 in, k+1 out
+    //
+    // That last pair is why this cannot be a simple graph walk with weight 1:
+    // batching and duplication change the FLOW RATE, and a stability check that
+    // ignored them would be wrong in the direction that matters.
+    VisitRatios vr;
+    if (!m_entry) return vr;
+
+    struct Item { const INode* node; double weight; int depth; };
+    std::vector<Item> stack{{m_entry, 1.0, 0}};
+
+    while (!stack.empty()) {
+        const Item it = stack.back();
+        stack.pop_back();
+        if (it.node == nullptr) continue;
+        // Depth guard: a cycle is rejected by validate(), but visitRatios() is
+        // also callable on a half-built model, and an infinite loop here would
+        // be a far worse diagnostic than a slightly wrong number.
+        if (it.depth > 512) { vr.exact = false; continue; }
+        if (it.weight < 1e-9) continue;
+
+        vr.visits[it.node] += it.weight;
+
+        double out = it.weight;
+        if (auto* b = dynamic_cast<const BatchNode*>(it.node))
+            out = it.weight / static_cast<double>(b->size());
+        if (auto* d = dynamic_cast<const DecideNode*>(it.node)) {
+            double p = 0.5;
+            if (d->isByChance()) p = d->probability();
+            else vr.exact = false;
+            stack.push_back({d->trueBranch(), it.weight * p, it.depth + 1});
+            stack.push_back({d->next(), it.weight * (1.0 - p), it.depth + 1});
+            continue;
+        }
+        if (dynamic_cast<const DisposeNode*>(it.node)) continue;
+        if (auto* s = dynamic_cast<const SeparateNode*>(it.node)) {
+            // A duplicate multiplies the flow; a batch-split restores it. The
+            // split factor is the batch size, which this node does not know, so
+            // it is left at 1 and flagged.
+            (void)s;
+            vr.exact = false;
+        }
+        stack.push_back({it.node->next(), out, it.depth + 1});
+    }
+    return vr;
 }
 
 double Model::offeredLoad(const Station& s) const {
     if (!m_interarrival) return 0.0;
     const SimTime meanGap = m_interarrival->mean();
     if (meanGap <= 0.0) return 0.0;
-    // Arrival rate at every station is the system arrival rate: this engine has
-    // no branching, so each entity visits each station on its route exactly
-    // once. Add probabilistic routing later and this needs visit ratios.
     const double lambda = 1.0 / meanGap;
+
     SimTime meanService = 0.0;
     if (s.usesServiceAttribute()) {
         // The service time rides on the entity, so ask the distribution that
-        // stamps it at arrival. Without this lookup, job-shop models (the ones
-        // most likely to be accidentally unstable) would skip the check
-        // entirely -- which is precisely backwards.
+        // stamps it at arrival. Job shops -- the models most likely to be
+        // accidentally unstable -- would otherwise skip the check entirely.
         for (const auto& a : m_arrivalAttributes)
             if (a.name == s.serviceAttributeName()) meanService = a.distribution->mean();
     } else {
         meanService = s.serviceDistribution().mean();
     }
     if (meanService <= 0.0) return 0.0;
-    return lambda * meanService / s.resource().capacity();
-}
 
-Station* Model::addStation(const std::string& name, int capacity,
-                           std::unique_ptr<IQueueRule> rule,
-                           std::unique_ptr<IDistribution> service) {
-    if (station(name) != nullptr)
-        throw ModelError("addStation: a station named '" + name + "' already exists");
-    if (capacity < 1)
-        throw ModelError("addStation: '" + name + "' needs capacity >= 1");
-    auto s = std::make_unique<Station>(name, capacity, std::move(rule), std::move(service));
-    Station* raw = s.get();
-    m_stations.push_back(std::move(s));
-    if (m_entry == nullptr) m_entry = raw;   // first station added is the default entry
-    return raw;
-}
+    const VisitRatios vr = visitRatios();
+    const auto it = vr.visits.find(&s);
+    const double visits = (it == vr.visits.end()) ? 1.0 : it->second;
 
-void Model::connect(const std::string& from, const std::string& to) {
-    Station* f = station(from);
-    Station* t = station(to);
-    if (f == nullptr) throw ModelError("connect: no station named '" + from + "'");
-    if (t == nullptr) throw ModelError("connect: no station named '" + to + "'");
-    if (f == t)       throw ModelError("connect: '" + from + "' cannot route to itself");
-    f->setNext(t);
-}
-
-void Model::setInterarrival(std::unique_ptr<IDistribution> d) {
-    assert(d != nullptr);
-    m_interarrival = std::move(d);
-}
-
-void Model::assignOnArrival(const std::string& name, std::unique_ptr<IDistribution> d) {
-    if (d == nullptr) throw ModelError("assignOnArrival: null distribution for '" + name + "'");
-    if (name == "waitTime" || name == "stationEntry" || name == "waitHere")
-        throw ModelError("assignOnArrival: '" + name + "' is reserved by the engine");
-    m_arrivalAttributes.push_back(ArrivalAttribute{name, std::move(d)});
-}
-
-void Model::setEntry(const std::string& name) {
-    Station* s = station(name);
-    if (s == nullptr) throw ModelError("setEntry: no station named '" + name + "'");
-    m_entry = s;
-}
-
-Station* Model::station(const std::string& name) {
-    for (auto& s : m_stations) {
-        if (s->name() == name) return s.get();
-    }
-    return nullptr;
-}
-
-const Station* Model::station(const std::string& name) const {
-    for (const auto& s : m_stations) {
-        if (s->name() == name) return s.get();
-    }
-    return nullptr;
-}
-
-void Model::reset() {
-    for (auto& s : m_stations) s->reset();
-    if (m_interarrival) m_interarrival->reset();
-    for (auto& a : m_arrivalAttributes) a.distribution->reset();
+    return lambda * visits * meanService / s.resource().capacity();
 }
 
 void Model::validate() const {
-    if (m_stations.empty())        throw ModelError("model has no stations");
+    if (m_nodes.empty())           throw ModelError("model has no blocks");
     if (m_interarrival == nullptr) throw ModelError("model has no arrival distribution -- call arrivals()");
-    if (m_entry == nullptr)        throw ModelError("model has no entry station -- call entryAt()");
+    if (m_entry == nullptr)        throw ModelError("model has no entry block -- call entryAt()");
 
-    // Walk the route from the entry and make sure it terminates. A cycle would
-    // send entities round forever, the run would never drain, and the symptom
-    // would be a simulation that simply does not stop -- with no clue why.
-    // Checking it here costs nothing and turns a hang into a message.
-    std::set<const Station*> seen;
-    const Station* s = m_entry;
-    while (s != nullptr) {
-        if (!seen.insert(s).second)
-            throw ModelError("routing loop through station '" + s->name() +
-                             "': entities would never leave the system");
-        s = s->next();
+    // A routing loop means entities never leave, the run never drains, and the
+    // symptom is a program that simply does not stop with no clue why. Follow
+    // both branches of every Decide.
+    std::set<const INode*> onPath;
+    std::vector<const INode*> stack{m_entry};
+    std::set<const INode*> seen;
+    while (!stack.empty()) {
+        const INode* n = stack.back();
+        stack.pop_back();
+        if (!n || !seen.insert(n).second) continue;
+        onPath.insert(n);
+        if (auto* d = dynamic_cast<const DecideNode*>(n)) {
+            if (d->trueBranch()) stack.push_back(d->trueBranch());
+        }
+        if (n->next()) stack.push_back(n->next());
     }
+    // Cycle detection: a proper DFS colouring, because the reachability walk
+    // above cannot tell a diamond (fine) from a loop (fatal).
+    std::set<const INode*> visiting, done;
+    struct Rec {
+        static void dfs(const INode* n, std::set<const INode*>& visiting,
+                        std::set<const INode*>& done) {
+            if (!n || done.count(n)) return;
+            if (!visiting.insert(n).second)
+                throw ModelError("routing loop through block '" + n->name() +
+                                 "': entities would never leave the system");
+            if (auto* d = dynamic_cast<const DecideNode*>(n)) dfs(d->trueBranch(), visiting, done);
+            dfs(n->next(), visiting, done);
+            visiting.erase(n);
+            done.insert(n);
+        }
+    };
+    Rec::dfs(m_entry, visiting, done);
 
-    // *** THE STABILITY CHECK. ***
-    // Every station on the route must be able to keep up with the work arriving
-    // at it. This is the check the examples used to tell you to do by hand, and
-    // the one people skip. rho >= 1 is not a warning, it is a broken model: the
-    // queue grows for as long as you run it, so "average wait" is a function of
-    // run length rather than a property of the system.
-    for (const auto& st : m_stations) {
+    // The stability check: every process on the route must keep up with the work
+    // reaching it. rho >= 1 is not a warning, it is a broken model -- the queue
+    // grows for as long as you run, so "average wait" is a function of run
+    // length rather than a property of the system.
+    const VisitRatios vr = visitRatios();
+    for (const Station* st : m_processes) {
+        if (vr.visits.find(st) == vr.visits.end()) continue;   // unreachable block
         const double rho = offeredLoad(*st);
         if (rho >= 1.0) {
             std::ostringstream os;
-            os << "station '" << st->name() << "' is unstable: offered load rho = "
+            os << "process '" << st->name() << "' is unstable: offered load rho = "
                << rho << " (>= 1). Work arrives faster than "
                << st->resource().capacity() << " server(s) can do it, so the queue "
                   "grows without bound and every average is meaningless. "
                   "Add capacity, speed up service, or slow arrivals.";
+            if (!vr.exact)
+                os << " (Flow rates are approximate here: a condition-based Decide "
+                      "or a batch split means the true split is an output of the run.)";
             throw ModelError(os.str());
         }
     }
@@ -168,9 +322,9 @@ void Model::validate() const {
 std::string Model::describe() const {
     std::ostringstream os;
     os << "arrivals ~ " << (m_interarrival ? m_interarrival->describe() : "<none>") << "\n";
-    for (const auto& s : m_stations) os << "  " << s->describe() << "\n";
     for (const auto& a : m_arrivalAttributes)
         os << "  attribute " << a.name << " ~ " << a.distribution->describe() << "\n";
+    for (const auto& n : m_nodes) os << "  " << n->describe() << "\n";
     os << "  entry: " << (m_entry ? m_entry->name() : "<none>");
     return os.str();
 }

@@ -289,7 +289,7 @@ void testTerminationRules() {
     SimulationSystem sim(5u);
     Model& m = sim.model();
     m.setInterarrival(constant(1.0));
-    m.addStation("S", 1, QueueDiscipline::FIFO, constant(0.5));
+    m.station("S", 1, QueueDiscipline::FIFO, constant(0.5));
     m.setEntry("S");
     sim.setTermination(entityLimit(10));
     sim.initialise();
@@ -299,7 +299,7 @@ void testTerminationRules() {
     SimulationSystem sim2(5u);
     Model& m2 = sim2.model();
     m2.setInterarrival(constant(1.0));
-    m2.addStation("S", 1, QueueDiscipline::FIFO, constant(0.5));
+    m2.station("S", 1, QueueDiscipline::FIFO, constant(0.5));
     m2.setEntry("S");
     sim2.setTermination(timeLimit(20.0));
     sim2.initialise();
@@ -320,7 +320,7 @@ void testDeterministicEndToEnd() {
     SimulationSystem sim(1u);
     Model& m = sim.model();
     m.setInterarrival(fixedTimes({2, 4, 1, 3, 5}));
-    m.addStation("Server", 1, QueueDiscipline::FIFO,
+    m.station("Server", 1, QueueDiscipline::FIFO,
                  fixedTimes({3, 2, 4, 1, 2}));
     m.setEntry("Server");
     sim.setTermination(entityLimit(5));
@@ -341,8 +341,8 @@ void testChainRouting() {
     SimulationSystem sim(1u);
     Model& m = sim.model();
     m.setInterarrival(constant(100.0));   // one arrival, then far apart
-    m.addStation("A", 1, QueueDiscipline::FIFO, constant(2.0));
-    m.addStation("B", 1, QueueDiscipline::FIFO, constant(3.0));
+    m.station("A", 1, QueueDiscipline::FIFO, constant(2.0));
+    m.station("B", 1, QueueDiscipline::FIFO, constant(3.0));
     m.connect("A", "B");
     m.setEntry("A");
     sim.setTermination(entityLimit(1));
@@ -354,7 +354,7 @@ void testChainRouting() {
     checkClose(sim.statistics().averageTimeInSystem(), 5.0, 1e-9,
                "time in system is 2 + 3 across both stations");
     check(sim.model().station("A")->next() == sim.model().station("B"), "A routes to B");
-    check(sim.model().station("B")->isExit(), "B is the exit");
+    check(sim.model().station("B")->next() == nullptr, "B is the exit");
 }
 
 void testReproducibility() {
@@ -362,7 +362,7 @@ void testReproducibility() {
     auto build = [](SimulationSystem& s) {
         Model& m = s.model();
         m.setInterarrival(exponential(1.0));
-        m.addStation("S", 2, QueueDiscipline::FIFO, exponential(1.5));
+        m.station("S", 2, QueueDiscipline::FIFO, exponential(1.5));
         m.setEntry("S");
         s.setTermination(timeLimit(500.0));
     };
@@ -388,7 +388,7 @@ void testWarmUpRemoval() {
     auto build = [](SimulationSystem& s) {
         Model& m = s.model();
         m.setInterarrival(constant(1.0));
-        m.addStation("S", 1, QueueDiscipline::FIFO, constant(0.5));
+        m.station("S", 1, QueueDiscipline::FIFO, constant(0.5));
         m.setEntry("S");
         s.setTermination(timeLimit(100.0));
     };
@@ -419,7 +419,7 @@ void testObservations() {
     SimulationSystem sim(3u);
     Model& m = sim.model();
     m.setInterarrival(constant(1.0));
-    m.addStation("S", 1, QueueDiscipline::FIFO, constant(0.5));
+    m.station("S", 1, QueueDiscipline::FIFO, constant(0.5));
     m.setEntry("S");
     sim.setTermination(timeLimit(100.0));
     sim.setObservationInterval(10.0);
@@ -433,7 +433,7 @@ void testExperiment() {
     auto build = [](SimulationSystem& s) {
         Model& m = s.model();
         m.setInterarrival(exponential(1.0));
-        m.addStation("S", 1, QueueDiscipline::FIFO, exponential(0.8));
+        m.station("S", 1, QueueDiscipline::FIFO, exponential(0.8));
         m.setEntry("S");
         s.setTermination(timeLimit(1500.0));
     };
@@ -472,7 +472,7 @@ void testWarmUpSuggestion() {
     Experiment busy("busy", [](SimulationSystem& s) {
         Model& m = s.model();
         m.setInterarrival(exponential(1.0));
-        m.addStation("S", 1, QueueDiscipline::FIFO, exponential(0.9));
+        m.station("S", 1, QueueDiscipline::FIFO, exponential(0.9));
         m.setEntry("S");
         s.setTermination(timeLimit(20000.0));
     });
@@ -628,13 +628,247 @@ void testEstimate() {
     check(!e.covers(100.0), "does not cover a distant value");
 }
 
+void testFlowchartBlocks() {
+    section("Flowchart blocks (v6)");
+
+    // Everything constant, so the answers are arithmetic rather than statistics.
+    // One entity every 100 minutes means the system is empty between arrivals
+    // and nothing ever queues -- so every number below is exact.
+    {
+        SimulationSystem sim(1u);
+        sim.model()
+            .arrivals(constant(100.0))
+            .assign("Tag", "kind", constant(7.0))
+            .delay("Walk", constant(2.0))
+            .station("Desk", 1, FIFO, constant(3.0))
+            .recordTimeInSystem("Age")
+            .dispose("Out")
+            .route("Tag", "Walk").route("Walk", "Desk")
+            .route("Desk", "Age").route("Age", "Out")
+            .entryAt("Tag");
+        sim.stopAfter(3).execute();
+
+        const RunResults r = sim.results();
+        check(r.exited == 3, "three entities went all the way through");
+        checkClose(r.averageTimeInSystem, 5.0, 1e-9,
+                   "Assign is instant, Delay 2 + Process 3 = 5");
+        checkClose(sim.model().nodeAs<RecordNode>("Age").average(), 5.0, 1e-9,
+                   "Record agrees with the system statistics");
+        check(sim.model().nodeAs<DisposeNode>("Out").count() == 3, "Dispose counts exits");
+        check(sim.model().nodeAs<AssignNode>("Tag").count() == 3, "Assign counts entities");
+        // Three services of exactly 3 minutes each. The run stops when the
+        // third entity exits (t = 205), NOT after a full 300-minute cycle, so
+        // the denominator is the measured period -- which is the point.
+        checkClose(sim.model().station("Desk")->stats().utilisation(sim.measuredTime(), 1),
+                   9.0 / sim.measuredTime(), 1e-9, "Desk utilisation is busy-time / measured period");
+        checkClose(sim.clock().now(), 205.0, 1e-9, "third entity exits at 100+100+5");
+    }
+
+    // DELAY holds many entities at once -- it has no resource, so there is no
+    // contention. If it behaved like a capacity-1 Process, entities would queue
+    // and the time in system would grow without bound at this arrival rate.
+    {
+        SimulationSystem sim(1u);
+        sim.model()
+            .arrivals(constant(1.0))
+            .delay("Belt", constant(10.0))     // ten on the belt at once
+            .dispose("End")
+            .route("Belt", "End")
+            .entryAt("Belt");
+        sim.stopAt(200.0).warmUpFor(50.0).execute();
+        checkClose(sim.results().averageTimeInSystem, 10.0, 1e-6,
+                   "a Delay never queues: time in system is exactly the delay");
+    }
+
+    // DECIDE by chance: the split must match the probability.
+    {
+        SimulationSystem sim(3u);
+        sim.model()
+            .arrivals(constant(1.0))
+            .decideByChance("Coin", 0.25)
+            .dispose("Heads").dispose("Tails")
+            .routeTrue("Coin", "Heads").route("Coin", "Tails")
+            .entryAt("Coin");
+        sim.stopAfter(4000).execute();
+        const auto& d = sim.model().nodeAs<DecideNode>("Coin");
+        const double frac = static_cast<double>(d.tookTrue()) / (d.tookTrue() + d.tookFalse());
+        checkClose(frac, 0.25, 0.02, "a 0.25 chance branch takes about a quarter");
+        check(sim.model().nodeAs<DisposeNode>("Heads").count() == d.tookTrue(),
+              "the true branch and its exit agree");
+    }
+
+    // DECIDE by condition: deterministic given the entity, so this is exact.
+    {
+        SimulationSystem sim(3u);
+        sim.model()
+            .arrivals(constant(1.0))
+            .attribute("score", constant(9.0))     // every entity scores 9
+            .decideByCondition("High", [](const Entity& e){ return e.attribute("score") > 5.0; })
+            .dispose("Big").dispose("Small")
+            .routeTrue("High", "Big").route("High", "Small")
+            .entryAt("High");
+        sim.stopAfter(50).execute();
+        const auto& d = sim.model().nodeAs<DecideNode>("High");
+        check(d.tookFalse() == 0 && d.tookTrue() > 0, "a condition sends every matching entity one way");
+    }
+
+    // BATCH, permanent: four in, one out.
+    {
+        SimulationSystem sim(1u);
+        sim.model()
+            .arrivals(constant(1.0))
+            .batch("Pack", 4, /*permanent=*/true)
+            .dispose("Shipped")
+            .route("Pack", "Shipped")
+            .entryAt("Pack");
+        sim.stopAt(100.0).execute();
+        const auto& b = sim.model().nodeAs<BatchNode>("Pack");
+        check(b.batchesFormed() > 0, "batches were formed");
+        check(sim.model().nodeAs<DisposeNode>("Shipped").count() == b.batchesFormed(),
+              "one carton leaves per batch formed, not four");
+        // The representative inherits the OLDEST member's creation time, so a
+        // carton's age includes the wait for its companions: four arrivals one
+        // minute apart means the first waited 3 minutes.
+        checkClose(sim.results().averageTimeInSystem, 3.0, 1e-6,
+                   "batch age is measured from the oldest member");
+    }
+
+    // BATCH temporary + SEPARATE: four in, four out.
+    {
+        SimulationSystem sim(1u);
+        sim.model()
+            .arrivals(constant(1.0))
+            .batch("Group", 4, /*permanent=*/false)
+            .separate("Split")
+            .dispose("Done")
+            .route("Group", "Split").route("Split", "Done")
+            .entryAt("Group");
+        sim.stopAt(100.0).execute();
+        const auto& b = sim.model().nodeAs<BatchNode>("Group");
+        check(sim.model().nodeAs<DisposeNode>("Done").count() == b.batchesFormed() * 4,
+              "a temporary batch gives every member back");
+    }
+
+    // DUPLICATE: one in, three out.
+    {
+        SimulationSystem sim(1u);
+        sim.model()
+            .arrivals(constant(1.0))
+            .duplicate("Copy", 2)              // the original plus two copies
+            .dispose("Out")
+            .route("Copy", "Out")
+            .entryAt("Copy");
+        sim.stopAt(20.0).execute();
+        const auto& sep = sim.model().nodeAs<SeparateNode>("Copy");
+        check(sim.model().nodeAs<DisposeNode>("Out").count() == sep.processed() * 3,
+              "duplicate x2 sends three entities onward for each one in");
+    }
+
+    // Separating something that is not a batch is a modelling mistake, and must
+    // say so rather than quietly doing nothing.
+    {
+        bool threw = false;
+        try {
+            SimulationSystem sim(1u);
+            sim.model().arrivals(constant(1.0)).separate("Split").dispose("Out")
+                       .route("Split", "Out").entryAt("Split");
+            sim.stopAfter(2).execute();
+        } catch (const ModelError&) { threw = true; }
+        check(threw, "separating a non-batch throws");
+    }
+}
+
+void testFlowchartValidation() {
+    section("Flowchart validation (v6)");
+    auto throwsModelError = [](auto fn) {
+        try { fn(); } catch (const ModelError&) { return true; } catch (...) { return false; }
+        return false;
+    };
+
+    check(throwsModelError([]{
+        SimulationSystem s(1u);
+        s.model().arrivals(constant(1.0))
+                 .station("A", 1, FIFO, constant(0.5))
+                 .station("B", 1, FIFO, constant(0.5))
+                 .route("A", "B").route("B", "A")      // a loop
+                 .entryAt("A");
+        s.stopAt(10.0).execute();
+    }), "a routing loop is caught before the run, not as a hang");
+
+    check(throwsModelError([]{
+        SimulationSystem s(1u);
+        s.model().arrivals(constant(1.0)).dispose("Out").route("Out", "Out");
+    }), "a block cannot route to itself");
+
+    check(throwsModelError([]{
+        SimulationSystem s(1u);
+        s.model().arrivals(constant(1.0)).station("A", 1, FIFO, constant(0.5))
+                 .dispose("Out").route("Out", "A");
+    }), "nothing follows a Dispose");
+
+    check(throwsModelError([]{
+        SimulationSystem s(1u);
+        s.model().arrivals(constant(1.0)).station("A", 1, FIFO, constant(0.5))
+                 .station("A", 1, FIFO, constant(0.5));
+    }), "duplicate block name");
+
+    check(throwsModelError([]{
+        SimulationSystem s(1u);
+        s.model().arrivals(constant(1.0)).station("A", 1, FIFO, constant(0.5)).entryAt("A");
+        s.model().nodeAs<BatchNode>("A");          // it is a Process, not a Batch
+    }), "nodeAs<> rejects the wrong kind of block");
+
+    // *** VISIT RATIOS. *** The stability check must follow the flowchart: a
+    // block behind a 10% branch sees a tenth of the work, and a block after a
+    // batch of 4 sees a quarter of the entities. Treating every block as seeing
+    // every entity would reject models that are perfectly fine.
+    {
+        SimulationSystem s(1u);
+        s.model()
+            .arrivals(constant(1.0))
+            .decideByChance("Split", 0.1)
+            .station("Rare", 1, FIFO, constant(5.0))    // 5.0 > 1.0 arrival gap!
+            .batch("Pack", 4)
+            .station("Packer", 1, FIFO, constant(3.0))  // 3.0 > 1.0 too
+            .dispose("Out")
+            .routeTrue("Split", "Rare").route("Split", "Pack")
+            .route("Rare", "Out").route("Pack", "Packer").route("Packer", "Out")
+            .entryAt("Split");
+
+        const Model::VisitRatios vr = s.model().visitRatios();
+        check(vr.exact, "a chance-only flowchart has exact visit ratios");
+        checkClose(vr.visits.at(s.model().node("Rare")), 0.1, 1e-9, "10% branch");
+        checkClose(vr.visits.at(s.model().node("Packer")), 0.9 / 4.0, 1e-9,
+                   "90% of entities, then four per carton");
+
+        // Both stations would look overloaded on naive arithmetic (service time
+        // longer than the arrival gap) and both are fine once the flowchart is
+        // taken into account. rho = 0.1*5 = 0.5 and 0.225*3 = 0.675.
+        checkClose(s.model().offeredLoad(*s.model().station("Rare")), 0.5, 1e-9, "rho behind a branch");
+        checkClose(s.model().offeredLoad(*s.model().station("Packer")), 0.675, 1e-9, "rho after a batch");
+        bool ok = true;
+        try { s.stopAt(200.0).execute(); } catch (...) { ok = false; }
+        check(ok, "and the model is accepted");
+    }
+
+    // A condition-based Decide makes the split an OUTPUT of the run, so the
+    // engine must say its ratios are inexact rather than inventing a number.
+    {
+        SimulationSystem s(1u);
+        s.model().arrivals(constant(1.0))
+                 .decideByCondition("C", [](const Entity&){ return true; })
+                 .dispose("Out").routeTrue("C", "Out").entryAt("C");
+        check(!s.model().visitRatios().exact, "a condition-based Decide is flagged inexact");
+    }
+}
+
 void testTheoryInsideInterval() {
     section("M/M/1 theory falls inside the interval");
     // The question open since v2, as an automated check.
     Experiment e("mm1", [](SimulationSystem& s) {
         Model& m = s.model();
         m.setInterarrival(exponential(1.0));
-        m.addStation("Server", 1, QueueDiscipline::FIFO, exponential(0.8));
+        m.station("Server", 1, QueueDiscipline::FIFO, exponential(0.8));
         m.setEntry("Server");
         s.setTermination(timeLimit(20000.0));
     });
@@ -683,6 +917,8 @@ int main() {
     testObservations();
     testExperiment();
     testModelErrors();
+    testFlowchartBlocks();
+    testFlowchartValidation();
     testDistributionMeans();
     testResultsStruct();
     testBuildHelpers();

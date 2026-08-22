@@ -78,6 +78,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 #include "Common.hpp"
 
 namespace des {
@@ -89,6 +90,12 @@ class Entity{
         SimTime m_creationTime;
         std::map<std::string, double> m_attributes;
 
+        // v6: a BATCH entity carries the entities it was formed from. Non-owning
+        // raw pointers -- SimulationSystem still owns every entity, exactly as
+        // it owns this one. A temporary batch keeps them so Separate can put
+        // them back; a permanent batch destroys them and clears this.
+        std::vector<Entity*> m_members;
+
     public:
         Entity(EntityId id, SimTime creationTime)
         : m_id(id), m_creationTime(creationTime) {}
@@ -99,6 +106,22 @@ class Entity{
         void setAttribute(const std::string& name, double value);
         double attribute(const std::string& name) const;
         bool hasAttribute(const std::string& name) const;
+
+        // v6. Copy every attribute from another entity -- used by Separate's
+        // duplicate mode, where a clone should differ only in identity.
+        void copyAttributesFrom(const Entity& other);
+
+        // v6: batching support.
+        void addMember(Entity* e);
+        const std::vector<Entity*>& members() const { return m_members; }
+        bool isBatch() const { return !m_members.empty(); }
+        void clearMembers() { m_members.clear(); }
+
+        // v6: a batch representative takes the OLDEST member's creation time, so
+        // time-in-system measures how long the first arrival waited for the
+        // group. This is the only place an entity's birth time may be rewritten,
+        // and it exists for that one reason.
+        void setCreationTime(SimTime t) { m_creationTime = t; }
 
 };
 

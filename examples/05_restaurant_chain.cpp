@@ -28,17 +28,17 @@ int main() {
     m.setInterarrival(exponential(15.0));
 
     // One host, seating takes ~2 min.
-    m.addStation("Host", 1, QueueDiscipline::FIFO,
+    m.station("Host", 1, QueueDiscipline::FIFO,
                  exponential(2.0));
 
     // Three waiters. A meal takes 20 to 60 minutes, most often 35 --
     // Triangular is the right shape when you have a plausible minimum, maximum
     // and most-likely value but no data. Which is most coursework.
-    m.addStation("Waiters", 3, QueueDiscipline::FIFO,
+    m.station("Waiters", 3, QueueDiscipline::FIFO,
                  triangular(20.0, 35.0, 60.0));
 
     // One cashier, 1 to 4 minutes, uniformly.
-    m.addStation("Cashier", 1, QueueDiscipline::FIFO,
+    m.station("Cashier", 1, QueueDiscipline::FIFO,
                  uniform(1.0, 4.0));
 
     // The routing. Without these two lines you have three unconnected queues

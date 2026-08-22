@@ -31,7 +31,7 @@ void heading(const char* text) {
 void buildMM1(SimulationSystem& sim, SimTime runLength) {
     Model& m = sim.model();
     m.setInterarrival(exponential(1.0));
-    m.addStation("Server", 1, QueueDiscipline::FIFO, exponential(0.8));
+    m.station("Server", 1, QueueDiscipline::FIFO, exponential(0.8));
     m.setEntry("Server");
     sim.setTermination(timeLimit(runLength));
 }
@@ -51,7 +51,7 @@ int main() {
         SimulationSystem sim(1u);
         Model& m = sim.model();
         m.setInterarrival(fixedTimes({2, 4, 1, 3, 5}));
-        m.addStation("Server", 1, QueueDiscipline::FIFO,
+        m.station("Server", 1, QueueDiscipline::FIFO,
                      fixedTimes({3, 2, 4, 1, 2}));
         m.setEntry("Server");
         sim.setTermination(entityLimit(5));
@@ -70,9 +70,9 @@ int main() {
         SimulationSystem sim(7u);
         Model& m = sim.model();
         m.setInterarrival(exponential(15.0));
-        m.addStation("Host",    1, QueueDiscipline::FIFO,     exponential(2.0));
-        m.addStation("Waiters", 3, QueueDiscipline::FIFO,     triangular(20.0, 35.0, 60.0));
-        m.addStation("Cashier", 1, QueueDiscipline::Priority, uniform(1.0, 4.0));
+        m.station("Host",    1, QueueDiscipline::FIFO,     exponential(2.0));
+        m.station("Waiters", 3, QueueDiscipline::FIFO,     triangular(20.0, 35.0, 60.0));
+        m.station("Cashier", 1, QueueDiscipline::Priority, uniform(1.0, 4.0));
         m.connect("Host", "Waiters");
         m.connect("Waiters", "Cashier");
         m.setEntry("Host");

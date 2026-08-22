@@ -33,6 +33,8 @@ add_library(des_engine STATIC
     src/TerminationRule.cpp
     src/Trace.cpp
     src/Station.cpp
+    src/Nodes.cpp
+    src/Node.cpp
     src/Model.cpp
     src/SimulationSystem.cpp
     src/Experiment.cpp

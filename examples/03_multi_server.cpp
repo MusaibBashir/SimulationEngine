@@ -25,7 +25,7 @@ void runWith(int servers, SimTime meanService, double theoryWq, double theoryW) 
     SimulationSystem sim(2024u);
     Model& m = sim.model();
     m.setInterarrival(exponential(1.0));
-    m.addStation("Servers", servers, QueueDiscipline::FIFO,
+    m.station("Servers", servers, QueueDiscipline::FIFO,
                  exponential(meanService));
     m.setEntry("Servers");
     sim.setTermination(timeLimit(50000.0));

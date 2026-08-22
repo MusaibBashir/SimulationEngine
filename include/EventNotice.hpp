@@ -17,14 +17,14 @@ namespace des {
 
 
 class Entity;
-class Station;
+class INode;
 
 class EventNotice {
 private:
     EventType m_type;
     SimTime   m_time;
     Entity*   m_entity;    // nullptr for system events like EndSimulation
-    Station*  m_station;   // nullptr when the event is not at a station
+    INode*    m_node;      // where the event happens; nullptr for system events
 
     // v4: the mutable static is GONE. The number is now stamped by the FEL at
     // schedule() time through a private setter, and FutureEventList is the only
@@ -42,12 +42,12 @@ private:
 
 public:
     EventNotice(EventType type, SimTime time,
-                Entity* entity = nullptr, Station* station = nullptr);
+                Entity* entity = nullptr, INode* node = nullptr);
 
     EventType type() const { return m_type; }
     SimTime   time() const { return m_time; }
     Entity*   entity() const { return m_entity; }
-    Station*  station() const { return m_station; }
+    INode*    node() const { return m_node; }
     uint64_t  sequenceNumber() const { return m_sequenceNumber; }
 
     // *** THE LINE THE WHOLE FEL DEPENDS ON. ***

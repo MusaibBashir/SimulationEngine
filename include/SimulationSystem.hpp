@@ -30,6 +30,7 @@
 #include "Model.hpp"
 #include "Entity.hpp"
 #include "Delay.hpp"
+#include "Node.hpp"
 #include "ModelError.hpp"
 #include <string>
 #include <vector>
@@ -93,7 +94,6 @@ private:
     // The Delay each waiting entity is currently inside. A delay is a fact about
     // the entity's relationship to the system, not an intrinsic property of the
     // entity, so it lives here and not on Entity.
-    std::map<EntityId, Delay> m_activeDelays;
 
     bool m_initialised{false};
 
@@ -110,16 +110,16 @@ private:
     void handleArrival(const EventNotice& notice);
     void handleDeparture(const EventNotice& notice);
 
-    // v3: the routing primitive. Put an entity into a station -- seize a server
-    // if one is free, otherwise queue it and open a Delay. Used both by arrival
-    // (into the entry station) and by departure (into the NEXT station). Having
-    // one function for both is what makes a chain work at all.
-    void admit(Entity* e, Station* station);
+    // v6: NodeContext is the only part of this class a node can see. It is a
+    // friend so it can call the four private operations below and nothing else.
+    friend class NodeContext;
 
-    // Pull the next waiting entity at this station into service, if any.
-    void startNextService(Station* station);
+    // Called by NodeContext::route() when a node routes to nullptr: the entity
+    // has left the system. Records exit statistics, then destroys it.
+    void disposeEntity(Entity* e);
 
     void refreshState();
+    std::size_t stillWaitingCount() const;
     void updateAllIntegrals(SimTime upTo);
 
     // SAFETY INVARIANT: an Entity may only be destroyed when nothing holds a raw
@@ -167,7 +167,7 @@ public:
     // --- running ---
     Entity* createEntity();
     void scheduleEvent(EventType type, SimTime t,
-                       Entity* e = nullptr, Station* s = nullptr);
+                       Entity* e = nullptr, INode* node = nullptr);
     void initialise();
     void run();
     void report() const;

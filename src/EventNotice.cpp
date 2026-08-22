@@ -7,8 +7,8 @@
 namespace des {
 
 
-EventNotice::EventNotice(EventType type, SimTime time, Entity* entity, Station* station)
-    : m_type(type), m_time(time), m_entity(entity), m_station(station) {}
+EventNotice::EventNotice(EventType type, SimTime time, Entity* entity, INode* node)
+    : m_type(type), m_time(time), m_entity(entity), m_node(node) {}
     // m_sequenceNumber stays 0 until FutureEventList::schedule() stamps it.
     // A notice that was never scheduled has no order, which is honest.
 

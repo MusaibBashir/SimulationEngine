@@ -31,7 +31,7 @@ Experiment::Builder busyQueue(SimTime runLength) {
     return [runLength](SimulationSystem& s) {
         Model& m = s.model();
         m.setInterarrival(exponential(1.0));
-        m.addStation("Server", 1, QueueDiscipline::FIFO, exponential(0.9));
+        m.station("Server", 1, QueueDiscipline::FIFO, exponential(0.9));
         m.setEntry("Server");
         s.setTermination(timeLimit(runLength));
     };

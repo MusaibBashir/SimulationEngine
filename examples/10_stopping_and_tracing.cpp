@@ -20,7 +20,7 @@ namespace {
 void build(SimulationSystem& s, QueueDiscipline rule = QueueDiscipline::FIFO) {
     Model& m = s.model();
     m.setInterarrival(exponential(2.0));
-    m.addStation("Desk", 1, rule, exponential(1.6));
+    m.station("Desk", 1, rule, exponential(1.6));
     m.setEntry("Desk");
 }
 
@@ -102,7 +102,7 @@ int main() {
         // called exactly "priority". Something must put it there:
         m.assignOnArrival("priority", uniform(1.0, 5.0));
 
-        m.addStation("Desk", 1, QueueDiscipline::Priority,
+        m.station("Desk", 1, QueueDiscipline::Priority,
                      exponential(1.6));
         m.setEntry("Desk");
         sim.setTermination(timeLimit(5000.0));

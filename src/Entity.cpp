@@ -39,6 +39,7 @@
 // redefinition error -- a useful one to trigger once, deliberately, to see it.
 
 #include "Entity.hpp"
+#include <cassert>
 
 namespace des {
 
@@ -51,6 +52,15 @@ double Entity::attribute(const std::string& name) const{
     auto it=m_attributes.find(name);
     if(it==m_attributes.end()) return 0.0;
     return it->second;
+}
+
+void Entity::copyAttributesFrom(const Entity& other) {
+    m_attributes = other.m_attributes;
+}
+
+void Entity::addMember(Entity* e) {
+    assert(e != nullptr && e != this);
+    m_members.push_back(e);
 }
 
 bool Entity::hasAttribute(const std::string& name) const{

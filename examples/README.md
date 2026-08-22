@@ -76,9 +76,11 @@ directory. Run them from a directory you don't mind cluttering.
 | 08 | `08_replications_ci.cpp` | **The most important one.** One run is one sample. Report an interval. |
 | 09 | `09_capacity_decision.cpp` | Using all of it to actually decide something. |
 | 10 | `10_stopping_and_tracing.cpp` | Termination rules, trace files, priorities, seeds. |
+| 11 | `11_flowchart_line.cpp` | **The full block set**: Assign, Delay, Decide, Batch, Separate, Record, Dispose. Branching and batching. |
 
 If you are short of time: **01, 02, 08**. Those three are the difference between
-using the tool correctly and producing confident nonsense.
+using the tool correctly and producing confident nonsense. Then **11** if your
+system is more than a chain of queues — which most real ones are.
 
 ---
 
@@ -152,16 +154,52 @@ the sort of thing an API should not leave to the caller.
 `initialise()` fully resets. Calling `initialise(); run();` twice gives the
 identical answer, not a continuation.
 
-### `Model`
+### `Model` — the blocks
 
-| Call | Does |
+A model is a **flowchart**. Each block does one job and passes the entity on.
+
+| Block | Does | Takes time? |
+|---|---|---|
+| `station(name, capacity, discipline, service)` | **Process**: seize a resource, delay, release. Also spelled `process()`. | yes, and queues |
+| `delay(name, duration)` | Hold for a time, **no resource** — transport, curing, paperwork. No queue, no contention. | yes, never queues |
+| `assign(name, attribute, value)` | Set an attribute. Call again with the same block name to add more. | no |
+| `decideByChance(name, p)` | Branch with probability `p` to the true side. | no |
+| `decideByCondition(name, pred)` | Branch on a `bool(const Entity&)` predicate. | no |
+| `batch(name, size, permanent)` | Accumulate `size` entities into one. | holds them |
+| `separate(name)` | Split a temporary batch back into members. | no |
+| `duplicate(name, copies)` | Send the original plus `copies` clones onward. | no |
+| `record(name)` / `recordAttribute(name, attr)` / `recordTimeInSystem(name)` | Tally without changing anything. | no |
+| `dispose(name)` | Leave the system. Routing to nothing does the same; a named Dispose lets you count exits separately. | no |
+
+| Wiring | Does |
 |---|---|
 | `arrivals(dist)` | How often entities arrive. Required. |
-| `station(name, capacity, discipline, serviceDist)` | Add a service point. |
-| `route("A", "B")` | After being served at A, go to B. |
-| `entryAt("A")` | Where arrivals land. Defaults to the first station added. |
-| `attribute("priority", dist)` | Give every arriving entity an attribute. |
-| `offeredLoad(station)` | ρ for that station. Checked for you at `execute()`. |
+| `attribute(name, dist)` | Give every arriving entity an attribute. |
+| `route("A", "B")` | After A, go to B. For a Decide this is the **false** branch. |
+| `routeTrue("Decide", "B")` | A Decide's **true** branch. |
+| `entryAt("A")` | Where arrivals land. Defaults to the first block added. |
+| `nodeAs<T>("name")` | Fetch a block back to read its counters. Throws if absent or the wrong kind. |
+| `visitRatios()` | How many times an average entity reaches each block. |
+| `offeredLoad(station)` | ρ for that block, **following the flowchart**. |
+
+Reading counters back:
+
+```cpp
+sim.model().nodeAs<DecideNode>("Inspection").tookTrue();
+sim.model().nodeAs<BatchNode>("Packing").batchesFormed();
+sim.model().nodeAs<RecordNode>("Age").average();
+sim.model().nodeAs<DisposeNode>("Shipped").count();
+```
+
+**Permanent vs temporary `batch`** is the decision to get right. *Permanent*
+consumes the members — ten parts become one assembly, and there is nothing to
+separate later. *Temporary* keeps them, so a `separate()` can put them back; use
+it when the grouping is transport and the items still matter individually.
+
+A batch representative inherits the **oldest** member's creation time, so its
+time-in-system includes the wait for its companions. That is nearly always the
+number you wanted, and starting the clock at "now" is a silent way to understate
+it.
 
 All return `Model&`, so they chain. (The older names — `setInterarrival`,
 `addStation`, `connect`, `setEntry`, `assignOnArrival` — still work and return
@@ -266,6 +304,12 @@ done nothing. Anything that is *your* mistake must be checked in every build;
 
 ## Mistakes to avoid
 
+**Assuming every block sees every entity.** It doesn't, once you branch or
+batch. `offeredLoad()` walks the flowchart — a station behind a 10% branch sees a
+tenth of the work, and one after a batch of 4 sees a quarter of the entities.
+Behind a *condition-based* Decide the split is an output of the run, so the
+engine flags its ratios inexact rather than guessing.
+
 **Not checking ρ.** `ρ = (mean service time) / (capacity × mean interarrival
 time)`. If ρ ≥ 1 the queue grows forever and every average is meaningless.
 As of v5 **the engine checks this for you** and throws rather than printing
@@ -305,6 +349,8 @@ same range.
 6. State which inputs are measured and which you assumed, and show how the
    answer moves when the assumed ones change. That sensitivity analysis is
    usually worth more marks than the simulation.
-7. Report the **maximum** as well as the mean whenever you use a priority or
+7. Draw the flowchart on paper before you write it. `describe()` prints back
+   what the engine thinks you built — compare the two.
+8. Report the **maximum** as well as the mean whenever you use a priority or
    shortest-job rule — those rules buy a good average by treating somebody
    badly, and the average hides it.

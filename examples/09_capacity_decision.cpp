@@ -38,7 +38,7 @@ Option evaluate(int agents) {
     Experiment e("staffing", [agents](SimulationSystem& s) {
         Model& m = s.model();
         m.setInterarrival(exponential(1.0));       // a call/min
-        m.addStation("Agents", agents, QueueDiscipline::FIFO,
+        m.station("Agents", agents, QueueDiscipline::FIFO,
                      exponential(3.5));            // 3.5 min/call
         m.setEntry("Agents");
         s.setTermination(timeLimit(RUN_MINUTES));

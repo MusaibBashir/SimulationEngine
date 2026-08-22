@@ -31,7 +31,7 @@ void trial(const std::string& label, std::function<std::unique_ptr<IDistribution
     Experiment e(label, [&makeService](SimulationSystem& s) {
         Model& m = s.model();
         m.setInterarrival(exponential(1.0));
-        m.addStation("S", 1, QueueDiscipline::FIFO, makeService());
+        m.station("S", 1, QueueDiscipline::FIFO, makeService());
         m.setEntry("S");
         s.setTermination(timeLimit(20000.0));
     });

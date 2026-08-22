@@ -40,8 +40,8 @@ void buildShop(SimulationSystem& sim, QueueDiscipline rule) {
     // Priority uses an attribute literally called "priority"; SPT uses
     // "serviceTime"; EDD uses "dueDate". Those names are fixed by the rules.
 
-    Station* machine = m.addStation("Machine", 1, rule,
-                                    uniform(2.0, 14.0));
+    m.station("Machine", 1, rule, uniform(2.0, 14.0));
+    Station* machine = m.station("Machine");   // fetch the block back by name
 
     // *** Make the machine actually TAKE the time the job says it needs. ***
     // Without this the station would draw a fresh random service time and SPT

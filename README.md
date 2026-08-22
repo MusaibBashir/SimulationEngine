@@ -3,9 +3,11 @@
 Written from the simulation theory table up, as a way of learning OOP and system
 design rather than as a way of getting a simulator.
 
-**Current state: v5.** A queueing-network simulator with warm-up removal,
-replications and confidence intervals, wrapped in an API you can use without
-reading its source. Refuses to run an unstable model. Builds clean under
+**Current state: v6.** A flowchart simulator in the spirit of Arena's Basic
+Process template — Process, Delay, Assign, Decide, Batch, Separate, Record,
+Dispose — with warm-up removal, replications and confidence intervals. Refuses
+to run an unstable model, and works out the offered load by walking the
+flowchart rather than assuming every block sees every entity. Builds clean under
 `-Wall -Wextra -Wpedantic` and ASan/UBSan; 160/160 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
@@ -139,6 +141,7 @@ need to read the engine's source to build a model with it.
 | `V3_READLOG.md` | What each v3 abstraction bought, what it cost, what was skipped |
 | `V4_READLOG.md` | Warm-up removal, Welch's method, confidence intervals |
 | `V5_READLOG.md` | The ergonomics pass: namespace, factories, ModelError, ρ check |
+| `V6_READLOG.md` | Flowchart blocks, INode, and why NodeContext beat a wider public interface |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
 ## Layout
@@ -248,19 +251,19 @@ two and every time-average goes quietly wrong with no error.
 
 ---
 
-# v6 — the order to do it in
+# v7 — the order to do it in
 
-1. **Probabilistic routing.** An entity leaving a station picks its next by
-   probability. The biggest modelling gap left — and note it breaks the v5
-   stability check, which assumes one visit per station and would need visit
-   ratios instead.
-2. **Common random numbers**, then **antithetic variates**. Narrower intervals
-   for the same compute. `constant()` already draws nothing from the stream,
-   which is a precondition for the pairing to work.
-3. **Batch means** — an alternative to replications when warm-up is expensive.
-4. **Config file input** — worth building now that `ModelError` exists and the
-   validation story is settled. That was the blocker in v3 and v4.
-5. **Balking and reneging** — customers who refuse a long queue, or give up
-   waiting. These need handlers that carry **state**, which is the long-standing
-   trigger for finally building `IEventHandler`.
-6. **Widen `EntityId`** — a plain `int` overflows on a very long run. One line.
+1. **Resource sets and transfer.** One Process currently owns its servers.
+   Real systems share an operator across three machines, and Arena models that
+   with a Resource that several blocks can seize.
+2. **Common random numbers**, then **antithetic variates.** Narrower intervals
+   for the same compute; `constant()` already draws nothing from the stream,
+   which is a precondition for the pairing.
+3. **Balking and reneging.** Customers who refuse a long queue, or give up
+   waiting. Now straightforward: they are node behaviour, and nodes carry state.
+4. **Config file input.** `ModelError` gave it a validation story in v5 and v6
+   gave it a graph to describe. This is finally worth building.
+5. **Conditional routing on more than two branches** — an N-way Decide with a
+   list of (condition, target).
+6. **Batch by attribute** — group only entities that match, e.g. same lot number.
+7. **Widen `EntityId`** — a plain `int` overflows on a very long run. One line.
