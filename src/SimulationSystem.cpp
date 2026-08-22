@@ -108,6 +108,7 @@
 #include <utility>        // std::move
 #include <cassert>
 #include <cmath>          // std::isinf
+#include <limits>         // std::numeric_limits
 
 SimulationSystem::SimulationSystem(TerminationCondition termination, unsigned seed)
     : m_termination(termination), m_rng(seed) {}
@@ -118,11 +119,19 @@ SimulationSystem::SimulationSystem(TerminationCondition termination, unsigned se
 // ---------------------------------------------------------------- factories --
 
 Entity* SimulationSystem::createEntity() {
-    auto e = std::make_unique<Entity>(m_nextEntityId, m_clock.now());
-    ++m_nextEntityId;
+    const EntityId id = m_nextEntityId++;
+    auto e = std::make_unique<Entity>(id, m_clock.now());
     Entity* raw = e.get();               // grab the address BEFORE the move --
-    m_entities.push_back(std::move(e));  // after std::move the local is null
+    m_entities.emplace(id, std::move(e));// after std::move the local is null
     return raw;
+}
+
+void SimulationSystem::destroyEntity(EntityId id) {
+    // See the safety invariant in the header. In debug builds, prove the
+    // entity is not still parked in a delay before freeing it.
+    assert(m_activeDelays.find(id) == m_activeDelays.end() &&
+           "destroying an entity that is still inside a Delay");
+    m_entities.erase(id);
 }
 
 Resource* SimulationSystem::addResource(const std::string& name, int capacity) {
@@ -185,11 +194,35 @@ void SimulationSystem::refreshState() {
 
 void SimulationSystem::initialise() {
     // The "Initialization" row of the theory table: state and FEL at t = 0.
+    //
+    // *** v2.1: THIS MUST RESET EVERYTHING THAT CARRIES RUN STATE. ***
+    // v2 reset the clock, stats, state, RNG and delays -- but not the FEL, not
+    // the resources, and not the queues. Calling initialise() a second time
+    // therefore left the server still seized from the previous replication, and
+    // with capacity 1 that server was busy forever: the second run served
+    // ZERO entities while the queue grew without bound. It looked like a
+    // plausible simulation and it was nothing of the sort.
+    //
+    // The rule this teaches: every object that holds run state needs a reset(),
+    // and initialise() must call all of them. Configuration (names, capacities,
+    // disciplines, distributions) survives; run state does not.
     m_clock.reset();
     m_stats.reset();
     m_state.reset();
     m_rng.reset();
+    m_fel.clear();
     m_activeDelays.clear();
+    m_entities.clear();
+    m_nextEntityId = 1;                    // so entity ids reproduce too
+    EventNotice::resetSequenceCounter();   // so FEL tie-breaks reproduce too
+
+    for (auto& r : m_resources) r->reset();
+    for (auto& q : m_queues)    q->reset();
+
+    // A run with no finite limit at all would loop until the machine gives up.
+    assert((!std::isinf(m_termination.maxTime()) ||
+            m_termination.maxEntities() < std::numeric_limits<int>::max()) &&
+           "TerminationCondition has neither a time limit nor a count limit");
 
     // Resolve the model ONCE, here, instead of doing a string lookup inside
     // every event handler.
@@ -288,6 +321,11 @@ void SimulationSystem::handleDeparture(const EventNotice& notice) {
 
     server->release();
 
+    // v2.1: Entity::attribute() returns 0.0 for a missing key, so a typo or a
+    // path that forgot to set this would silently report a zero wait and skew
+    // every average. Assert that the value was actually put there.
+    assert(finished->hasAttribute("waitTime") &&
+           "waitTime was never set for this entity");
     const SimTime wait     = finished->attribute("waitTime");
     const SimTime inSystem = m_clock.now() - finished->creationTime();
     m_stats.recordDeparture(m_clock.now(), wait, inSystem);
@@ -308,6 +346,10 @@ void SimulationSystem::handleDeparture(const EventNotice& notice) {
         const Activity service("Service", m_clock.now(), m_rng.exponential(m_meanService));
         scheduleEvent(EventType::Departure, service.endTime(), nextInLine, server);
     }
+
+    // v2.1: the entity has left the system. Destroy it LAST -- everything above
+    // still reads through `finished`, and after this line that pointer dangles.
+    destroyEntity(finished->id());
 
     refreshState();
 }
@@ -332,6 +374,7 @@ void SimulationSystem::report() const {
     std::cout << "server utilisation       : "
               << m_stats.serverUtilisation(total, m_server ? m_server->capacity() : 0) << "\n";
     std::cout << "still waiting at stop    : " << m_activeDelays.size() << "\n";
+    std::cout << "live entity objects      : " << m_entities.size() << "\n";
     std::cout << "-----------------------------------------------------------\n";
     // v4: this becomes a Report object that can emit text or CSV.
 }

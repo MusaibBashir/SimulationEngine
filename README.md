@@ -3,9 +3,10 @@
 A single-server queueing simulator written from the theory table up, as a way of
 learning OOP and system design rather than as a way of getting a simulator.
 
-**Current state: v2 — it runs.** Builds clean under
-`-Wall -Wextra -Wpedantic`, simulates an M/M/1 queue, and passes Little's Law to
-four decimal places.
+**Current state: v2.1 — it runs, twice.** Builds clean under
+`-Wall -Wextra -Wpedantic`, clean under ASan/UBSan, simulates an M/M/1 queue,
+passes Little's Law to four decimal places, and produces identical output when
+the same seed is run twice.
 
 ## Build and run
 
@@ -21,9 +22,18 @@ Or, without CMake:
 g++ -std=c++17 -Wall -Wextra -Wpedantic -Iinclude main.cpp src/*.cpp -o des
 ```
 
-`main` runs four things: the v1 storage check, an FEL ordering check, an FEL
-tie-break check, and a 20,000-minute M/M/1 run validated against Little's Law
-and the closed-form steady-state result.
+`main` runs five checks: v1 storage, FEL ordering, FEL tie-breaking, a
+20,000-minute M/M/1 run validated against Little's Law and closed-form theory,
+and a replication-reproducibility check (two runs, same seed, identical output).
+
+Worth running occasionally, and before any refactor:
+
+```
+g++ -std=c++17 -g -O1 -fsanitize=address,undefined -Iinclude main.cpp src/*.cpp -o des_asan && ./des_asan
+```
+
+Entities are destroyed on departure, so a use-after-free is now a thing that
+*can* happen. The sanitizer is what proves it doesn't.
 
 ## Documents
 
@@ -31,7 +41,7 @@ and the closed-form steady-state result.
 |---|---|
 | `README.md` | This file — layout, design rules, v3 plan |
 | `CHANGELOG.md` | What changed in each version |
-| `V2_READLOG.md` | Detailed review of v2: every bug found and why it mattered |
+| `V2_READLOG.md` | Detailed review of v2 and v2.1: every bug found and why it mattered |
 
 ## Layout
 
@@ -122,15 +132,22 @@ exercise:
   value.** Returning `nullptr` from an unimplemented queue discipline lost
   entities silently for a whole version.
 - **One source of randomness.** Same seed, same run, or you cannot debug it.
+- **Every object holding run state needs a `reset()`, and `initialise()` must
+  call all of them.** Configuration (names, capacities, disciplines) survives a
+  reset; run state does not. Missing two of these made the second replication
+  serve zero entities while printing a plausible report.
+- **A default return value is a place for a bug to hide.** `Entity::attribute()`
+  returns 0.0 for a missing key, which is convenient right up until a typo turns
+  into a silently wrong average. Assert at the call sites that matter.
 - **`std::move` on anything `const` is a silent no-op.** It compiles, it warns
   about nothing, and it copies.
 
 ## Known and deliberate
 
-- `m_entities` grows for the whole run and is never trimmed. Fine at 20k
-  entities, fatal at 10⁸. v4.
-- `EventNotice::s_nextSequenceNumber` is a mutable static — works, not
-  thread-safe, not reset between replications.
+- `EventNotice::s_nextSequenceNumber` is a mutable static. Reset between
+  replications as of v2.1, but still not thread-safe, and constructing an event
+  notice still has a side effect. Removing it needs `FutureEventList` to stamp
+  the number, which means a setter on a class meant to be immutable — v3.
 - `Wq` measured 3.2864 against M/M/1 theory 3.2000. Not a bug: no warm-up
   removal and a single replication. v4 addresses both.
 - `resource()` / `queue()` are linear scans, now called once in `initialise()`

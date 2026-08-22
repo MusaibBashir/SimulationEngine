@@ -184,5 +184,45 @@ int main() {
         std::cout << "-----------------------------------------------------------\n";
     }
 
+    // ---------------------------------------------------------------------
+    // v2.1: REPLICATION REPRODUCIBILITY.
+    //
+    // Two runs of the same model, same seed, in the same process, must produce
+    // identical numbers. In v2 they did not: initialise() reset the clock,
+    // stats, state, RNG and delays, but NOT the FEL, the resources or the
+    // queues. The server stayed seized from the first run, so with capacity 1
+    // it was busy forever -- the second replication served ZERO entities while
+    // the queue grew without bound, and printed a plausible-looking report.
+    //
+    // This check is cheap and it guards the whole reset path. Keep it.
+    // ---------------------------------------------------------------------
+    {
+        TerminationCondition term(2000.0, 1000000);
+        SimulationSystem sim(term, /*seed=*/12345u);
+        sim.addResource("Teller", 1);
+        sim.addQueue("TellerQueue", QueueDiscipline::FIFO);
+        sim.setModel("Teller", "TellerQueue");
+        sim.setMeanInterarrival(1.0);
+        sim.setMeanService(0.8);
+
+        sim.initialise(); sim.run();
+        const int    served1 = sim.statistics().numberServed();
+        const double wait1   = sim.statistics().averageWaitingTime();
+
+        sim.initialise(); sim.run();
+        const int    served2 = sim.statistics().numberServed();
+        const double wait2   = sim.statistics().averageWaitingTime();
+
+        std::cout << "\n--- replication reproducibility ---------------------------\n";
+        std::cout << "rep 1                    : served " << served1
+                  << ", avg wait " << wait1 << "\n";
+        std::cout << "rep 2                    : served " << served2
+                  << ", avg wait " << wait2 << "\n";
+        std::cout << "identical                : "
+                  << std::boolalpha
+                  << (served1 == served2 && wait1 == wait2) << "\n";
+        std::cout << "-----------------------------------------------------------\n";
+    }
+
     return 0;
 }

@@ -79,6 +79,12 @@ class Resource{
         bool isAvailable() const { return unitsAvailable() > 0; }
         ResourceState state() const { return m_unitsBusy > 0 ? ResourceState::Busy : ResourceState::Idle; }
 
-        void seize(int units = 1); // TODO v2
-        void release(int units = 1); // TODO v2
+        // v2.1: put the resource back to its t=0 condition. Without this,
+        // calling initialise() a second time leaves units still seized from the
+        // previous replication -- and if capacity is 1, the server is busy
+        // forever and the second run serves NOBODY.
+        void reset();
+
+        void seize(int units = 1);
+        void release(int units = 1);
 };

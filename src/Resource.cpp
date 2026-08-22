@@ -34,22 +34,19 @@ Resource::Resource(std::string name, int capacity)
     assert(capacity > 0);
 }
 
-void Resource::seize(int units) {
-    // TODO v2:
-    //   assert(units > 0);
-    //   assert(units <= unitsAvailable());   // the class invariant, checked
-    //   m_unitsBusy += units;
-    // Restore the parameter name when you use it.
-    assert(units>0);
-    assert(units<=unitsAvailable());
-    m_unitsBusy+=units;
-
+void Resource::reset() {
+    m_unitsBusy = 0;
+    // Name and capacity are model configuration, not run state -- they survive.
 }
+
+void Resource::seize(int units) {
+    assert(units > 0);
+    assert(units <= unitsAvailable());   // the class invariant, checked
+    m_unitsBusy += units;
+}
+
 void Resource::release(int units) {
-    // TODO v2:
-    //   assert(units > 0 && units <= m_unitsBusy);
-    //   m_unitsBusy -= units;
-    assert(units>0);
-    assert(units<=m_unitsBusy);
-    m_unitsBusy-=units;
+    assert(units > 0);
+    assert(units <= m_unitsBusy);
+    m_unitsBusy -= units;
 }

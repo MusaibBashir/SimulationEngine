@@ -5,6 +5,73 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [2.1.0] — 2026-08-22 — "It runs twice"
+
+Defect pass over v2. No new features; these are all things that should have been
+right in v2. Every fix below is a bug that compiled, ran, and produced
+plausible-looking output.
+
+### Fixed
+
+- **A second replication served ZERO entities.** `initialise()` reset the clock,
+  statistics, state, RNG and delays — but not the FEL, not the resources, and
+  not the queues. The server stayed seized from the previous run, so with
+  capacity 1 it was busy forever: run two queued 2,037 entities and served none,
+  while printing a report that looked like a simulation.
+  Added `Resource::reset()`, `EntityQueue::reset()`, `FutureEventList::clear()`
+  and `EventNotice::resetSequenceCounter()`, and `initialise()` now calls all of
+  them plus clearing entities and resetting the id counter.
+  *Rule: every object holding run state needs a `reset()`, and `initialise()`
+  must call all of them. Configuration survives; run state does not.*
+- **Entities were never destroyed** — 20,182 live `Entity` objects for a
+  20,000-minute run. `m_entities` is now
+  `std::unordered_map<EntityId, unique_ptr<Entity>>` and `handleDeparture`
+  destroys the entity once it has left. Live count during a run is now 1.
+  The safety invariant (nothing may hold a raw pointer to a destroyed entity) is
+  documented at `destroyEntity` and asserted in debug builds.
+- **A missing `waitTime` attribute would have read as `0.0`.**
+  `Entity::attribute()` returns 0.0 for an absent key, so any path that forgot
+  to set it would silently skew every wait average. `handleDeparture` now
+  asserts the attribute exists before reading it.
+- **A termination condition with no finite limit** would have looped until the
+  machine gave up. `initialise()` now asserts at least one limit is finite.
+
+### Changed
+
+- `EventNotice::operator>` documented as intentionally using exact `SimTime`
+  equality to detect ties, with the caveat that FP equality is fragile in
+  general.
+- Stale `// TODO v2` blocks removed from function bodies now that the code is
+  written; the design rationale comments stay.
+- `report()` prints `live entity objects`, so the memory leak cannot come back
+  unnoticed.
+- `main` gains a **replication reproducibility check**: two runs, same seed,
+  same process, must produce identical numbers. This guards the entire reset
+  path and is the regression test for the headline bug above.
+
+### Verified
+
+- Clean build under `-Wall -Wextra -Wpedantic`.
+- Clean under `-fsanitize=address,undefined`: no memory errors, no leaks — which
+  is the real proof that destroying entities at departure is safe.
+- Two replications with seed 12345 produce identical output (`served 2041,
+  avg wait 3.7876` both times).
+- M/M/1 results unchanged from v2 — utilisation 0.8022, Little's Law relative
+  error 0.0000 — confirming the fixes changed correctness, not the physics.
+
+### Still known / deliberate
+
+- `EventNotice::s_nextSequenceNumber` remains a mutable static. It is now reset
+  between replications, but it is still not thread-safe and still gives
+  construction a side effect. Removing it means letting `FutureEventList` stamp
+  the number, which needs a setter on a class meant to be immutable — a v3
+  decision, not a v2.1 patch.
+- `Wq` 3.2864 against theory 3.2000: still no warm-up removal, still one
+  replication. v4.
+- `resource()` / `queue()` remain linear scans, called once in `initialise()`.
+
+---
+
 ## [2.0.0] — 2026-08-22 — "It runs"
 
 The engine simulates. An M/M/1 model runs for 20,000 simulated minutes and the

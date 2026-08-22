@@ -14,8 +14,6 @@ TerminationCondition::TerminationCondition(SimTime maxTime, int maxEntities)
     : m_maxTime(maxTime), m_maxEntities(maxEntities) {}
 
 bool TerminationCondition::isMet(SimTime now, int entitiesServed) const {
-    // TODO v2 -- one line:
-    //   return now >= m_maxTime || entitiesServed >= m_maxEntities;
     // The infinity / INT_MAX sentinels the caller supplies are what let this
     // stay a single expression, with no branching on "was a limit even set".
     return now >= m_maxTime || entitiesServed >= m_maxEntities;

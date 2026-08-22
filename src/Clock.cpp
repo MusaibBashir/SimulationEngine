@@ -22,22 +22,14 @@
 #include <cassert>
 
 void Clock::advanceTo(SimTime t) {
-    // TODO v2 -- two lines, and they are the entire reason Clock is a class
-    // rather than a bare double:
-    //   assert(t >= m_now);   // >= not > : several events legitimately share
-    //                         // one instant, so advancing to "now" must be a
-    //                         // legal no-op, not an assertion failure
-    //   m_now = t;
-    // Restore the parameter name when you use it.
-    assert(t>=m_now);
-    m_now=t;
-
+    // The two lines that are the entire reason Clock is a class and not a bare
+    // double. >= not > : several events legitimately share one instant, so
+    // advancing to "now" must be a legal no-op, not an assertion failure.
+    assert(t >= m_now);
+    m_now = t;
 }
 
 void Clock::reset() {
-    // TODO v2: m_now = 0.0;
-    // Not needed until v4 runs multiple replications, but the interface is
-    // fixed now so the call sites never have to change.
-    m_now=0.0;
+    m_now = 0.0;
 }
 

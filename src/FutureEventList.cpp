@@ -30,6 +30,12 @@
 #include "FutureEventList.hpp"
 #include <cassert>
 
+void FutureEventList::clear() {
+    // std::priority_queue has no clear(). Move-assigning a fresh empty one is
+    // the idiomatic way, and it releases the old vector's memory too.
+    m_fel = decltype(m_fel){};
+}
+
 void FutureEventList::schedule(const EventNotice& e) {
     m_fel.push(e);
 }

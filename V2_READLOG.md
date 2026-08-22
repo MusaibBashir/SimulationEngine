@@ -1,4 +1,4 @@
-# v2 Read Log — "it runs"
+# v2 / v2.1 Read Log
 
 What you wrote, what was broken, and what I changed to make v2 work. Read the
 **Bugs** section carefully; four of them are the kind that compile and run and
@@ -263,3 +263,122 @@ confidence interval, then check whether 3.2000 falls inside it.
   that two times computed by different arithmetic paths will not compare equal.
 - **`resource()` / `queue()` are still linear scans.** They are now called once
   in `initialise()` instead of once per event, so the cost is gone. Leave them.
+
+
+---
+
+# v2.1 — the defect pass
+
+Everything below should have been right in v2. None of it is a new feature, and
+every one produced plausible-looking output while being wrong.
+
+## 1. The headline: a second replication served zero entities
+
+`initialise()` reset the clock, statistics, state, RNG and delays. It did **not**
+reset the FEL, the resources, or the queues.
+
+So the second call left `Resource::m_unitsBusy == 1` from the previous run. With
+capacity 1 the server was never available again, every arrival queued, no
+Departure was ever scheduled, and nothing was ever served. Measured:
+
+```
+REP 1: served=2041 avgWait=3.78761 maxQ=23  queueLen=1
+REP 2: served=0    avgWait=0       maxQ=2037 queueLen=2037
+```
+
+Note what makes this dangerous: `served=0` is obviously wrong *if you look*, but
+`avgWait=0` and a full report still printed without a single error or warning.
+
+**Fixed** by adding `Resource::reset()`, `EntityQueue::reset()`,
+`FutureEventList::clear()` and `EventNotice::resetSequenceCounter()`, and making
+`initialise()` call all of them plus clearing entities and resetting the id
+counter.
+
+**The rule worth taking away:** every object that holds *run state* needs a
+`reset()`, and `initialise()` must call all of them. Configuration — names,
+capacities, disciplines, distributions — survives a reset. Run state does not.
+Whenever you add a member, ask which of the two it is.
+
+`std::priority_queue` has no `clear()`, incidentally. Move-assigning a fresh
+empty one (`m_fel = decltype(m_fel){}`) is the idiomatic way, and it releases the
+old vector's memory as well.
+
+## 2. Entities were never destroyed
+
+`m_entities` was a `std::vector<std::unique_ptr<Entity>>` that only ever grew:
+20,182 live `Entity` objects, each with a `std::map` of attributes, for a
+20,000-minute run. Nothing was ever freed.
+
+**Fixed:** `m_entities` is now `std::unordered_map<EntityId, unique_ptr<Entity>>`
+and `handleDeparture` destroys the entity once it has left the system. Live count
+during a run is now **1**.
+
+This is the first change in the project that can cause a **use-after-free**, so
+the invariant is written at `destroyEntity` and asserted in debug builds:
+
+> An `Entity` may only be destroyed when nothing holds a raw pointer to it. At
+> departure that holds — it is not in any queue, its `Delay` has been erased from
+> `m_activeDelays`, and its Departure notice has just been popped off the FEL.
+> Arrival events carry `nullptr`, so no future event names it.
+
+Break any one of those clauses and the program is wrong in a way that will not
+reproduce reliably. This is the cost of the raw-pointer-as-observer design, and
+it is worth understanding rather than resenting: the alternative
+(`shared_ptr` everywhere) trades this one documented invariant for an atomic
+refcount on every queue operation.
+
+The destroy call goes **last** in `handleDeparture` — everything above it still
+reads through `finished`, and after that line the pointer dangles.
+
+## 3. A missing `waitTime` would have read as zero
+
+`Entity::attribute()` returns `0.0` for a key that is not there — a v1 decision,
+flagged at the time with a note to revisit. Now that `handleDeparture` feeds that
+value straight into the wait-time statistics, any path that forgets to set it
+reports a zero wait and quietly drags the average down.
+
+**Fixed** with `assert(finished->hasAttribute("waitTime"))` before the read.
+
+**The general point:** a convenient default return value is a place for a bug to
+hide. The default is fine for optional attributes; it is not fine for a value
+your statistics depend on. Assert at the call sites that matter.
+
+## 4. A termination condition with no finite limit
+
+`TerminationCondition(infinity, INT_MAX)` is constructible and would have run
+until the machine gave up. `initialise()` now asserts that at least one limit is
+finite.
+
+## 5. Housekeeping
+
+- Stale `// TODO v2` blocks removed from function bodies now that the code
+  exists. The design-rationale comments stay; the instructions do not.
+- `report()` prints `live entity objects`, so the leak cannot silently return.
+- `main` gained a **replication reproducibility check** — two runs, same seed,
+  same process, identical numbers. Cheap, and it guards the entire reset path.
+
+## 6. Verification
+
+```
+--- replication reproducibility ---------------------------
+rep 1                    : served 2041, avg wait 3.7876
+rep 2                    : served 2041, avg wait 3.7876
+identical                : true
+-----------------------------------------------------------
+```
+
+Clean under `-fsanitize=address,undefined`: **no memory errors, no leaks.** That
+is the real proof that destroying entities at departure is safe — the assert
+covers the case you thought of, the sanitizer covers the ones you did not.
+
+M/M/1 output is byte-identical to v2 (utilisation 0.8022, Little's Law relative
+error 0.0000), confirming these fixes changed correctness, not the physics.
+
+## 7. Deliberately not fixed
+
+`EventNotice::s_nextSequenceNumber` is still a mutable static. It is reset
+between replications now, so reproducibility is restored, but constructing an
+event notice still has a global side effect and the program still cannot be
+threaded. The clean fix is to let `FutureEventList::schedule()` stamp the number
+— which requires a setter on a class deliberately built to be immutable. That is
+a design decision for v3, not a patch.

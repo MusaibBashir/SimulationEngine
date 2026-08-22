@@ -88,6 +88,10 @@ public:
     bool isEmpty() const { return m_fel.empty(); }
     std::size_t size() const { return m_fel.size(); }
 
+    // v2.1: empty the list, so initialise() can be called twice without the
+    // second run inheriting the first run's leftover events.
+    void clear();
+
     void schedule(const EventNotice& e);
     EventNotice popImminent();
     SimTime nextEventTime() const;

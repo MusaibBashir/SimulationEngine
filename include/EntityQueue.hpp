@@ -108,6 +108,11 @@ class EntityQueue {
         // v2: injected by SimulationSystem::initialise().
         void setRandomStream(RandomStream* rng) { m_rng = rng; }
 
+        // v2.1: back to the t=0 condition. Clearing m_waiting also drops the
+        // dangling Entity* left over from the previous replication, whose
+        // objects initialise() is about to destroy.
+        void reset();
+
         void push(Entity* e);
         Entity* pop();
 };

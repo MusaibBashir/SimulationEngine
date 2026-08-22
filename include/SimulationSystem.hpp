@@ -128,6 +128,7 @@
 #include <memory>
 #include <string>
 #include <map>
+#include <unordered_map>
 #include "Common.hpp"
 #include "Clock.hpp"
 #include "FutureEventList.hpp"
@@ -151,7 +152,11 @@ private:
     RandomStream m_rng;                       // v2: the ONE source of randomness
 
     // --- owned by pointer: variable in number ---
-    std::vector<std::unique_ptr<Entity>> m_entities;
+    // v2.1: keyed by id, not a plain vector, so a departed entity can actually
+    // be DESTROYED. As a vector this grew for the whole run -- 20,182 live
+    // Entity objects for a 20,000-minute run, none ever freed. Fine at that
+    // scale, fatal at 10^8 events.
+    std::unordered_map<EntityId, std::unique_ptr<Entity>> m_entities;
     std::vector<std::unique_ptr<Resource>> m_resources;
     std::vector<std::unique_ptr<EntityQueue>> m_queues;
 
@@ -181,6 +186,16 @@ private:
     void handleDeparture(const EventNotice& notice);
     void refreshState();   // v2: push the true counts into m_state
 
+    // v2.1: destroy an entity that has left the system.
+    //
+    // SAFETY INVARIANT -- read before calling this from anywhere new:
+    // an Entity may only be destroyed when NOTHING holds a raw pointer to it.
+    // At departure that holds: it is not in any queue, its Delay has been
+    // erased from m_activeDelays, and its Departure notice has just been popped
+    // off the FEL. Arrival events carry nullptr, so no future event names it.
+    // Break any one of those and this becomes a use-after-free.
+    void destroyEntity(EntityId id);
+
 public:
     explicit SimulationSystem(TerminationCondition termination, unsigned seed = 12345u);
 
@@ -205,6 +220,11 @@ public:
     const SystemState& state() const { return m_state; }
     const FutureEventList& fel() const { return m_fel; }
     const RandomStream& randomStream() const { return m_rng; }
+
+    // v2.1: how many Entity objects are alive right now. Should stay small and
+    // flat during a run -- if it tracks the number of arrivals, entities are
+    // not being destroyed and you have the v2 memory leak back.
+    std::size_t liveEntityCount() const { return m_entities.size(); }
 
     // --- running ---
     void initialise();

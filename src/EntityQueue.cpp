@@ -52,6 +52,12 @@ EntityQueue::EntityQueue(const std::string& name, QueueDiscipline discipline)
     // deque default-constructs empty
 }
 
+void EntityQueue::reset() {
+    m_waiting.clear();
+    m_maxLengthObserved = 0;
+    // m_name, m_discipline and m_rng are configuration, not run state.
+}
+
 void EntityQueue::push(Entity* e) {
     assert(e != nullptr);
     m_waiting.push_back(e);

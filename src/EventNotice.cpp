@@ -28,10 +28,11 @@ uint64_t EventNotice::s_nextSequenceNumber=0;
 EventNotice::EventNotice(EventType type, SimTime time, Entity* entity, Resource* resource)
     : m_type(type), m_time(time), m_entity(entity), m_resource(resource), m_sequenceNumber(++s_nextSequenceNumber) {}
 
+void EventNotice::resetSequenceCounter() {
+    s_nextSequenceNumber = 0;
+}
+
 bool EventNotice::operator>(const EventNotice& other) const {
-    // TODO v2: when the times are EQUAL, fall back to comparing a sequence
-    // number so that ties resolve deterministically and two runs with the
-    // same seed produce byte-identical output.
     if (m_time == other.m_time) {
         return m_sequenceNumber > other.m_sequenceNumber;
     }

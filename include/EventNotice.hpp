@@ -70,11 +70,21 @@ private:
     SimTime   m_time;
     Entity*   m_entity;
     Resource* m_resource;
+    // The tie-break counter. A mutable static, which is a wart: it makes
+    // constructing an EventNotice have a side effect, and it is not thread-safe.
+    // It stays for now because moving it into FutureEventList would mean giving
+    // EventNotice a setter, and an event notice is meant to be immutable. See
+    // the v3 plan.
     static uint64_t s_nextSequenceNumber;
     uint64_t m_sequenceNumber;
 
 public:
     EventNotice(EventType type, SimTime time, Entity* entity = nullptr, Resource* resource = nullptr);
+
+    // v2.1: without this, sequence numbers keep climbing across replications.
+    // Ordering still works, but two runs of the same model in one process are
+    // no longer bit-identical, which defeats the point of seeding.
+    static void resetSequenceCounter();
 
     EventType type() const { return m_type; }
     SimTime time() const { return m_time; }
