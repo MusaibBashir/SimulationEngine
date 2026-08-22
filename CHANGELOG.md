@@ -5,6 +5,87 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [2.0.0] — 2026-08-22 — "It runs"
+
+The engine simulates. An M/M/1 model runs for 20,000 simulated minutes and the
+results satisfy Little's Law to four decimal places.
+
+Full narrative review in `V2_READLOG.md`.
+
+### Added
+
+- **`RandomStream`** (new) — one `std::mt19937`, one seed, one place. Every draw
+  in the program comes through it, so the same seed reproduces the same run.
+  `exponential()` is parameterised by **mean**, not rate; the 1/λ conversion
+  happens in exactly one line.
+- `SimulationSystem::refreshState()` — recomputes `SystemState` from the
+  authoritative `Resource` and `EntityQueue` after every state change.
+- `SimulationSystem::setModel()`, `setMeanInterarrival()`, `setMeanService()`,
+  and a seed parameter on the constructor.
+- `m_activeDelays` (`std::map<EntityId, Delay>`) — tracks the `Delay` each
+  waiting entity is inside, which is where waiting time now comes from.
+- `EntityQueue::setRandomStream()` — non-owning injection for the Random
+  discipline.
+- `main` now runs a real M/M/1 model, checks FEL tie-breaking, and validates the
+  output against Little's Law and closed-form M/M/1 theory.
+
+### Fixed
+
+- **All statistics would have been zero.** `recordArrival`, `recordDeparture`
+  and `updateTimeIntegrals` were empty stubs while the four derived getters that
+  divide them were fully implemented. Consumers written before producers.
+- **Entities were born at the wrong time.** The next entity was created at the
+  current clock and attached to a future Arrival, so `creationTime` preceded
+  actual arrival and every time-in-system was inflated by an interarrival gap.
+  Restructured: Arrival events carry no entity, and `handleArrival` creates it —
+  the timestamp is now correct by construction.
+- **Waiting time was hardcoded `0.0`.** The `Delay` was never created, ended, or
+  read. Now tracked in `m_activeDelays`, closed on service start, and stored as
+  the entity's `waitTime` attribute.
+- **The Random discipline silently lost entities** by returning `nullptr` from a
+  non-empty queue. Now asserts and draws a uniform index. `nullptr` from `pop()`
+  means "empty" and nothing else.
+- **`report()` recomputed averages** that `Statistics` already provides, guards
+  included. Now delegates.
+- **`SystemState` was never updated** — the duplication flagged as deliberately
+  wrong in v1, hit exactly as predicted. Resolved as option (b), snapshot.
+- **`EndSimulation` could be scheduled at infinity.** Guarded with `std::isinf`.
+- Seven compile errors: `EntityQueue::size` (is `length`), missing
+  `Activity.hpp` include, undeclared `interarrival` / `serviceDraw`, and
+  `report() const` calling non-const `queue()` / `resource()`.
+
+### Changed
+
+- **Priority / SPT / EDD collapsed** from three copies of one scan loop into a
+  single `extractBest(deque&, attribute, wantLargest)` helper in an anonymous
+  namespace. Deliberately not the full strategy-object abstraction — that is v3
+  step 2.
+- **The engine no longer hardcodes `"Teller"`.** Names are configurable and
+  resolved once in `initialise()` into cached `m_server` / `m_line` pointers,
+  instead of a linear string search on every event.
+- `README.md` rewritten: build instructions, run-loop walkthrough, design rules,
+  and a nine-step ordered plan for v3.
+
+### Verified
+
+- Clean build under `-Wall -Wextra -Wpedantic`.
+- FEL ordering (3, 7, 10) and tie-breaking (Arr, Dep, Arr at t=5.0) both pass.
+- 20,000 min at ρ=0.8: utilisation 0.8022 (theory 0.8000);
+  Little's Law relative error 0.0000.
+
+### Known / deliberate
+
+- `Wq` measures 3.2864 against theory 3.2000. **Not a bug** — no warm-up removal
+  and a single replication. v4 answers this properly with confidence intervals;
+  do not tune constants to close the gap.
+- `m_entities` grows unboundedly (20,182 `unique_ptr`s for this run).
+- `EventNotice::s_nextSequenceNumber` is a mutable static: not thread-safe, not
+  reset between replications.
+- `operator>` uses `==` on `SimTime` for the tie-break. Correct here, but exact
+  FP equality is fragile in general.
+
+---
+
 ## [1.0.0] — 2026-08-22 — "It stores, and does nothing else"
 
 First working skeleton. Every noun from the simulation theory table exists as a
@@ -113,15 +194,18 @@ filling the bodies is v2.
 
 ---
 
-## [Unreleased] — v2, "it runs"
+## [Unreleased] — v3, "abstraction, earned"
 
-Planned, in this order:
+Ordered plan with rationale in `README.md`. Summary:
 
-1. `RandomStream` — `std::mt19937` plus exponential/uniform/normal draws, seeded
-   explicitly so runs reproduce.
-2. `Clock::advanceTo` and the `Statistics` update routines.
-3. `EntityQueue::push` / `pop` with all six disciplines written out longhand.
-4. `SimulationSystem::initialise()`.
-5. The `run()` loop.
-6. `handleArrival` / `handleDeparture` last.
-7. `report()`, then validate against a hand-worked M/M/1 table and Little's Law.
+1. `IDistribution` — exponential/uniform/triangular/constant behind an interface
+2. Queue disciplines become strategy objects
+3. Multi-server, then multi-resource
+4. A `Model` object separate from the engine  ← the real architecture step
+5. `IEventHandler` — polymorphic event dispatch
+6. `ITerminationCondition`
+7. Config file input (and the assert-vs-validation distinction)
+8. `Trace` output
+9. Unit tests — deliberately last, once the interfaces stop moving
+
+Then v4: replications, warm-up removal, confidence intervals, entity lifetime.

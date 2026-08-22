@@ -20,7 +20,7 @@
 Delay::Delay(SimTime start)
     : m_startTime(start), m_endTime(start), m_ended(false) {}
 
-void Delay::end(SimTime /*t*/) {
+void Delay::end(SimTime t) {
     // TODO v2:
     //   assert(t >= m_startTime);
     //   m_endTime = t;
@@ -28,6 +28,9 @@ void Delay::end(SimTime /*t*/) {
     // Called BY THE SYSTEM, at the moment the waiting entity finally seizes a
     // resource. A delay never knows its own end -- that is what makes it a
     // delay and not an activity.
+    assert(t >= m_startTime);
+    m_endTime = t;
+    m_ended = true;
 }
 
 SimTime Delay::duration() const {
@@ -37,6 +40,7 @@ SimTime Delay::duration() const {
     //                      // than returning a plausible zero, which is exactly
     //                      // what the v1 placeholder below does wrong.
     //   return m_endTime - m_startTime;
-    return 0.0;   // v1 placeholder
+    assert(m_ended);
+    return m_endTime - m_startTime;
 }
 

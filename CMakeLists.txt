@@ -21,6 +21,7 @@
 # [5] add_executable(des
 #         main.cpp
 #         src/Entity.cpp
+    src/RandomStream.cpp
 #         src/Resource.cpp
 #         src/EntityQueue.cpp
 #         src/EventNotice.cpp

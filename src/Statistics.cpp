@@ -60,35 +60,32 @@
 #include "Statistics.hpp"
 
 void Statistics::recordArrival(SimTime /*t*/) {
-    // TODO v2: ++m_numberArrived;
-    // t is unused for now. KEEP THE PARAMETER -- the signature is the interface,
-    // and v4 will want arrival times for rate traces. Commenting out the name is
-    // how you keep the parameter without earning a -Wunused-parameter warning.
+    ++m_numberArrived;
+    // t is still unused. The parameter stays because the signature is the
+    // interface, and v4 wants arrival times for rate traces.
 }
 
-void Statistics::recordDeparture(SimTime /*t*/, SimTime /*waitTime*/, SimTime /*timeInSystem*/) {
-    // TODO v2 -- four lines:
-    //   ++m_numberServed;
-    //   m_totalWaitingTime  += waitTime;
-    //   m_totalTimeInSystem += timeInSystem;
-    //   if (waitTime > m_maxWaitingTime) m_maxWaitingTime = waitTime;
+void Statistics::recordDeparture(SimTime /*t*/, SimTime waitTime, SimTime timeInSystem) {
+    ++m_numberServed;
+    m_totalWaitingTime  += waitTime;
+    m_totalTimeInSystem += timeInSystem;
+    if (waitTime > m_maxWaitingTime) {
+        m_maxWaitingTime = waitTime;
+    }
 }
 
-void Statistics::updateTimeIntegrals(SimTime /*now*/, int /*queueLength*/, int /*serversBusy*/) {
-    // TODO v2 -- four lines:
-    //   SimTime dt = now - m_lastUpdateTime;
-    //   m_areaUnderQueueLength += queueLength * dt;
-    //   m_areaUnderServerBusy  += serversBusy * dt;
-    //   m_lastUpdateTime = now;
+void Statistics::updateTimeIntegrals(SimTime now, int queueLength, int serversBusy) {
+    // *** CALLED AT THE TOP OF run()'s LOOP, BEFORE THE CLOCK MOVES AND BEFORE
+    // ANY STATE CHANGES. *** The arguments describe the interval that just
+    // ENDED, so they must be the OLD queue length and OLD busy count.
     //
-    // *** CALL THIS AT THE TOP OF EVERY EVENT HANDLER, BEFORE ANY STATE
-    // CHANGE. *** The arguments describe the interval that just ENDED, so they
-    // must be the OLD queue length and OLD busy count. Update the state first
-    // and you attribute the new values to the old interval -- every time
-    // average in the report is then silently wrong, with no error message.
-    //
-    // Self-check for v2: m_areaUnderServerBusy / (totalTime * capacity) must
-    // land in [0, 1]. Above 1 means you are calling this twice per event.
+    // Geometrically: we are adding one rectangle to a running integral. Its
+    // width is the time since we were last here; its height is the state that
+    // held throughout that width.
+    const SimTime dt = now - m_lastUpdateTime;
+    m_areaUnderQueueLength += queueLength * dt;
+    m_areaUnderServerBusy  += serversBusy * dt;
+    m_lastUpdateTime = now;
 }
 
 void Statistics::reset() {
@@ -100,38 +97,28 @@ void Statistics::reset() {
 }
 
 double Statistics::averageWaitingTime() const {
-    // TODO v2:
-    //   if (m_numberServed == 0) return 0.0;   // GUARD IT
-    //   return m_totalWaitingTime / m_numberServed;
-    // Floating-point division by zero does not crash -- it yields NaN, and your
-    // report cheerfully prints "nan". Guard, do not rely on a crash.
-    return 0.0;   // v1 placeholder
+    if (m_numberServed == 0) return 0.0;   // guard: FP division by zero gives
+                                           // NaN, not a crash, and the report
+                                           // would cheerfully print "nan"
+    return m_totalWaitingTime / m_numberServed;
 }
 
 double Statistics::averageTimeInSystem() const {
-    // TODO v2: same shape and same zero-guard as averageWaitingTime(),
-    //          over m_totalTimeInSystem.
-    return 0.0;   // v1 placeholder
+    if (m_numberServed == 0) return 0.0;
+    return m_totalTimeInSystem / m_numberServed;
 }
 
-double Statistics::timeAverageQueueLength(SimTime /*totalTime*/) const {
-    // TODO v2:
-    //   if (totalTime <= 0.0) return 0.0;
-    //   return m_areaUnderQueueLength / totalTime;
-    //
-    // v2 acceptance test -- LITTLE'S LAW:  L = lambda * W
-    // This value should approximately equal (arrival rate) x averageWaitingTime().
-    // If the two disagree, your accumulators are wrong, not the theory. It is
-    // the single most useful test in the whole project.
-    return 0.0;   // v1 placeholder
+double Statistics::timeAverageQueueLength(SimTime totalTime) const {
+    if (totalTime <= 0.0) return 0.0;
+    // LITTLE'S LAW CHECK:  L = lambda * W. This should approximately equal
+    // (effective arrival rate) x averageWaitingTime(). If they disagree, the
+    // accumulators are wrong -- the theory is not.
+    return m_areaUnderQueueLength / totalTime;
 }
 
-double Statistics::serverUtilisation(SimTime /*totalTime*/, int /*capacity*/) const {
-    // TODO v2:
-    //   if (totalTime <= 0.0 || capacity <= 0) return 0.0;
-    //   return m_areaUnderServerBusy / (totalTime * capacity);
-    // Dimensionless, and it MUST land in [0, 1]. A value above 1 is a
-    // double-counting bug, not a busy server.
-    return 0.0;   // v1 placeholder
+double Statistics::serverUtilisation(SimTime totalTime, int capacity) const {
+    if (totalTime <= 0.0 || capacity <= 0) return 0.0;
+    // Dimensionless, and it MUST land in [0, 1]. Above 1 is a double-counting
+    // bug, not a busy server.
+    return m_areaUnderServerBusy / (totalTime * capacity);
 }
-

@@ -124,60 +124,91 @@
 //     let the compiler enforce it.
 
 #pragma once
-
 #include <vector>
 #include <memory>
 #include <string>
-
+#include <map>
 #include "Common.hpp"
 #include "Clock.hpp"
 #include "FutureEventList.hpp"
 #include "SystemState.hpp"
 #include "Statistics.hpp"
 #include "TerminationCondition.hpp"
+#include "RandomStream.hpp"
 #include "Entity.hpp"
 #include "Resource.hpp"
 #include "EntityQueue.hpp"
+#include "Delay.hpp"
 
 class SimulationSystem {
 private:
+    // --- owned by value: they live and die with the system ---
     Clock m_clock;
     FutureEventList m_fel;
     SystemState m_state;
     Statistics m_stats;
     TerminationCondition m_termination;
+    RandomStream m_rng;                       // v2: the ONE source of randomness
 
+    // --- owned by pointer: variable in number ---
     std::vector<std::unique_ptr<Entity>> m_entities;
     std::vector<std::unique_ptr<Resource>> m_resources;
     std::vector<std::unique_ptr<EntityQueue>> m_queues;
 
     EntityId m_nextEntityId{1};
+
+    // --- v2: model parameters ---
+    SimTime m_meanInterarrival{1.0};
+    SimTime m_meanService{0.8};
+
+    // v2: which resource and queue this single-server model uses. Looked up ONCE
+    // in initialise() and cached, instead of doing a string lookup inside every
+    // event handler. The names are configurable so the engine is not welded to
+    // the word "Teller".
+    // v3 replaces all five of these with a proper model description object.
+    std::string m_serverName{"Teller"};
+    std::string m_queueName{"TellerQueue"};
+    Resource*    m_server{nullptr};   // non-owning: m_resources owns it
+    EntityQueue* m_line{nullptr};     // non-owning: m_queues owns it
+
+    // v2: the Delay each waiting entity is currently inside. Keyed by entity id
+    // rather than stored on Entity, because a delay is a fact about the entity's
+    // relationship to THIS system, not an intrinsic property of the entity.
+    std::map<EntityId, Delay> m_activeDelays;
+
+    // --- internal steps of run(), not interface ---
     void handleArrival(const EventNotice& notice);
     void handleDeparture(const EventNotice& notice);
+    void refreshState();   // v2: push the true counts into m_state
 
 public:
-    explicit SimulationSystem(TerminationCondition termination);
+    explicit SimulationSystem(TerminationCondition termination, unsigned seed = 12345u);
 
     SimulationSystem(const SimulationSystem&) = delete;
     SimulationSystem& operator=(const SimulationSystem&) = delete;
 
+    // --- model building ---
     Entity* createEntity();
     Resource* addResource(const std::string& name, int capacity);
     EntityQueue* addQueue(const std::string& name, QueueDiscipline d);
+    void setModel(const std::string& serverName, const std::string& queueName);
+    void setMeanInterarrival(SimTime mean);
+    void setMeanService(SimTime mean);
 
+    // --- lookup ---
     Resource* resource(const std::string& name);
     EntityQueue* queue(const std::string& name);
 
+    // --- read-only views ---
     const Clock& clock() const { return m_clock; }
     const Statistics& statistics() const { return m_stats; }
     const SystemState& state() const { return m_state; }
     const FutureEventList& fel() const { return m_fel; }
+    const RandomStream& randomStream() const { return m_rng; }
 
+    // --- running ---
     void initialise();
     void scheduleEvent(EventType type, SimTime t, Entity* e = nullptr, Resource* r = nullptr);
     void run();
     void report() const;
 };
-
-//
-// [7] Close class with semicolon.

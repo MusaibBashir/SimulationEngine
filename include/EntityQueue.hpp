@@ -80,7 +80,8 @@
 #include <cstddef>
 #include "Common.hpp"
 
-class Entity;  // forward declaration, not include, because we only store pointers
+class Entity;        // forward declaration, not include: we only store pointers
+class RandomStream;  // same -- only a pointer, so no include needed (v2)
 
 class EntityQueue {
     private:
@@ -89,13 +90,23 @@ class EntityQueue {
         std::deque<Entity*> m_waiting;
         std::size_t m_maxLengthObserved;
 
+        // v2: the Random discipline needs randomness, and randomness in this
+        // project comes from exactly one place. NON-OWNING pointer: the
+        // SimulationSystem owns the stream and lends it to us. nullptr is legal
+        // for every discipline except Random, which asserts.
+        RandomStream* m_rng;
+
     public:
         EntityQueue(const std::string& name, QueueDiscipline discipline);
+
         const std::string& name() const { return m_name; }
         QueueDiscipline discipline() const { return m_discipline; }
         std::size_t length() const { return m_waiting.size(); }
         bool isEmpty() const { return m_waiting.empty(); }
         std::size_t maxLengthObserved() const { return m_maxLengthObserved; }
+
+        // v2: injected by SimulationSystem::initialise().
+        void setRandomStream(RandomStream* rng) { m_rng = rng; }
 
         void push(Entity* e);
         Entity* pop();

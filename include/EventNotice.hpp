@@ -59,6 +59,8 @@
 
 #pragma once
 #include "Common.hpp"
+#include <cstdint>  // for uint64_t
+
 class Entity;
 class Resource;
 
@@ -68,6 +70,8 @@ private:
     SimTime   m_time;
     Entity*   m_entity;
     Resource* m_resource;
+    static uint64_t s_nextSequenceNumber;
+    uint64_t m_sequenceNumber;
 
 public:
     EventNotice(EventType type, SimTime time, Entity* entity = nullptr, Resource* resource = nullptr);
