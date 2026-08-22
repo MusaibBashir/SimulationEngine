@@ -1,0 +1,54 @@
+# ---- Build output -------------------------------------------------------
+# CMake generates thousands of files here. None of them are source, all of
+# them are reproducible from the source, so none of them belong in history.
+build/
+cmake-build-*/
+out/
+
+# CMake droppings if anyone ever configures in-source (don't, but just in case)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# ---- Compiled artefacts -------------------------------------------------
+*.exe
+*.out
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+des
+
+# ---- MSVC / Visual Studio ----------------------------------------------
+*.pdb
+*.ilk
+*.idb
+*.sln
+*.vcxproj
+*.vcxproj.*
+*.tlog
+.vs/
+x64/
+Debug/
+Release/
+
+# ---- Editors & OS -------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# ---- v2 output ----------------------------------------------------------
+# Simulation traces and result dumps: regenerable, often large, and they make
+# every diff unreadable. Ignore them from the start.
+*.csv
+*.trace
+results/
