@@ -13,7 +13,18 @@
 - **C++17.** No newer features. No external dependencies — the project deliberately has none.
 - **All 293 existing checks must pass, unchanged.** Not adapted, not deleted. If a test needs changing, stop and raise it.
 - **Examples 01–15 must produce byte-identical traces to v9.** Capture the baselines in Task 1 before touching anything.
-- **Clean under `-Wall -Wextra -Wpedantic`** and under ASan/UBSan.
+- **The verification gate is `bash tools/verify.sh`** and it must print `VERIFY CLEAN`.
+  It runs three checks; run it, do not hand-roll the commands.
+  - GCC 14.2 `-Wall -Wextra -Wpedantic` — zero warnings.
+  - Clang 19.1 `-Wall -Wextra -Wpedantic` — zero warnings.
+  - MSVC `/fsanitize=address` — the full suite passes under AddressSanitizer.
+- **UBSan is unavailable on this machine and must not be claimed.** MinGW ships
+  no `libubsan`, MinGW Clang has no runtime for the windows-gnu target, and MSVC
+  has no UBSan at all. A `-fsanitize=undefined` command here fails to LINK — it
+  does not silently pass. Do not add one back.
+- **The `g++` on PATH is MinGW GCC 6.3 and cannot compile this code** (no
+  `<variant>`, no `<optional>`). `tools/verify.sh` finds the WinLibs GCC 14 /
+  Clang 19 itself and refuses any compiler older than GCC 7.
 - **Headers declare, sources define.** One-line getters stay inline. Every `.cpp` includes its own header first.
 - **`unique_ptr` = ownership, raw pointer = observation.** Every polymorphic base gets a virtual destructor.
 - **Every object holding run state needs `reset()`**, and `initialise()` must call it.
@@ -2221,7 +2232,7 @@ Expected: `374 / 374 checks passed` (336 + 38 new). No FAIL lines.
 - [ ] **Step 9: Check the sanitisers**
 
 ```bash
-g++ -std=c++17 -g -O1 -fsanitize=address,undefined -Iinclude -Itests main.cpp src/*.cpp -o des_asan && ./des_asan > /dev/null && echo "ASAN CLEAN"
+bash tools/verify.sh
 ```
 
 Expected: `ASAN CLEAN`.
@@ -3221,7 +3232,7 @@ Model& Model::station(const std::string& name, int capacity,
 ```bash
 cmake --build build && ./build/des_tests | tail -3
 for f in build/example_*; do n=$(basename "$f"); "$f" > "/tmp/$n.txt" 2>&1; diff -q "tests/baseline/$n.txt" "/tmp/$n.txt" || echo "DIFFERS: $n"; done; echo "trace check done"
-g++ -std=c++17 -g -O1 -fsanitize=address,undefined -Iinclude -Itests main.cpp src/*.cpp -o des_asan && ./des_asan > /dev/null && echo "ASAN CLEAN"
+bash tools/verify.sh
 ```
 
 Expected: `410 / 410 checks passed`, no `DIFFERS`, `ASAN CLEAN`.
@@ -3429,7 +3440,7 @@ A runnable program in the style of the other fifteen, showing what v10 bought: a
 cmake --build build && ./build/des_tests | tail -3
 ./build/example_16_expressions | head -30
 for f in build/example_*; do n=$(basename "$f"); case "$n" in *16*) continue;; esac; "$f" > "/tmp/$n.txt" 2>&1; diff -q "tests/baseline/$n.txt" "/tmp/$n.txt" || echo "DIFFERS: $n"; done; echo "trace check done"
-g++ -std=c++17 -g -O1 -fsanitize=address,undefined -Iinclude -Itests main.cpp src/*.cpp -o des_asan && ./des_asan > /dev/null && echo "ASAN CLEAN"
+bash tools/verify.sh
 ```
 
 Expected: all checks pass, example 16 runs, **no `DIFFERS` for examples 01–15**, `ASAN CLEAN`.
