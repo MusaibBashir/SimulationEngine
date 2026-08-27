@@ -42,7 +42,11 @@ CLANGXX="${WINLIBS_BIN:+$WINLIBS_BIN/clang++.exe}"
 [ -x "$CLANGXX" ] || CLANGXX="$(command -v clang++ || true)"
 
 WARN_FLAGS="-std=c++17 -Wall -Wextra -Wpedantic -Iinclude -Itests"
+# TWO link units, because both have a main(): the demo program and the test
+# suite. Compiling only the first would leave tests/ unchecked by GCC and
+# Clang -- and from v10 on, tests/ is where most of the new code lives.
 SOURCES="main.cpp src/*.cpp"
+TEST_SOURCES="tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp src/*.cpp"
 FAILED=0
 
 banner() { printf '\n=== %s ===\n' "$1"; }
@@ -62,41 +66,38 @@ check_version() {
     return 1
 }
 
-warnings() {
-    local out
-    out="$(mktemp)"
+# One compiler, one link unit. $3 is a label so a failure names which of the
+# two builds broke.
+compile_unit() {
+    local cc="$1" label="$2" unit="$3" sources="$4"
+    local out; out="$(mktemp)"
+    # shellcheck disable=SC2086
+    if "$cc" $WARN_FLAGS $sources -o "$out.exe" 2>"$out"; then
+        if grep -q "warning:" "$out"; then
+            grep "warning:" "$out" | head -20
+            printf '%s (%s): WARNINGS\n' "$label" "$unit"; FAILED=1
+        else
+            printf '%s (%s): clean\n' "$label" "$unit"
+        fi
+    else
+        head -30 "$out"
+        printf '%s (%s): BUILD FAILED\n' "$label" "$unit"; FAILED=1
+    fi
+    rm -f "$out" "$out.exe"
+}
 
+warnings() {
     if [ -n "$GXX" ] && check_version "$GXX" gcc; then
         banner "GCC $("$GXX" -dumpversion) -Wall -Wextra -Wpedantic"
-        # shellcheck disable=SC2086
-        if "$GXX" $WARN_FLAGS $SOURCES -o "$out.exe" 2>"$out"; then
-            if grep -q "warning:" "$out"; then
-                grep "warning:" "$out" | head -20
-                printf 'GCC: WARNINGS\n'; FAILED=1
-            else
-                printf 'GCC: clean\n'
-            fi
-        else
-            head -30 "$out"; printf 'GCC: BUILD FAILED\n'; FAILED=1
-        fi
+        compile_unit "$GXX" GCC engine "$SOURCES"
+        compile_unit "$GXX" GCC tests  "$TEST_SOURCES"
     fi
 
     if [ -n "$CLANGXX" ] && check_version "$CLANGXX" clang; then
         banner "Clang $("$CLANGXX" -dumpversion) -Wall -Wextra -Wpedantic"
-        # shellcheck disable=SC2086
-        if "$CLANGXX" $WARN_FLAGS $SOURCES -o "$out.exe" 2>"$out"; then
-            if grep -q "warning:" "$out"; then
-                grep "warning:" "$out" | head -20
-                printf 'Clang: WARNINGS\n'; FAILED=1
-            else
-                printf 'Clang: clean\n'
-            fi
-        else
-            head -30 "$out"; printf 'Clang: BUILD FAILED\n'; FAILED=1
-        fi
+        compile_unit "$CLANGXX" Clang engine "$SOURCES"
+        compile_unit "$CLANGXX" Clang tests  "$TEST_SOURCES"
     fi
-
-    rm -f "$out" "$out.exe"
 }
 
 asan() {
