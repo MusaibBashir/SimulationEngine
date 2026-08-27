@@ -12,7 +12,7 @@
 
 - **C++17.** No newer features. No external dependencies — the project deliberately has none.
 - **All 293 existing checks must pass, unchanged.** Not adapted, not deleted. If a test needs changing, stop and raise it.
-- **Examples 01–15 must produce byte-identical traces to v9.** Capture the baselines in Task 1 before touching anything.
+- **The 14 gated examples must stay byte-identical to v9.** Baselines were captured before this work began and are committed in `tests/baseline/`.
 - **The verification gate is `bash tools/verify.sh`** and it must print `VERIFY CLEAN`.
   It runs three checks; run it, do not hand-roll the commands.
   - GCC 14.2 `-Wall -Wextra -Wpedantic` — zero warnings.
@@ -31,6 +31,18 @@
 - **Sources are LISTED in `CMakeLists.txt`, never globbed** (except `examples/`).
 - **User errors are `Diagnostic` values; programmer errors are thrown `ModelError`.** Never mix these.
 - Namespace is `des` throughout. New public headers are added to `include/des.hpp`.
+- **The byte-identical gate is `bash tools/baseline.sh check`** and it must print
+  `BASELINE CLEAN`. Baselines are already captured from v9 — **never re-capture**;
+  re-capturing after a change is how a gate silently stops being a gate.
+- **`12_shared_resources` is EXCLUDED from that gate** — it produces a different
+  result on every run despite a fixed seed, a v9 bug predating this work. The
+  script prints the exclusion on every run. Do not "fix" it as part of v10, and
+  do not add anything else to the exclusion list.
+- **Build with CMake + Visual Studio**: `cmake --build build --config Debug`.
+  Binaries land in `build/Debug/` and examples in `build/examples/Debug/` — not
+  the Unix `build/` layout.
+- **Git Bash mangles MSVC-style flags** (`/fsanitize=address` becomes a path).
+  Use PowerShell for `cl`/CMake flag arguments, or the provided scripts.
 
 ## File Structure
 
@@ -79,10 +91,9 @@ Nothing here changes behaviour. It creates the safety net every later task is ch
 Build v9 as it stands and record what every example prints. These files are the byte-identical gate for Tasks 8–12.
 
 ```bash
-cmake -S . -B build && cmake --build build
-mkdir -p tests/baseline
-for f in build/example_*; do n=$(basename "$f"); "$f" > "tests/baseline/$n.txt" 2>&1; done
-ls tests/baseline/
+# ALREADY DONE before this plan started -- tests/baseline/ holds 14 captured
+# outputs and tools/baseline.sh is committed. Verify, do not recapture:
+bash tools/baseline.sh check
 ```
 
 Expected: 15 `.txt` files, non-empty.
@@ -2728,7 +2739,7 @@ Expected: `394 / 394 checks passed` (387 + 7 new), **and all 293 original checks
 - [ ] **Step 8: Verify the traces are still byte-identical**
 
 ```bash
-for f in build/example_*; do n=$(basename "$f"); "$f" > "/tmp/$n.txt" 2>&1; diff -q "tests/baseline/$n.txt" "/tmp/$n.txt" || echo "DIFFERS: $n"; done; echo "trace check done"
+bash tools/baseline.sh check
 ```
 
 Expected: no `DIFFERS` lines. **If any example differs, stop.** Nothing in this task should change behaviour, and a diff means an integral moved.
@@ -2894,7 +2905,7 @@ Model& Model::branch(const std::string& decideName, const std::string& condition
 
 ```bash
 cmake --build build && ./build/des_tests | tail -3
-for f in build/example_*; do n=$(basename "$f"); "$f" > "/tmp/$n.txt" 2>&1; diff -q "tests/baseline/$n.txt" "/tmp/$n.txt" || echo "DIFFERS: $n"; done; echo "trace check done"
+bash tools/baseline.sh check
 ```
 
 Expected: `399 / 399 checks passed`, no `DIFFERS` lines.
@@ -3068,7 +3079,7 @@ where `assignBlock(name)` is the existing "find-or-create the AssignNode" helper
 
 ```bash
 cmake --build build && ./build/des_tests | tail -3
-for f in build/example_*; do n=$(basename "$f"); "$f" > "/tmp/$n.txt" 2>&1; diff -q "tests/baseline/$n.txt" "/tmp/$n.txt" || echo "DIFFERS: $n"; done; echo "trace check done"
+bash tools/baseline.sh check
 ```
 
 Expected: `403 / 403 checks passed`, no `DIFFERS` lines.
@@ -3231,7 +3242,7 @@ Model& Model::station(const std::string& name, int capacity,
 
 ```bash
 cmake --build build && ./build/des_tests | tail -3
-for f in build/example_*; do n=$(basename "$f"); "$f" > "/tmp/$n.txt" 2>&1; diff -q "tests/baseline/$n.txt" "/tmp/$n.txt" || echo "DIFFERS: $n"; done; echo "trace check done"
+bash tools/baseline.sh check
 bash tools/verify.sh
 ```
 
@@ -3347,7 +3358,7 @@ In the report, print alongside the existing `VisitRatios::exact` line:
 
 ```bash
 cmake --build build && ./build/des_tests | tail -3
-for f in build/example_*; do n=$(basename "$f"); "$f" > "/tmp/$n.txt" 2>&1; diff -q "tests/baseline/$n.txt" "/tmp/$n.txt" || echo "DIFFERS: $n"; done; echo "trace check done"
+bash tools/baseline.sh check
 ```
 
 Expected: `416 / 416 checks passed`, no `DIFFERS` lines — no existing example uses a computed mean, so none should gain the new warning.
@@ -3439,7 +3450,7 @@ A runnable program in the style of the other fifteen, showing what v10 bought: a
 ```bash
 cmake --build build && ./build/des_tests | tail -3
 ./build/example_16_expressions | head -30
-for f in build/example_*; do n=$(basename "$f"); case "$n" in *16*) continue;; esac; "$f" > "/tmp/$n.txt" 2>&1; diff -q "tests/baseline/$n.txt" "/tmp/$n.txt" || echo "DIFFERS: $n"; done; echo "trace check done"
+bash tools/baseline.sh check
 bash tools/verify.sh
 ```
 

@@ -1,0 +1,33 @@
+Call centre: 1 call/min arriving, 3.5 min per call.
+Work arriving = 3.5 agent-minutes per minute, so 4 agents is
+the bare minimum to keep up (rho = 3.5/4 = 0.875) and 3 would
+have rho > 1 -- an unbounded queue. We start at 4.
+
+  agents   mean wait (min)      Lq     rho    cost/hr
+  ---------------------------------------------------
+       4      4.86 +/-  0.34     4.86    0.87     391.78
+       5      0.84 +/-  0.08     0.84    0.70     175.65
+       6      0.26 +/-  0.03     0.26    0.58     165.63
+       7      0.08 +/-  0.01     0.08    0.50     179.82
+       8      0.02 +/-  0.00     0.02    0.44     201.38
+
+  cheapest on this cost model: 6 agents at 165.63/hr
+
+--- what to notice ------------------------------------------------------
+The wait collapses between 4 and 6 agents and then barely moves. That
+shape -- steep, then flat -- is universal in queueing, and it is why
+"just add one more server" works spectacularly right up until it does
+nothing at all.
+
+BEFORE YOU QUOTE THE WINNER, CHECK THE INTERVALS. If two staffing levels
+have overlapping intervals on the quantity you care about, your simulation
+has NOT shown one is better. Either accept they are indistinguishable, or
+run more replications.
+
+Also notice how much the answer depends on COST_PER_WAITING_HOUR, which is
+a number somebody made up. Simulation gives you the queueing behaviour
+exactly; it cannot give you the value of a customer's time. Say which of
+your inputs are measured and which are assumed, and show how the answer
+moves when the assumed ones change. That sensitivity analysis is usually
+worth more marks than the simulation itself.
+--------------------------------------------------------------------------

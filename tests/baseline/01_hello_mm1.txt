@@ -1,0 +1,39 @@
+=== simulation report =====================================
+seed                     : 12345
+termination              : TimeLimit(480)
+total simulated time     : 480.0846
+warm-up discarded        : 0.0000
+measured period          : 480.0846
+entities arrived         : 494
+entities exited          : 493
+average total wait       : 3.0097
+average time in system   : 3.8308
+max total wait           : 12.1343
+time-avg in queue (Lq)   : 3.0962
+time-avg in system (L)   : 3.9394
+still waiting at stop    : 0
+live entity objects      : 1
+
+  station        cap   served    avg wait   time-avg Q    util   maxQ
+  -----------------------------------------------------------------
+  Teller          1      493      3.0097       3.0962  0.8432     15
+===========================================================
+
+customers served      : 493
+average wait          : 3.0097 min
+longest anyone waited : 12.1343 min
+teller utilisation    : 0.8432
+longest the queue got : 15
+
+Utilisation lands near 0.80 because rho = 0.8 / 1.0 = 0.8: the server is
+busy 80% of the time.
+
+THAT NUMBER IS THE ONE TO CHECK BEFORE ANY MODEL RUNS.
+
+    rho = mean service time / (capacity * mean interarrival time)
+
+If rho >= 1, work arrives faster than it can be done, the queue grows for
+as long as you run, and every average is a function of run length rather
+than a property of the system. Try changing the service time to 1.4 and
+re-running: the engine refuses, with a message saying why. It used to run
+and print confident nonsense.

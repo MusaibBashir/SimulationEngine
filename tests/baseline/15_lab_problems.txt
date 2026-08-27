@@ -1,0 +1,211 @@
+
+
+################################################################
+  PROBLEM 1 -- gear manufacturing (batch of 5), 4 hours
+################################################################
+
+============================================================
+Replication ended at time : 240.2530
+
+TALLY VARIABLES
+Identifier                             Average     Minimum     Maximum  Observations
+------------------------------------------------------------------------------------
+Entity.TotalTime                       0.93784     0.00000     4.78791           485
+Gear Machine.Queue.WaitingTime         0.01137     0.00000     0.53457            97
+Batching Station.Queue.WaitingTime     0.93784     0.00000     4.78791           485
+
+DISCRETE-CHANGE VARIABLES
+Identifier                             Average   Final Value
+------------------------------------------------------------
+Entity.WIP                             1.89825       3.00000
+Gear Machine.Utilization               0.40841       0.00000
+Gear Machine.Queue.NumberInQueue       0.00459       0.00000
+
+OUTPUTS
+------------------------------------------------------------
+Entity.NumberIn                                488.000
+Entity.NumberOut                               485.000
+Gear Machine Number In                          97.000
+Gear Machine Number Out                         97.000
+Gear Machine.ScheduledUtilization                0.408
+Batching Station.BatchesFormed                  97.000
+Dispatch.NumberOut                              97.000
+System.NumberOut                                97.000
+============================================================
+
+--- ANSWERS -------------------------------------------------------------
+Batching station queue, average waiting time : 0.9378 min   (485 plates)
+Gear machine queue, average waiting time     : 0.0114 min   (97 batches)
+Entities leaving the gear machine            : 97 batches
+Entities leaving the system                  : 97
+Gear machine scheduled utilization           : 0.4084
+
+--- reading this ---------------------------------------------------------
+THE BATCHING QUEUE IS WHERE ALL THE WAITING IS. A plate waits for four
+companions before the machine even sees it, and that dominates the machine
+queue by two orders of magnitude. Note the OBSERVATION COUNTS differ: the
+batching queue records one observation per PLATE, the machine queue one per
+BATCH -- five times fewer. Comparing the two averages without noticing that
+is comparing different things.
+
+*** A MODELLING TRAP IN THE QUESTION. ***
+The words say the plates "are separated and are dispatched". That means a
+TEMPORARY batch plus a Separate block, and roughly five times as many
+entities leaving the system. But a PERMANENT batch -- which is what the
+reference Arena model used -- consumes its members, so Separate has nothing
+to split and quietly does nothing: one entity leaves per batch.
+
+Both are defensible readings of an ambiguous question. What is NOT
+defensible is not noticing which one you built. The two answers to "how
+many entities leave the system" differ by a factor of five.
+
+Below is the same model with a temporary batch, so you can see both.
+  permanent batch : 97 entities leave the system
+  temporary batch : 485 entities leave the system (the plates themselves)
+
+
+################################################################
+  PROBLEM 3 -- urine sample testing, 4 hours
+################################################################
+*** THIS MODEL IS OVERLOADED, AND THAT IS THE INTERESTING PART. ***
+Samples arrive every 0.5 hours on average, so 2 per hour. Adding chemicals
+takes 1 hour on average with ONE station, so rho = 2.0. Work arrives twice
+as fast as it can be done and the queue grows for as long as you run.
+
+The engine refuses such a model by default, because for a STEADY-STATE
+study "average wait" would be a function of run length rather than a
+property of the system. Here the question is a TERMINATING one -- run for
+four hours and report what happened -- which is a perfectly good question
+about an overloaded shift. allowOverload() says so out loud, and the report
+carries the caveat.
+
+============================================================
+Replication ended at time : 4.0182
+*** OVERLOADED MODEL: at least one queue grows without bound.
+*** These are TERMINATING-run results for this horizon only.
+*** They are not steady-state values and will change if the
+*** run length changes.
+
+TALLY VARIABLES
+Identifier                             Average     Minimum     Maximum  Observations
+------------------------------------------------------------------------------------
+Entity.TotalTime                       2.07436     0.00000     2.58966             5
+Adding Chemicals.Queue.WaitingTime     0.17979     0.00000     0.53937             3
+Sample Process 1.Queue.WaitingTime     0.02933     0.00000     0.05340             3
+Sample Process 2.Queue.WaitingTime     0.09774     0.00000     0.19548             2
+
+DISCRETE-CHANGE VARIABLES
+Identifier                             Average   Final Value
+------------------------------------------------------------
+Entity.WIP                             1.93409       1.00000
+Adding Chemicals.Utilization           0.98476       1.00000
+Adding Chemicals.Queue.NumberInQueue     0.90423       2.00000
+Sample Process 1.Utilization           0.68502       0.00000
+Sample Process 1.Queue.NumberInQueue     0.02190       0.00000
+Sample Process 2.Utilization           0.68502       1.00000
+Sample Process 2.Queue.NumberInQueue     0.10108       0.00000
+
+OUTPUTS
+------------------------------------------------------------
+Entity.NumberIn                                  6.000
+Entity.NumberOut                                 5.000
+Adding Chemicals Number In                       6.000
+Adding Chemicals Number Out                      3.000
+Adding Chemicals.ScheduledUtilization            0.985
+Sample Process 1 Number In                       3.000
+Sample Process 1 Number Out                      3.000
+Sample Process 1.ScheduledUtilization            0.685
+Sample Process 2 Number In                       3.000
+Sample Process 2 Number Out                      2.000
+Sample Process 2.ScheduledUtilization            0.685
+Samples Exit.NumberOut                           5.000
+System.NumberOut                                 5.000
+============================================================
+
+--- ANSWERS -------------------------------------------------------------
+                        queue wait (hr)   scheduled utilization
+  Adding Chemicals           0.17979               0.98476
+  Sample Process 1           0.02933               0.68502
+  Sample Process 2           0.09774               0.68502
+
+Test results leaving the system : 5
+
+--- reading this ---------------------------------------------------------
+ADDING CHEMICALS IS PINNED AT UTILIZATION 1.0 and its queue grows all
+afternoon. That is not a simulation artefact, it is the answer: with one
+station at this arrival rate the front of the process cannot cope, and
+everything downstream is starved by it.
+
+The two test settings sit near 0.7 each, and they are NOT the bottleneck.
+Buying a third tester would change nothing. Adding a second chemicals
+station is the only thing that would.
+
+TEST RESULTS ARE ROUGHLY TWICE THE SAMPLES that get through, because
+Separate duplicates each one. Every sample that clears chemicals produces
+two results.
+
+AND THE NUMBERS DEPEND ON THE RUN LENGTH. Run it for 8 hours instead of 4
+and the chemicals queue will be twice as long. For an overloaded system
+that is expected -- there is no steady state to converge to.
+
+
+################################################################
+  PROBLEM 5 -- one of each: matched batching, 4 hours
+################################################################
+
+============================================================
+Replication ended at time : 240.7482
+
+TALLY VARIABLES
+Identifier                             Average     Minimum     Maximum  Observations
+------------------------------------------------------------------------------------
+Baseball.TotalTime                     4.66258     0.00000    13.48096           237
+Basketball.TotalTime                   0.54655     0.00000     8.81673           237
+Football.TotalTime                     6.02250     0.00000    14.81875           237
+Batching Station.Queue.WaitingTime     3.74388     0.00000    14.81875           711
+
+DISCRETE-CHANGE VARIABLES
+Identifier                             Average   Final Value
+------------------------------------------------------------
+Baseball.WIP                           4.76330       6.00000
+Basketball.WIP                         0.53805       0.00000
+Football.WIP                           6.20684      10.00000
+
+OUTPUTS
+------------------------------------------------------------
+Baseball.NumberIn                              243.000
+Baseball.NumberOut                             237.000
+Basketball.NumberIn                            237.000
+Basketball.NumberOut                           237.000
+Football.NumberIn                              247.000
+Football.NumberOut                             237.000
+Batching Station.BatchesFormed                 237.000
+Dispatched.NumberOut                           237.000
+System.NumberOut                               237.000
+============================================================
+
+--- ANSWERS -------------------------------------------------------------
+Batching station, average waiting time : 3.7439 min
+Batching station, WIP (time-average number in system) : 11.5082
+Batching station, longest queue        : 32
+Sets of three dispatched              : 237
+
+  type          entering   leaving
+  Baseball           243       237
+  Basketball         237       237
+  Football           247       237
+
+--- reading this ---------------------------------------------------------
+ALL THREE TYPES ARRIVE AT THE SAME RATE, so the batching station stays
+roughly balanced and no type builds up badly. Change one stream to
+Expo(0.5) and watch what happens: the two slower types are consumed as
+fast as they arrive while the fast one piles up, because every set needs
+one of each and the set can only go as fast as its slowest ingredient.
+
+THAT IS THE WHOLE POINT OF MATCHED BATCHING. A plain batch of three would
+take the first three balls to show up -- often three of the same kind --
+and would never stall. It would also be modelling a different system.
+
+The 1000-per-type cap never binds here: at one per minute for 240 minutes
+only about 240 of each arrive. Shorten the run or speed up the streams and
+the cap starts to matter.
