@@ -62,7 +62,7 @@ add_executable(des main.cpp)
 target_link_libraries(des PRIVATE des_engine)
 target_compile_options(des PRIVATE ${DES_WARNINGS})
 
-add_executable(des_tests tests/tests.cpp)
+add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp)
 target_link_libraries(des_tests PRIVATE des_engine)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
 
