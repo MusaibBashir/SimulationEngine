@@ -430,4 +430,89 @@ void runExpressionTests() {
             checkClose(asNumber(copy->evaluate(ctx)), 4.0, 1e-12, "a cloned call tree evaluates");
         }
     }
+
+    section("Variables");
+    {
+        VariableStore v;
+        v.declare("WIPCount", 0.0);
+        check(v.has("WIPCount"), "a declared variable is present");
+        check(!v.has("nosuch"), "an undeclared variable is absent");
+        checkClose(v.get("WIPCount"), 0.0, 1e-12, "initial value");
+
+        v.set("WIPCount", 5.0, 0.0);
+        checkClose(v.get("WIPCount"), 5.0, 1e-12, "set round-trips");
+
+        // Configuration survives reset; run state does not.
+        v.reset();
+        checkClose(v.get("WIPCount"), 0.0, 1e-12, "reset restores the initial value");
+        check(v.has("WIPCount"), "reset keeps the declaration");
+        check(v.count() == 1, "names() lists the declarations");
+        check(v.names()[0] == "WIPCount", "declaration order is kept");
+
+        bool threw = false;
+        try { v.declare("WIPCount", 1.0); } catch (const ModelError&) { threw = true; }
+        check(threw, "a duplicate declaration throws");
+
+        // ONE NAMESPACE: a variable may not shadow an attribute. The
+        // alternative is a resolution order, and that means one of the two
+        // reads silently wrong.
+        VariableStore w;
+        w.noteAttributeNames({"priority"});
+        threw = false;
+        try { w.declare("priority", 0.0); } catch (const ModelError&) { threw = true; }
+        check(threw, "a variable colliding with an attribute is refused");
+        w.declare("shift", 1.0);
+        check(w.has("shift"), "a non-colliding name is still fine");
+
+        threw = false;
+        try { w.set("nosuch", 1.0, 0.0); } catch (const ModelError&) { threw = true; }
+        check(threw, "setting an undeclared variable throws rather than auto-declaring");
+
+        threw = false;
+        try { w.get("nosuch"); } catch (const ModelError&) { threw = true; }
+        check(threw, "reading an undeclared variable throws");
+
+        // Time-persistent average, hand-computed: 0 over [0,2), 10 over [2,4)
+        // gives a time average of 5 over [0,4).
+        VariableStore t;
+        t.declare("Level", 0.0);
+        t.resetStatistics(0.0);
+        t.set("Level", 10.0, 2.0);
+        t.updateIntegrals(4.0);
+        checkClose(t.timeAverage("Level"), 5.0, 1e-9, "time-persistent average, hand-computed");
+
+        // Warm-up: the measurement restarts, the VALUE does not.
+        t.resetStatistics(4.0);
+        checkClose(t.get("Level"), 10.0, 1e-12, "resetStatistics leaves the value alone");
+        t.updateIntegrals(6.0);
+        checkClose(t.timeAverage("Level"), 10.0, 1e-9,
+                   "the average measures only since the warm-up");
+
+        // A variable that never changes still averages to its value.
+        VariableStore c;
+        c.declare("Fixed", 3.0);
+        c.resetStatistics(0.0);
+        c.updateIntegrals(10.0);
+        checkClose(c.timeAverage("Fixed"), 3.0, 1e-9, "a constant variable averages to itself");
+
+        // Before any time has passed, report the current value rather than
+        // dividing by zero.
+        VariableStore z;
+        z.declare("Z", 7.0);
+        checkClose(z.timeAverage("Z"), 7.0, 1e-12, "zero measured time reports the value");
+
+        // A NameExpression now resolves against a real store.
+        VariableStore live;
+        live.declare("Rate", 2.5);
+        EvalContext lctx(nullptr, &live, nullptr, nullptr);
+        NameExpression rate("Rate", SourceSpan{0, 4});
+        checkClose(asNumber(rate.evaluate(lctx)), 2.5, 1e-12, "a name resolves to a variable");
+
+        ValidationContext vc;
+        vc.variables = &live;
+        vc.field = FieldContext::NoEntity;
+        std::vector<Diagnostic> d;
+        rate.validate(vc, d);
+        check(!hasErrors(d), "a declared variable validates even with no entity");
+    }
 }
