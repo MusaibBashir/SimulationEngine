@@ -674,4 +674,98 @@ void runExpressionTests() {
             check(threw, "a condition branch on a by-chance Decide is still refused");
         }
     }
+
+    section("Assign");
+    {
+        // Counted = Counted + 1 -- an expression with a global on BOTH sides.
+        // This is the thing attributes structurally cannot express.
+        {
+            SimulationSystem sim(99u);
+            sim.model().variable("Counted", 0.0)
+                       .arrivals(constant(1.0))
+                       .assignVariable("Count", "Counted", "Counted + 1")
+                       .station("Work", 1, FIFO, constant(0.5))
+                       .route("Count", "Work")
+                       .entryAt("Count");
+            sim.stopAt(10.5).initialise();
+            sim.run();
+            checkClose(sim.model().variables().get("Counted"), 11.0, 1e-12,
+                       "the variable counted every arrival");
+        }
+
+        // An attribute assigned from an expression over another attribute.
+        {
+            SimulationSystem s2(5u);
+            s2.model().attribute("base", constant(2.0))
+                      .arrivals(constant(1.0))
+                      .assignTo("Double", "doubled", "base * 3")
+                      .recordAttribute("Seen", "doubled")
+                      .route("Double", "Seen")
+                      .entryAt("Double");
+            s2.stopAt(5.0).initialise();
+            s2.run();
+            checkClose(s2.model().nodeAs<RecordNode>("Seen").average(), 6.0, 1e-9,
+                       "the assigned attribute is base * 3");
+        }
+
+        // One Assign block, several fields, mixed targets.
+        {
+            SimulationSystem s3(6u);
+            s3.model().variable("Total", 0.0)
+                      .arrivals(constant(1.0))
+                      .assignTo("Stamp", "size", "3")
+                      .assignVariable("Stamp", "Total", "Total + size")
+                      .station("W", 1, FIFO, constant(0.1))
+                      .route("Stamp", "W")
+                      .entryAt("Stamp");
+            s3.stopAt(4.5).initialise();
+            s3.run();
+            // Assert the RELATIONSHIP, not a predicted arrival count: every
+            // entity through the block adds exactly the size just stamped on
+            // it, which only holds if the fields run in order.
+            const long long stamped = s3.model().nodeAs<AssignNode>("Stamp").count();
+            check(stamped > 0, "the Assign block saw entities");
+            checkClose(s3.model().variables().get("Total"), 3.0 * static_cast<double>(stamped),
+                       1e-12,
+                       "fields run in order, so the variable sees the attribute just set");
+        }
+
+        // Assigning the entity's TYPE, which per-type reporting keys on.
+        {
+            SimulationSystem s4(7u);
+            s4.model().arrivals(constant(1.0))
+                      .assignEntityType("Rename", "\"Widget\"")
+                      .station("W", 1, FIFO, constant(0.1))
+                      .route("Rename", "W")
+                      .entryAt("Rename");
+            s4.stopAt(5.0).initialise();
+            s4.run();
+            check(s4.byType().count("Widget") == 1,
+                  "entities are reported under their reassigned type");
+        }
+
+        // A reserved engine attribute is still refused.
+        {
+            SimulationSystem s5(8u);
+            bool threw = false;
+            try { s5.model().assignTo("Bad", "waitTime", "1"); }
+            catch (const ModelError&) { threw = true; }
+            check(threw, "a reserved attribute name is still refused");
+        }
+
+        // Text into a numeric variable is refused rather than stored as zero.
+        {
+            SimulationSystem s6(1u);
+            s6.model().variable("V", 0.0)
+                      .arrivals(constant(1.0))
+                      .assignVariable("A", "V", "\"text\"")
+                      .station("W", 1, FIFO, constant(0.1))
+                      .route("A", "W")
+                      .entryAt("A");
+            s6.stopAt(5.0).initialise();
+            bool threw = false;
+            try { s6.run(); } catch (const ModelError&) { threw = true; }
+            check(threw, "text assigned to a numeric variable throws rather than storing 0");
+        }
+    }
 }

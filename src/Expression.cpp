@@ -8,6 +8,8 @@ namespace des {
 
 void IExpression::useStream(RandomStream*) {}
 
+void IExpression::reset() {}
+
 const char* spelling(UnaryOp op) {
     switch (op) {
         case UnaryOp::Negate: return "-";
@@ -107,6 +109,8 @@ ExpressionPtr UnaryExpression::clone() const {
 
 void UnaryExpression::useStream(RandomStream* s) { m_operand->useStream(s); }
 
+void UnaryExpression::reset() { m_operand->reset(); }
+
 Value BinaryExpression::evaluate(EvalContext& ctx) const {
     // && and || SHORT-CIRCUIT. Not an optimisation: it is what lets
     // `Count > 0 && Total / Count > 5` be written at all.
@@ -174,6 +178,11 @@ ExpressionPtr BinaryExpression::clone() const {
 void BinaryExpression::useStream(RandomStream* s) {
     m_left->useStream(s);
     m_right->useStream(s);
+}
+
+void BinaryExpression::reset() {
+    m_left->reset();
+    m_right->reset();
 }
 
 Value LambdaExpression::evaluate(EvalContext& ctx) const {

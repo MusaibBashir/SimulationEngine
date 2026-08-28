@@ -45,15 +45,27 @@ public:
 // ASSIGN -- set attributes on the entity passing through. Instant.
 // Two forms: a fixed value, or a draw from a distribution.
 // ---------------------------------------------------------------------------
+// v10: Arena's Assign writes an attribute, a VARIABLE, or the entity's TYPE.
+// Through v9 it could only write attributes, which is why "how many have we
+// served" could not be said at all -- that fact belongs to the system, not to
+// any one entity.
+enum class AssignTarget { Attribute, Variable, EntityType };
+
 class AssignNode : public INode {
 public:
-    struct Rule { std::string name; std::unique_ptr<IDistribution> value; };
+    struct Rule {
+        AssignTarget  target{AssignTarget::Attribute};
+        std::string   name;      // empty for EntityType
+        ExpressionPtr value;
+    };
 private:
     std::vector<Rule> m_rules;
     long long m_count{0};
 public:
     explicit AssignNode(std::string name);
     AssignNode& set(const std::string& attribute, std::unique_ptr<IDistribution> value);
+    AssignNode& set(AssignTarget target, const std::string& name, ExpressionPtr value);
+    const std::vector<Rule>& rules() const { return m_rules; }
     void enter(NodeContext& ctx, Entity* e) override;
     void reset() override;
     void resetStatistics(SimTime now) override;

@@ -200,6 +200,38 @@ Model& Model::delay(const std::string& name, std::unique_ptr<IDistribution> dura
     return *this;
 }
 
+// Find-or-create the Assign block. Calling assign twice with one block name
+// adds a second field to the SAME block, which is how an Assign with several
+// fields is written.
+AssignNode& Model::assignBlock(const std::string& name) {
+    if (INode* existing = node(name)) {
+        auto* a = dynamic_cast<AssignNode*>(existing);
+        if (!a) throw ModelError("block '" + name + "' exists and is not an Assign");
+        return *a;
+    }
+    auto owned = std::make_unique<AssignNode>(name);
+    AssignNode* raw = owned.get();
+    add(std::move(owned));
+    return *raw;
+}
+
+Model& Model::assignTo(const std::string& block, const std::string& attributeName,
+                       const std::string& valueText) {
+    assignBlock(block).set(AssignTarget::Attribute, attributeName, expr(valueText));
+    return *this;
+}
+
+Model& Model::assignVariable(const std::string& block, const std::string& variableName,
+                             const std::string& valueText) {
+    assignBlock(block).set(AssignTarget::Variable, variableName, expr(valueText));
+    return *this;
+}
+
+Model& Model::assignEntityType(const std::string& block, const std::string& typeText) {
+    assignBlock(block).set(AssignTarget::EntityType, "", expr(typeText));
+    return *this;
+}
+
 Model& Model::assign(const std::string& name, const std::string& attributeName,
                      std::unique_ptr<IDistribution> value) {
     // Calling assign() twice with the same block name adds a second attribute to

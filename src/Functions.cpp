@@ -67,6 +67,8 @@ public:
     void useStream(RandomStream* s) override {
         for (const ExpressionPtr& a : m_args) a->useStream(s);
     }
+
+    void reset() override { for (const ExpressionPtr& a : m_args) a->reset(); }
 };
 
 // --- model state -----------------------------------------------------------
@@ -178,6 +180,11 @@ public:
     void useStream(RandomStream* s) override {
         m_stream = s;
         if (m_fixed) m_fixed->useStream(s);
+    }
+
+    void reset() override {
+        for (const ExpressionPtr& a : m_args) a->reset();
+        if (m_fixed) m_fixed->reset();
     }
 };
 

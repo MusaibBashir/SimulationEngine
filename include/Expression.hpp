@@ -61,6 +61,12 @@ public:
     // finally separates a Delay's draws from a Decide's: they shared a stream
     // because they shared a code path, and now they are separate objects.
     virtual void useStream(RandomStream* s);
+
+    // Back to the t=0 condition between replications. Only a Deterministic
+    // distribution has anything to do -- it walks a cursor through a list --
+    // but a node that owned a distribution used to reset it, so an expression
+    // that owns one must too.
+    virtual void reset();
 };
 
 using ExpressionPtr = std::unique_ptr<IExpression>;
@@ -104,6 +110,7 @@ public:
     std::string describe() const override;
     ExpressionPtr clone() const override;
     void useStream(RandomStream* s) override;
+    void reset() override;
 };
 
 class BinaryExpression : public IExpression {
@@ -118,6 +125,7 @@ public:
     std::string describe() const override;
     ExpressionPtr clone() const override;
     void useStream(RandomStream* s) override;
+    void reset() override;
 };
 
 // The two adapters below are why v10 breaks nothing. The old C++ API does not
@@ -150,7 +158,7 @@ public:
     std::string describe() const override { return m_distribution->describe(); }
     ExpressionPtr clone() const override;
     void useStream(RandomStream* s) override;
-    void reset() { m_distribution->reset(); }
+    void reset() override { m_distribution->reset(); }
 };
 
 }  // namespace des

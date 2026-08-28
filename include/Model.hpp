@@ -67,6 +67,7 @@ private:
     INode* m_entry{nullptr};
 
     INode* add(std::unique_ptr<INode> node);
+    AssignNode& assignBlock(const std::string& name);
     void requireUnique(const std::string& name) const;
 
 public:
@@ -162,6 +163,13 @@ public:
     Model& delay(const std::string& name, std::unique_ptr<IDistribution> duration);
     Model& assign(const std::string& name, const std::string& attributeName,
                   std::unique_ptr<IDistribution> value);
+    // v10. assignTo writes an attribute from text; assignVariable writes a
+    // global; assignEntityType restamps the entity's type.
+    Model& assignTo(const std::string& block, const std::string& attributeName,
+                    const std::string& valueText);
+    Model& assignVariable(const std::string& block, const std::string& variableName,
+                          const std::string& valueText);
+    Model& assignEntityType(const std::string& block, const std::string& typeText);
     Model& decideByChance(const std::string& name, double probabilityTrue);
     Model& decideByCondition(const std::string& name, DecideNode::Condition condition);
     Model& decideByCondition(const std::string& name, ExpressionPtr condition);
