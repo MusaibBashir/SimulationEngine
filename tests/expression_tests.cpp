@@ -591,4 +591,87 @@ void runExpressionTests() {
                        "a variable held all run averages to its value");
         }
     }
+
+    section("Decide by a text condition");
+    {
+        // Text and lambda must agree EXACTLY -- same seed, same routing.
+        auto countExpress = [](bool useText) {
+            SimulationSystem sim(4242u);
+            Model& m = sim.model();
+            m.attribute("priority", uniform(0.0, 4.0))
+             .arrivals(exponential(1.0));
+            if (useText) m.decideWhen("Sort", "priority > 2");
+            else         m.decideByCondition("Sort",
+                            [](const Entity& e){ return e.attribute("priority") > 2; });
+            m.station("Express", 1, FIFO, exponential(0.3))
+             .station("Normal",  1, FIFO, exponential(0.3))
+             .routeTrue("Sort", "Express")
+             .route("Sort", "Normal")
+             .entryAt("Sort");
+            sim.stopAt(200.0).initialise();
+            sim.run();
+            return sim.model().nodeAs<DecideNode>("Sort").tookTrue();
+        };
+        const long long viaText = countExpress(true);
+        check(viaText == countExpress(false),
+              "a text condition routes IDENTICALLY to the equivalent lambda");
+        check(viaText > 0, "the condition actually fired");
+
+        // A malformed condition is a programmer error on the C++ API.
+        {
+            SimulationSystem sim(1u);
+            bool threw = false;
+            try { sim.model().decideWhen("Bad", "priority >"); }
+            catch (const ModelError&) { threw = true; }
+            check(threw, "a malformed condition text throws on the C++ API");
+        }
+
+        // A condition reading live model state -- impossible with a lambda,
+        // which cannot see the queue.
+        {
+            SimulationSystem sim(7u);
+            sim.model().arrivals(constant(1.0))
+                       .decideWhen("Full", "NQ(Busy) > 2")
+                       .station("Busy", 1, FIFO, constant(2.0))
+                       .station("Overflow", 1, FIFO, constant(0.1))
+                       .routeTrue("Full", "Overflow")
+                       .route("Full", "Busy")
+                       .entryAt("Full");
+            sim.model().allowOverload();
+            sim.stopAt(50.0).initialise();
+            sim.run();
+            check(sim.model().nodeAs<DecideNode>("Full").tookTrue() > 0,
+                  "NQ() in a condition sees the queue actually filling");
+        }
+
+        // A condition reading a variable.
+        {
+            SimulationSystem sim(9u);
+            sim.model().variable("Gate", 0.0)
+                       .arrivals(constant(1.0))
+                       .decideWhen("Check", "Gate > 0")
+                       .station("Open", 1, FIFO, constant(0.1))
+                       .station("Shut", 1, FIFO, constant(0.1))
+                       .routeTrue("Check", "Open")
+                       .route("Check", "Shut")
+                       .entryAt("Check");
+            sim.stopAt(20.0).initialise();
+            sim.model().variables().set("Gate", 1.0, 0.0);
+            sim.run();
+            check(sim.model().nodeAs<DecideNode>("Check").tookTrue() > 0,
+                  "a variable read in a condition routes on its value");
+            check(sim.model().nodeAs<DecideNode>("Check").tookFalse() == 0,
+                  "and nothing takes the other branch while it stays set");
+        }
+
+        // Mixing chance and condition branches is still refused.
+        {
+            SimulationSystem sim(1u);
+            sim.model().decideNWayByChance("Mix").station("A", 1, FIFO, constant(1.0));
+            bool threw = false;
+            try { sim.model().branchWhen("Mix", "1 > 0", "A"); }
+            catch (const ModelError&) { threw = true; }
+            check(threw, "a condition branch on a by-chance Decide is still refused");
+        }
+    }
 }

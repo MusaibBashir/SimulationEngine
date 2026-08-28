@@ -120,6 +120,15 @@ DecideNode::DecideNode(std::string name, double probability)
 DecideNode::DecideNode(std::string name, Condition condition)
     : INode(std::move(name)), m_byChance(false) {
     if (!condition) throw ModelError("decide '" + m_name + "': null condition");
+    // The old API becomes a CONSTRUCTOR for the new representation, not a
+    // second code path beside it.
+    m_branches.push_back(
+        Branch{-1.0, std::make_unique<LambdaExpression>(std::move(condition)), nullptr, 0});
+}
+
+DecideNode::DecideNode(std::string name, ExpressionPtr condition)
+    : INode(std::move(name)), m_byChance(false) {
+    if (!condition) throw ModelError("decide '" + m_name + "': null condition");
     m_branches.push_back(Branch{-1.0, std::move(condition), nullptr, 0});
 }
 
@@ -141,6 +150,12 @@ DecideNode& DecideNode::addBranch(double probability, INode* target) {
 }
 
 DecideNode& DecideNode::addBranch(Condition condition, INode* target) {
+    if (!condition) throw ModelError("decide '" + m_name + "': null condition");
+    return addBranch(ExpressionPtr(std::make_unique<LambdaExpression>(std::move(condition))),
+                     target);
+}
+
+DecideNode& DecideNode::addBranch(ExpressionPtr condition, INode* target) {
     if (m_byChance)
         throw ModelError("decide '" + m_name + "': this block branches by chance; "
                          "a Decide is all-chance or all-condition, never mixed");
@@ -177,8 +192,9 @@ void DecideNode::enter(NodeContext& ctx, Entity* e) {
     } else {
         // First matching condition wins, so ORDER IS MEANINGFUL. Put the most
         // specific condition first.
+        EvalContext ectx = ctx.evaluationContext(e);
         for (auto& b : m_branches) {
-            if (b.condition(*e)) { chosen = &b; break; }
+            if (truthy(b.condition->evaluate(ectx))) { chosen = &b; break; }
         }
     }
 

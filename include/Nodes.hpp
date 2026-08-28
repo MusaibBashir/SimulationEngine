@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 #include "Common.hpp"
+#include "Expression.hpp"
 #include "Node.hpp"
 #include "Distribution.hpp"
 #include "Statistics.hpp"
@@ -78,9 +79,12 @@ public:
 
     // v7: a Decide is now N-way. Each branch is either a probability or a
     // predicate; whatever matches no branch falls through to next().
+    // v10: the condition is an EXPRESSION. A std::function still works -- it
+    // arrives wrapped in a LambdaExpression -- so there is one evaluation path
+    // rather than two kept alive in parallel. Branch is move-only as a result.
     struct Branch {
         double probability{-1.0};   // < 0 means this is a condition branch
-        Condition condition;
+        ExpressionPtr condition;
         INode* target{nullptr};
         long long taken{0};
     };
@@ -94,6 +98,7 @@ public:
     // Two-way shorthands, unchanged from v6.
     DecideNode(std::string name, double probability);
     DecideNode(std::string name, Condition condition);
+    DecideNode(std::string name, ExpressionPtr condition);
     // N-way: start empty and add branches.
     explicit DecideNode(std::string name, bool byChance);
 
@@ -103,6 +108,7 @@ public:
     // not tell which rule applied to which branch. Refused rather than guessed.
     DecideNode& addBranch(double probability, INode* target);
     DecideNode& addBranch(Condition condition, INode* target);
+    DecideNode& addBranch(ExpressionPtr condition, INode* target);
 
     // The two-way spelling: branch 0 is "true".
     void setTrueBranch(INode* n);

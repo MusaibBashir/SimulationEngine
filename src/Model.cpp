@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "Model.hpp"
+#include "Parser.hpp"
 #include "QueueRule.hpp"
 #include <cassert>
 #include <set>
@@ -180,6 +181,19 @@ Model& Model::branch(const std::string& decideName, DecideNode::Condition condit
     return *this;
 }
 
+Model& Model::branch(const std::string& decideName, ExpressionPtr condition,
+                     const std::string& to) {
+    INode* target = node(to);
+    if (!target) throw ModelError("branch: no block named '" + to + "'");
+    nodeAs<DecideNode>(decideName).addBranch(std::move(condition), target);
+    return *this;
+}
+
+Model& Model::branchWhen(const std::string& decideName, const std::string& conditionText,
+                         const std::string& to) {
+    return branch(decideName, expr(conditionText), to);
+}
+
 Model& Model::delay(const std::string& name, std::unique_ptr<IDistribution> duration) {
     requireUnique(name);
     add(std::make_unique<DelayNode>(name, std::move(duration)));
@@ -213,6 +227,16 @@ Model& Model::decideByCondition(const std::string& name, DecideNode::Condition c
     requireUnique(name);
     add(std::make_unique<DecideNode>(name, std::move(c)));
     return *this;
+}
+
+Model& Model::decideByCondition(const std::string& name, ExpressionPtr condition) {
+    requireUnique(name);
+    add(std::make_unique<DecideNode>(name, std::move(condition)));
+    return *this;
+}
+
+Model& Model::decideWhen(const std::string& name, const std::string& conditionText) {
+    return decideByCondition(name, expr(conditionText));
 }
 
 Model& Model::batch(const std::string& name, std::size_t size, bool permanent) {

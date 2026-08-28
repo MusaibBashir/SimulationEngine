@@ -147,6 +147,14 @@ public:
     Model& branch(const std::string& decideName, double probability, const std::string& to);
     Model& branch(const std::string& decideName, DecideNode::Condition condition,
                   const std::string& to);
+    // v10: the same branch written as text. The parse happens here, so a
+    // malformed condition is a ModelError at build time -- on the C++ API it IS
+    // a programmer error. v11's compile() uses parseExpression() instead and
+    // collects diagnostics against the cell.
+    Model& branch(const std::string& decideName, ExpressionPtr condition,
+                  const std::string& to);
+    Model& branchWhen(const std::string& decideName, const std::string& conditionText,
+                      const std::string& to);
     Model& process(const std::string& name, int capacity,
                    QueueDiscipline discipline, std::unique_ptr<IDistribution> service) {
         return station(name, capacity, discipline, std::move(service));
@@ -156,6 +164,8 @@ public:
                   std::unique_ptr<IDistribution> value);
     Model& decideByChance(const std::string& name, double probabilityTrue);
     Model& decideByCondition(const std::string& name, DecideNode::Condition condition);
+    Model& decideByCondition(const std::string& name, ExpressionPtr condition);
+    Model& decideWhen(const std::string& name, const std::string& conditionText);
     Model& batch(const std::string& name, std::size_t size, bool permanent = false);
     // Group entities that AGREE on an attribute (same lot, same order).
     Model& batchBySameAttribute(const std::string& name, std::size_t size,
