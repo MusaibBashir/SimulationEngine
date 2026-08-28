@@ -22,6 +22,7 @@
 #include "Station.hpp"
 #include "Distribution.hpp"
 #include "ModelError.hpp"
+#include "VariableStore.hpp"
 
 namespace des {
 
@@ -61,6 +62,7 @@ private:
     std::vector<CreateNode*> m_sources;               // non-owning, for reports
     bool m_allowOverload{false};
     std::vector<ArrivalAttribute> m_arrivalAttributes;
+    VariableStore m_variables;
     std::unique_ptr<IDistribution> m_interarrival;
     INode* m_entry{nullptr};
 
@@ -98,6 +100,13 @@ public:
     Model& allowOverload(bool on = true);
     bool overloadAllowed() const { return m_allowOverload; }
     void setInterarrival(std::unique_ptr<IDistribution> d) { arrivals(std::move(d)); }
+    // v10: Arena's Variable data module. Global, numeric, shared by every
+    // block -- the thing an attribute cannot say, because an attribute travels
+    // with one entity and this belongs to the system.
+    Model& variable(const std::string& name, double initialValue = 0.0);
+    VariableStore&       variables()       { return m_variables; }
+    const VariableStore& variables() const { return m_variables; }
+
     Model& attribute(const std::string& name, std::unique_ptr<IDistribution> d);
     void assignOnArrival(const std::string& n, std::unique_ptr<IDistribution> d) { attribute(n, std::move(d)); }
     const std::vector<ArrivalAttribute>& arrivalAttributes() const { return m_arrivalAttributes; }

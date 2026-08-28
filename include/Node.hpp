@@ -43,6 +43,7 @@
 
 #include <string>
 #include "Common.hpp"
+#include "EvalContext.hpp"
 
 namespace des {
 
@@ -81,6 +82,11 @@ public:
     // no entity would trip the departure handler's assertion -- which is exactly
     // what happened the first time this was wired up.
     void scheduleNextArrival(SimTime at, INode* source);
+
+    // v10: the only way a node evaluates an expression. Pass nullptr where
+    // there is no entity -- a Create block's interarrival field.
+    EvalContext    evaluationContext(const Entity* e);
+    VariableStore& variables();
 
     Entity* createEntity();
 

@@ -75,6 +75,17 @@ Model& Model::attribute(const std::string& name, std::unique_ptr<IDistribution> 
     return *this;
 }
 
+Model& Model::variable(const std::string& name, double initialValue) {
+    // Feed the store the attribute names first, so a collision is caught HERE
+    // rather than becoming a silent shadow at evaluation time.
+    std::vector<std::string> attributeNames;
+    attributeNames.reserve(m_arrivalAttributes.size());
+    for (const ArrivalAttribute& a : m_arrivalAttributes) attributeNames.push_back(a.name);
+    m_variables.noteAttributeNames(std::move(attributeNames));
+    m_variables.declare(name, initialValue);
+    return *this;
+}
+
 Model& Model::resource(const std::string& name, int capacity) {
     if (resourceNamed(name) != nullptr)
         throw ModelError("a resource named '" + name + "' already exists");
@@ -306,6 +317,7 @@ void Model::reset() {
     // m_sources are among m_nodes, so they are reset with everything else.
     if (m_interarrival) m_interarrival->reset();
     for (auto& a : m_arrivalAttributes) a.distribution->reset();
+    m_variables.reset();
 }
 
 // ------------------------------------------------------------ analysis --

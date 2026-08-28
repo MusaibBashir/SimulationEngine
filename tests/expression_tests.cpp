@@ -515,4 +515,80 @@ void runExpressionTests() {
         rate.validate(vc, d);
         check(!hasErrors(d), "a declared variable validates even with no entity");
     }
+
+    section("Variables and model state in a running model");
+    {
+        SimulationSystem sim(12345u);
+        sim.model().variable("Served", 0.0)
+                   .arrivals(constant(1.0))
+                   .station("Teller", 1, FIFO, constant(0.5))
+                   .entryAt("Teller");
+        sim.stopAt(10.0);
+        sim.initialise();
+
+        checkClose(sim.model().variables().get("Served"), 0.0, 1e-12,
+                   "a variable starts at its initial value");
+        sim.run();
+
+        const IModelState& state = sim;
+        checkClose(state.now(), sim.clock().now(), 1e-12, "IModelState::now is the clock");
+        check(state.queueLength("Teller") >= 0.0, "queueLength answers for a real block");
+        checkClose(state.resourceCapacity("Teller"), 1.0, 1e-12, "resourceCapacity answers");
+        check(state.numberInSystem() >= 0.0, "numberInSystem answers");
+
+        // An unknown block name is an ERROR, not a silent zero. A typo in NQ()
+        // must not read as "the queue is empty".
+        bool threw = false;
+        try { state.queueLength("Tellr"); } catch (const ModelError&) { threw = true; }
+        check(threw, "queueLength on an unknown block throws rather than reading 0");
+        threw = false;
+        try { state.resourceBusy("nope"); } catch (const ModelError&) { threw = true; }
+        check(threw, "resourceBusy on an unknown name throws");
+
+        // A second run starts clean.
+        sim.initialise();
+        checkClose(sim.model().variables().get("Served"), 0.0, 1e-12,
+                   "initialise() resets variables");
+
+        // A variable colliding with a declared attribute is refused.
+        {
+            SimulationSystem s2(1u);
+            s2.model().attribute("priority", uniform(0.0, 1.0));
+            bool collided = false;
+            try { s2.model().variable("priority", 0.0); }
+            catch (const ModelError&) { collided = true; }
+            check(collided, "Model::variable refuses to shadow an arrival attribute");
+        }
+
+        // A shared resource is addressable by its own name, a private one by
+        // the block's -- there is no other name for it.
+        {
+            SimulationSystem s3(2u);
+            s3.model().resource("Nurse", 2)
+                      .arrivals(constant(5.0))
+                      .stationUsing("Triage", "Nurse", FIFO, constant(1.0))
+                      .entryAt("Triage");
+            s3.stopAt(20.0).initialise();
+            s3.run();
+            const IModelState& st = s3;
+            checkClose(st.resourceCapacity("Nurse"), 2.0, 1e-12, "a shared resource by name");
+            checkClose(st.resourceCapacity("Triage"), 2.0, 1e-12, "or by the block using it");
+        }
+
+        // The variable integral is closed in the same step as every other one,
+        // so a time average taken over a whole run is right. Value 0 for the
+        // first half of a 10-unit run and 4 for the second averages to 2.
+        {
+            SimulationSystem s4(3u);
+            s4.model().variable("Level", 0.0)
+                      .arrivals(constant(1.0))
+                      .station("W", 1, FIFO, constant(0.1))
+                      .entryAt("W");
+            s4.stopAt(10.0).initialise();
+            s4.model().variables().set("Level", 4.0, 0.0);
+            s4.run();
+            checkClose(s4.variableAverage("Level"), 4.0, 1e-9,
+                       "a variable held all run averages to its value");
+        }
+    }
 }

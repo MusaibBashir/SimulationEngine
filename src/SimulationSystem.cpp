@@ -145,6 +145,50 @@ Entity* NodeContext::createEntity() { return m_sim.createEntity(); }
 void NodeContext::registerArrival(Entity* e) { m_sim.noteArrival(e); }
 void NodeContext::destroy(Entity* e) { m_sim.destroyEntity(e->id()); }
 
+// --- IModelState -----------------------------------------------------------
+// An unknown name THROWS rather than reading zero. A typo'd block name in
+// NQ() reading as "the queue is empty" is exactly the v9 bug where WIP was
+// silently 0.0 while 32 balls were waiting: a value that is quietly zero gets
+// copied into an answer.
+
+double SimulationSystem::queueLength(const std::string& blockName) const {
+    if (const Station* s = m_model.station(blockName))
+        return static_cast<double>(s->queue().length());
+    throw ModelError("NQ(" + blockName + "): no Process block named '" + blockName + "'");
+}
+
+double SimulationSystem::resourceBusy(const std::string& name) const {
+    if (const Resource* r = m_model.resourceNamed(name)) return r->unitsBusy();
+    // A Process with a private resource is addressable by the block's name --
+    // there is no other name for it.
+    if (const Station* s = m_model.station(name)) return s->resource().unitsBusy();
+    throw ModelError("NR(" + name + "): no resource or Process block named '" + name + "'");
+}
+
+double SimulationSystem::resourceCapacity(const std::string& name) const {
+    if (const Resource* r = m_model.resourceNamed(name)) return r->capacity();
+    if (const Station* s = m_model.station(name)) return s->resource().capacity();
+    throw ModelError("MR(" + name + "): no resource or Process block named '" + name + "'");
+}
+
+double SimulationSystem::numberInSystem() const {
+    return static_cast<double>(m_state.numberInSystem());
+}
+
+SimTime SimulationSystem::now() const { return m_clock.now(); }
+
+double SimulationSystem::variableAverage(const std::string& name) const {
+    return m_model.variables().timeAverage(name);
+}
+
+// A node never builds an EvalContext itself: this is what keeps the variable
+// store and the model-state implementation out of every node's reach.
+EvalContext NodeContext::evaluationContext(const Entity* e) {
+    return EvalContext(e, &m_sim.m_model.variables(), &m_sim, &m_sim.m_rng);
+}
+
+VariableStore& NodeContext::variables() { return m_sim.m_model.variables(); }
+
 void NodeContext::route(Entity* e, INode* to) {
     if (to == nullptr) { m_sim.disposeEntity(e); return; }
     // Direct call, not an event: moving between blocks takes no simulated time
@@ -216,6 +260,9 @@ void SimulationSystem::updateAllIntegrals(SimTime upTo) {
                                       s.unitsHeld());
     }
     m_stats.updateTimeIntegrals(upTo, m_state.numberInQueue(), m_state.numberInSystem());
+    // Variables are time-persistent, so their integrals close HERE with
+    // everything else -- before the clock moves, never after.
+    m_model.variables().updateIntegrals(upTo);
     // WIP per type: the same rectangle rule, one integral per entity type.
     for (auto& kv : m_byType) {
         TypeStats& t = kv.second;
@@ -382,6 +429,7 @@ void SimulationSystem::handleWarmUpEnd() {
     // numbers in one report meaning different periods.
     for (std::size_t i = 0; i < m_model.nodeCount(); ++i)
         m_model.nodeAt(i).resetStatistics(m_clock.now());
+    m_model.variables().resetStatistics(m_clock.now());
     m_warmUpEnded = m_clock.now();
 
     if (m_trace.isOn()) {
@@ -537,7 +585,8 @@ void SimulationSystem::reportArenaStyle() const {
         // is scheduled for the whole run.
         dcv(s.name() + ".Utilization", s.stats().utilisation(T, s.resource().capacity()),
             s.unitsHeld());
-        dcv(s.name() + ".Queue.NumberInQueue", s.stats().timeAverageA(T), s.queue().length());
+        dcv(s.name() + ".Queue.NumberInQueue", s.stats().timeAverageA(T),
+            static_cast<double>(s.queue().length()));
     }
 
     std::cout << "\nOUTPUTS\n";
