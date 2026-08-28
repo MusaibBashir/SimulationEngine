@@ -18,6 +18,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ----------------------------------------------------------------------------
 add_library(des_engine STATIC
     src/Entity.cpp
+    src/Value.cpp
     src/RandomStream.cpp
     src/StreamTests.cpp
     src/Distribution.cpp
