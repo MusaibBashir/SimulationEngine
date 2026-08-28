@@ -20,6 +20,9 @@ add_library(des_engine STATIC
     src/Entity.cpp
     src/Value.cpp
     src/Lexer.cpp
+    src/EvalContext.cpp
+    src/VariableStore.cpp
+    src/Expression.cpp
     src/RandomStream.cpp
     src/StreamTests.cpp
     src/Distribution.cpp
