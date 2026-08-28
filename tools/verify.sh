@@ -17,14 +17,17 @@
 #     x86_64-w64-windows-gnu target either.
 #   * MSVC has AddressSanitizer and it works. MSVC has no UBSan.
 #
-# So the gate is: warnings clean under TWO independent front ends, and
-# AddressSanitizer clean under MSVC. UBSan is genuinely unavailable here --
-# not skipped, not silently passing. Do not add it back without checking that
-# a runtime actually links.
+#   * WSL's Linux GCC has BOTH sanitiser runtimes. That is where UBSan lives.
+#
+# So the gate is: warnings clean under two independent front ends,
+# AddressSanitizer clean under MSVC, and ASan + UBSan clean under WSL. The
+# Windows-side UBSan gap is real and is worked around, not ignored -- if WSL is
+# missing the leg SKIPS loudly rather than passing silently.
 #
 # Usage:  bash tools/verify.sh            # everything
 #         bash tools/verify.sh warnings   # just the two compilers
-#         bash tools/verify.sh asan       # just AddressSanitizer
+#         bash tools/verify.sh asan       # just MSVC AddressSanitizer
+#         bash tools/verify.sh sanitisers # just WSL ASan + UBSan
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -132,11 +135,40 @@ asan() {
     fi
 }
 
+# The only place on this machine where UBSan actually exists. MinGW ships no
+# libubsan and MSVC has none at all, but WSL's Linux GCC has both sanitisers --
+# so the check the README has claimed since v2 can finally be run for real.
+# Skipped, loudly, if WSL or the distro is absent.
+sanitisers() {
+    banner "WSL Linux GCC: AddressSanitizer + UndefinedBehaviorSanitizer"
+    if ! command -v wsl.exe > /dev/null 2>&1; then
+        printf 'SKIP: no wsl.exe on PATH\n'; return
+    fi
+    if ! wsl.exe -d Ubuntu -e bash -lc 'command -v g++' > /dev/null 2>&1; then
+        printf 'SKIP: no Ubuntu distro with g++ (wsl -l -v to check)\n'; return
+    fi
+    local out
+    out="$(wsl.exe -d Ubuntu -e bash -lc "cd '$(wslpath -a "$ROOT" 2>/dev/null || echo .)' && \
+        g++ -std=c++17 -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Iinclude -Itests tests/*.cpp src/*.cpp -o /tmp/des_san 2>&1 | head -20 && \
+        cd /tmp && ./des_san 2>&1 | grep -E 'runtime error|ERROR: |SUMMARY|checks passed|FAIL'" \
+        2>&1 | tr -d '\000')"
+    printf '%s\n' "$out"
+    if printf '%s' "$out" | grep -qE 'runtime error|ERROR: |FAIL'; then
+        printf 'Sanitisers: FAILED\n'; FAILED=1
+    elif printf '%s' "$out" | grep -q 'checks passed'; then
+        printf 'Sanitisers: clean (ASan + UBSan)\n'
+    else
+        printf 'Sanitisers: INCONCLUSIVE -- no result line\n'; FAILED=1
+    fi
+}
+
 case "${1:-all}" in
-    warnings) warnings ;;
-    asan)     asan ;;
-    all)      warnings; asan ;;
-    *)        printf 'usage: %s [all|warnings|asan]\n' "$0"; exit 2 ;;
+    warnings)   warnings ;;
+    asan)       asan ;;
+    sanitisers) sanitisers ;;
+    all)        warnings; asan; sanitisers ;;
+    *)          printf 'usage: %s [all|warnings|asan|sanitisers]\n' "$0"; exit 2 ;;
 esac
 
 banner "RESULT"

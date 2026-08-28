@@ -136,6 +136,8 @@ public:
             if (lit == nullptr || !isNumber(lit->value())) { allConstant = false; break; }
             constants.push_back(asNumber(lit->value()));
         }
+        // NOTE: may throw ModelError on a bad parameter. buildCall catches it
+        // and turns it into a Diagnostic -- the parser never throws at a user.
         if (allConstant) m_fixed = m_build(constants);
     }
 
@@ -334,7 +336,17 @@ ExpressionPtr buildCall(const std::string& name,
         }
 
         case Entry::Kind::Dist:
-            return std::make_unique<DistributionCall>(name, entry.dist, std::move(args), nameSpan);
+            try {
+                return std::make_unique<DistributionCall>(name, entry.dist, std::move(args),
+                                                          nameSpan);
+            } catch (const ModelError& bad) {
+                // A distribution constructor refused these parameters. That is a
+                // USER mistake in a cell, so it becomes a diagnostic rather than
+                // an exception -- otherwise one bad cell aborts a whole
+                // spreadsheet compile instead of contributing one message.
+                out.push_back(Diagnostic{Severity::Error, nameSpan, bad.what()});
+                return placeholder(nameSpan);
+            }
     }
     return placeholder(nameSpan);
 }

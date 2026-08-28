@@ -89,10 +89,31 @@ void SimulationSystem::assignStreams() {
         Station& s = m_model.stationAt(i);
         giveExpr(&s.serviceExpression(), "service:" + s.name());
     }
-    // Blocks with their own randomness (Delay durations, Decide draws) keep
-    // using the shared stream. Naming every one of them would be the complete
-    // job; this covers the two that variance reduction actually cares about,
-    // and the limit is stated rather than hidden.
+    // v10: the complete job. Every other block that samples gets its own
+    // stream too, named after what it drives. Before v10 these shared the
+    // common stream because they shared a code path; now each is a distinct
+    // expression and useStream() recurses into every sampling site beneath it.
+    for (std::size_t i = 0; i < m_model.nodeCount(); ++i) {
+        INode& n = m_model.nodeAt(i);
+        if (auto* d = dynamic_cast<DelayNode*>(&n)) {
+            giveExpr(&d->durationExpression(), "delay:" + d->name());
+        } else if (auto* dec = dynamic_cast<DecideNode*>(&n)) {
+            // A by-chance branch has no condition expression; it still draws
+            // from the shared stream, which is what makes it a good witness
+            // that the blocks above no longer disturb it.
+            for (std::size_t b = 0; b < dec->branches().size(); ++b) {
+                if (dec->branches()[b].condition) {
+                    giveExpr(dec->branches()[b].condition.get(),
+                             "decide:" + dec->name() + ":" + std::to_string(b));
+                }
+            }
+        } else if (auto* a = dynamic_cast<AssignNode*>(&n)) {
+            for (std::size_t r = 0; r < a->rules().size(); ++r) {
+                giveExpr(a->rules()[r].value.get(),
+                         "assign:" + a->name() + ":" + std::to_string(r));
+            }
+        }
+    }
 }
 
 bool SimulationSystem::enableTrace(const std::string& path, TraceLevel level, bool markdown) {
@@ -125,10 +146,41 @@ void SimulationSystem::noteExit(Entity* e) {
     if (!e->hasAttribute("counted")) return;   // manufactured, not demand
     TypeStats& t = m_byType[e->type()];
     ++t.out;
+    // This guard is load-bearing for a REAL, PRE-EXISTING reason, found while
+    // fixing the v10 retype bug and deliberately left for its own version:
+    //
+    //   SeparateNode's duplicate path calls copyAttributesFrom(), which copies
+    //   the internal "counted" mark along with everything else. So a duplicate
+    //   is counted as an EXIT although it was never counted as an ARRIVAL, and
+    //   the decrement below has nothing to match it.
+    //
+    // Fixing that changes NumberOut and WIP for every model using duplicate(),
+    // which is a v9 behaviour change and not v10's to make. Until then the
+    // guard stops the underflow. It should become an assert the moment the
+    // duplicate accounting is corrected.
     if (t.inSystem > 0) --t.inSystem;
     const SimTime inSystem = m_clock.now() - e->creationTime();
     t.totalTime += inSystem;
     t.maxTime = std::max(t.maxTime, inSystem);
+}
+
+void SimulationSystem::retypeEntity(Entity* e, const std::string& type) {
+    if (type == e->type()) return;
+    // Only entities that were COUNTED as arrivals appear in m_byType. Batch
+    // representatives and Separate duplicates are manufactured, never counted,
+    // and must not move a count that was never added.
+    if (e->hasAttribute("counted")) {
+        TypeStats& from = m_byType[e->type()];
+        // Same guard, same reason as noteExit: a Separate duplicate carries the
+        // "counted" mark it should not, so its count may already be absent.
+        if (from.inSystem > 0) {
+            --from.inSystem;
+            ++m_byType[type].inSystem;
+        }
+        // in/out are lifetime totals for the type an entity ARRIVED as, so they
+        // deliberately do not move: the shop received one of the old type.
+    }
+    e->setType(type);
 }
 
 void SimulationSystem::destroyEntity(EntityId id) {
@@ -187,12 +239,26 @@ double SimulationSystem::numberInSystem() const {
 
 SimTime SimulationSystem::now() const { return m_clock.now(); }
 
+void SimulationSystem::reportStability(std::ostream& os) const {
+    const Model::StabilityReport r = m_model.stability();
+    if (r.checked) return;      // nothing to say; silence means verified
+    os << "\n*** STABILITY NOT VERIFIED for:";
+    for (const std::string& name : r.unverifiable) os << " " << name;
+    os << "\n*** Their offered load depends on an expression whose mean cannot be\n"
+          "*** computed before the run, so the check could not be applied. That is\n"
+          "*** NOT the same as a load of zero.\n";
+}
+
 double SimulationSystem::variableAverage(const std::string& name) const {
     return m_model.variables().timeAverage(name);
 }
 
 // A node never builds an EvalContext itself: this is what keeps the variable
 // store and the model-state implementation out of every node's reach.
+void NodeContext::setEntityType(Entity* e, const std::string& type) {
+    m_sim.retypeEntity(e, type);
+}
+
 EvalContext NodeContext::evaluationContext(const Entity* e) {
     return EvalContext(e, &m_sim.m_model.variables(), &m_sim, &m_sim.m_rng);
 }
@@ -636,6 +702,9 @@ void SimulationSystem::report() const {
     // knows how a number is derived, and printing is just a view of it.
     const RunResults r = results();
     std::cout << std::fixed << std::setprecision(4);
+    // Before the numbers, not after: a reader who stops at the first table
+    // should still have been told the check could not be applied.
+    reportStability(std::cout);
     std::cout << "=== simulation report =====================================\n";
     std::cout << "seed                     : " << m_rng.seed() << "\n";
     std::cout << "termination              : "

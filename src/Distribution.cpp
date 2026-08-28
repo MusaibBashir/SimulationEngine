@@ -25,7 +25,11 @@ std::string Exponential::describe() const {
 }
 
 // ---------------------------------------------------------------- Constant --
-Constant::Constant(SimTime value) : m_value(value) { assert(value >= 0.0); }
+Constant::Constant(SimTime value) : m_value(value) {
+    // Throw, not assert: a parsed CONS(-5) is a USER mistake, and NDEBUG
+    // would otherwise let a negative duration walk the clock backwards.
+    if (value < 0.0) throw ModelError("Constant: value must be >= 0");
+}
 
 SimTime Constant::draw(RandomStream& /*rng*/) {
     // Draws nothing from the stream. That matters: swapping Exponential for

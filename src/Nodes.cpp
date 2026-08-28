@@ -102,7 +102,9 @@ void AssignNode::enter(NodeContext& ctx, Entity* e) {
                 ctx.variables().set(r.name, asNumber(v), ctx.now());
                 break;
             case AssignTarget::EntityType:
-                e->setType(isText(v) ? asText(v) : formatValue(v));
+                // Through the engine, not e->setType(): the per-type counters
+                // are keyed by type and a live entity has to move between them.
+                ctx.setEntityType(e, isText(v) ? asText(v) : formatValue(v));
                 break;
         }
     }
@@ -272,7 +274,12 @@ void DecideNode::resetStatistics(SimTime now) {
 }
 
 void DecideNode::reset() {
-    for (auto& b : m_branches) b.taken = 0;
+    for (auto& b : m_branches) {
+        b.taken = 0;
+        // The condition may own a distribution with a cursor. Every other node
+        // that owns an expression resets it; this one was the gap.
+        if (b.condition) b.condition->reset();
+    }
     m_fellThrough = 0;
 }
 

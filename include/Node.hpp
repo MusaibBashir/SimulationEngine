@@ -85,6 +85,10 @@ public:
 
     // v10: the only way a node evaluates an expression. Pass nullptr where
     // there is no entity -- a Create block's interarrival field.
+    // v10: retyping an entity is not a plain setType(). Per-type NumberIn /
+    // NumberOut / WIP are keyed by the type an entity HAD when it arrived, so
+    // the engine has to move the live count across.
+    void           setEntityType(Entity* e, const std::string& type);
     EvalContext    evaluationContext(const Entity* e);
     VariableStore& variables();
 

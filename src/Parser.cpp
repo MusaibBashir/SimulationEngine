@@ -114,8 +114,19 @@ private:
         if (at(TokenKind::Minus) || at(TokenKind::Bang)) {
             const bool negate = at(TokenKind::Minus);
             const SourceSpan span = advance().span;
+            ExpressionPtr operand = parseUnary();
+            // FOLD -literal into a literal. The lexer only starts a number on a
+            // digit, so -1 would otherwise be a UnaryExpression, and every
+            // "are all my arguments constant?" test would say no -- silently
+            // turning UNIF(-1, 3) into an expression with no knowable mean.
+            if (negate) {
+                if (const auto* lit = dynamic_cast<const LiteralExpression*>(operand.get()))
+                    if (isNumber(lit->value()))
+                        return std::make_unique<LiteralExpression>(
+                            Value(-asNumber(lit->value())), span);
+            }
             return std::make_unique<UnaryExpression>(
-                negate ? UnaryOp::Negate : UnaryOp::Not, parseUnary(), span);
+                negate ? UnaryOp::Negate : UnaryOp::Not, std::move(operand), span);
         }
         return parsePower();
     }

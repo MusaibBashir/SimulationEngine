@@ -2,6 +2,7 @@
 // tests/expression_tests.cpp  --  v10: the expression layer
 // ============================================================================
 #include <fstream>
+#include <sstream>
 #include <iterator>
 #include <string>
 #include "harness.hpp"
@@ -736,15 +737,41 @@ void runExpressionTests() {
         // Assigning the entity's TYPE, which per-type reporting keys on.
         {
             SimulationSystem s4(7u);
-            s4.model().arrivals(constant(1.0))
+            // A capped source plus DrainedRule: with the retype bug the
+            // per-type count never returns to zero, numberInSystem() never
+            // reaches 0, and this rule can never fire. AnyOf with a time limit
+            // so a regression is a FAILURE rather than a hang.
+            s4.model().source("Arrivals", "Entity", constant(1.0), 5)
                       .assignEntityType("Rename", "\"Widget\"")
-                      .station("W", 1, FIFO, constant(0.1))
+                      // Slower than arrivals on purpose: the system stays
+                      // occupied until the last entity leaves, so draining
+                      // means "all five are out", not "there was a gap".
+                      .station("W", 1, FIFO, constant(2.0))
                       .route("Rename", "W")
-                      .entryAt("Rename");
-            s4.stopAt(5.0).initialise();
+                      .entryAt("Rename")
+                      // Five entities served slower than they arrive: a finite
+                      // terminating run, which is what allowOverload is for.
+                      .allowOverload();
+            s4.setTermination(anyOf(whenDrained(), timeLimit(1000.0)));
+            s4.initialise();
             s4.run();
+            check(s4.clock().now() < 1000.0,
+                  "whenDrained() actually fires after a retype");
             check(s4.byType().count("Widget") == 1,
                   "entities are reported under their reassigned type");
+            // The key existing proves nothing. What matters is that the LIVE
+            // count moved with the entity: the old type must not keep a
+            // phantom, because refreshState sums these into numberInSystem and
+            // a phantom there is the v9 silently-wrong-WIP bug with the sign
+            // flipped -- it also stops whenDrained() ever firing.
+            const IModelState& st4 = s4;
+            checkClose(st4.numberInSystem(), 0.0, 1e-12,
+                       "every entity has left, so numberInSystem is 0 after a retype");
+            for (const auto& kv : s4.byType())
+                check(kv.second.inSystem == 0,
+                      "no type keeps a phantom entity after a retype");
+            check(s4.results().averageTimeInSystem > 0.0,
+                  "time in system is still measured across a retype");
         }
 
         // A reserved engine attribute is still refused.
@@ -848,24 +875,49 @@ void runExpressionTests() {
         // v9 open item 5: two blocks' draws are independent, because they are
         // separate AST nodes rather than one shared code path.
         {
+            // The Delay must be a REAL sampling site or this proves nothing:
+            // Constant::draw consumes nothing from the stream by design, so a
+            // constant Delay would leave the service draws untouched however
+            // the streams were wired. EXPO draws.
+            //
             // Capacity 50 so nothing queues, and a fixed entity count so the
-            // SAME number of service draws happen either way. Time at the block
-            // is then exactly the service time, and the service stream is
-            // untouched by what the Delay did.
-            auto serviceAt = [](double delayDuration) {
+            // same number of service draws happen either way. Time at the block
+            // is then exactly the service time.
+            // What "its own stream" actually buys, tested where it shows.
+            //
+            // A Decide-by-chance draws from the SHARED stream (it has no
+            // condition expression, so nothing gives it one). Before v10 a
+            // Delay drew from that same shared stream, so changing the Delay's
+            // mean shifted every later shared draw and silently changed which
+            // way entities branched. With the Delay on its own stream the
+            // branching is untouched.
+            //
+            // A capped source plus drain so both runs see exactly 100 entities.
+            auto branchesTakenWithDelay = [](double delayMean) {
                 SimulationSystem sim(777u);
                 sim.useSeparateStreams();
                 sim.model().arrivals("EXPO(1.0)")
-                           .delay("Move", constant(delayDuration))
                            .station("T", 50, FIFO, "EXPO(0.8)")
-                           .route("Move", "T")
-                           .entryAt("Move");
+                           .delay("Move", "EXPO(" + std::to_string(delayMean) + ")")
+                           .decideByChance("Pass", 0.5)
+                           .dispose("Yes")
+                           .dispose("No")
+                           .route("T", "Move")
+                           .route("Move", "Pass")
+                           .routeTrue("Pass", "Yes")
+                           .route("Pass", "No")
+                           .entryAt("T");
+                // stopAfter, NOT whenDrained: a drained rule fires the first
+                // time the system happens to be momentarily empty, which
+                // depends on the delay and would compare two different runs.
                 sim.stopAfter(100).initialise();
                 sim.run();
-                return sim.model().station("T")->stats().averageTimeInSystem();
+                return sim.model().nodeAs<DecideNode>("Pass").tookTrue();
             };
-            checkClose(serviceAt(1.0), serviceAt(2.0), 1e-12,
-                       "changing a Delay's duration does not shift the service stream");
+            const long long taken = branchesTakenWithDelay(1.0);
+            check(taken > 0 && taken < 100, "the Decide actually split the entities");
+            check(taken == branchesTakenWithDelay(2.0),
+                  "changing a Delay's duration no longer disturbs the shared stream");
         }
     }
 
@@ -917,6 +969,127 @@ void runExpressionTests() {
         checkClose(*expr("EXPO(0.8)")->meanIfKnown(), 0.8, 1e-12, "EXPO(0.8) mean is 0.8");
         check(!expr("NQ(X) * 2")->meanIfKnown().has_value(),
               "model state has no known mean");
+
+        // An unknowable ARRIVAL mean must make every station unverifiable.
+        // Letting lambda read as 0 reported a clean bill of health on a model
+        // the check never examined -- worse than having no check.
+        {
+            SimulationSystem sim(4u);
+            sim.model().variable("Rate", 1.0)
+                       .arrivals("EXPO(Rate)")
+                       .station("Slow", 1, FIFO, "EXPO(2.0)")   // true rho = 2
+                       .entryAt("Slow");
+            sim.stopAt(10.0).initialise();
+            const Model::StabilityReport r = sim.model().stability();
+            check(!r.checked, "an unknowable arrival rate makes the check inconclusive");
+            check(r.unverifiable.size() == 1 && r.unverifiable[0] == "Slow",
+                  "and names the station it could not judge, rather than passing it");
+            checkClose(r.maxUtilisation, 0.0, 1e-12,
+                       "no utilisation is claimed for a block that was not judged");
+        }
+
+        // A negative literal is still a constant: -1 lexes as unary minus, and
+        // without folding, UNIF(-1, 3) would silently lose its knowable mean
+        // and disable the check for that block.
+        check(expr("UNIF(-1, 3)")->meanIfKnown().has_value(),
+              "a negative literal argument is still constant");
+        checkClose(*expr("UNIF(-1, 3)")->meanIfKnown(), 1.0, 1e-12,
+                   "and its mean is right");
+        checkClose(*expr("-2")->meanIfKnown(), -2.0, 1e-12, "-2 folds to a literal");
+        {
+            EvalContext none(nullptr, nullptr, nullptr, nullptr);
+            checkClose(asNumber(expr("-2 ^ 2")->evaluate(none)), -4.0, 1e-12,
+                       "folding did not break unary-minus precedence");
+        }
+    }
+
+    section("Review fixes");
+    {
+        // A bad distribution parameter typed by a USER is a diagnostic, not an
+        // exception. One bad cell must not abort a whole compile.
+        for (const char* bad : {"WEIB(0, 1)", "ERLA(1, 0)", "POIS(-1)", "NORM(1, -1)",
+                                "CONS(-5)", "DISC(0.5, 1, 0.4, 2)"}) {
+            bool threw = false;
+            ParseResult r{nullptr, {}};
+            try { r = parseExpression(bad); } catch (...) { threw = true; }
+            check(!threw, std::string("parseExpression does not throw on ") + bad);
+            check(hasErrors(r.diagnostics),
+                  std::string("it reports a diagnostic for ") + bad);
+        }
+        // And the C++-side convenience still throws, because there a bad
+        // expression really is a programmer error.
+        {
+            bool threw = false;
+            try { expr("WEIB(0, 1)"); } catch (const ModelError&) { threw = true; }
+            check(threw, "expr() still throws on a bad distribution parameter");
+        }
+
+        // The one-namespace rule works in BOTH directions.
+        {
+            SimulationSystem sim(1u);
+            sim.model().variable("shift", 1.0);
+            bool threw = false;
+            try { sim.model().attribute("shift", constant(1.0)); }
+            catch (const ModelError&) { threw = true; }
+            check(threw, "an attribute colliding with a variable is refused too");
+        }
+        // Including an attribute invented by an Assign, which cannot be caught
+        // at declaration because the block may be added later.
+        {
+            SimulationSystem sim(1u);
+            sim.model().variable("Count", 0.0)
+                       .arrivals(constant(1.0))
+                       .assignTo("Stamp", "Count", "1")
+                       .station("W", 1, FIFO, constant(0.1))
+                       .route("Stamp", "W")
+                       .entryAt("Stamp");
+            sim.stopAt(5.0);
+            bool threw = false;
+            try { sim.initialise(); } catch (const ModelError&) { threw = true; }
+            check(threw, "an Assign writing an attribute named like a variable is refused");
+        }
+
+        // A Decide's condition is reset between replications like every other
+        // expression-owning block's.
+        {
+            auto decide = std::make_unique<DecideNode>(
+                "D", ExpressionPtr(std::make_unique<DistributionExpression>(
+                         fixedTimes({1.0, 0.0, 0.0}, true))));
+            RandomStream rng(1u);
+            EvalContext ctx(nullptr, nullptr, nullptr, &rng);
+            const IExpression& c = *decide->branches()[0].condition;
+            checkClose(asNumber(c.evaluate(ctx)), 1.0, 1e-12, "first draw");
+            checkClose(asNumber(c.evaluate(ctx)), 0.0, 1e-12, "second draw");
+            decide->reset();
+            checkClose(asNumber(c.evaluate(ctx)), 1.0, 1e-12,
+                       "reset() rewinds a Decide's condition, as every other block does");
+        }
+
+        // The engine SAYS what it could not verify, rather than only being
+        // able to say it if asked.
+        {
+            SimulationSystem sim(5u);
+            sim.model().variable("Rate", 2.0)
+                       .arrivals("EXPO(1.0)")
+                       .station("Var", 1, FIFO, "EXPO(Rate)")
+                       .entryAt("Var");
+            sim.stopAt(10.0).initialise();
+            std::ostringstream os;
+            sim.reportStability(os);
+            check(os.str().find("STABILITY NOT VERIFIED") != std::string::npos,
+                  "the engine reports blocks it could not verify");
+            check(os.str().find("Var") != std::string::npos, "and names them");
+        }
+        {
+            SimulationSystem sim(6u);
+            sim.model().arrivals("EXPO(2.0)")
+                       .station("Fast", 1, FIFO, "EXPO(0.5)")
+                       .entryAt("Fast");
+            sim.stopAt(10.0).initialise();
+            std::ostringstream os;
+            sim.reportStability(os);
+            check(os.str().empty(), "and says nothing when everything was verified");
+        }
     }
 
     section("The text path and the code path trace identically");

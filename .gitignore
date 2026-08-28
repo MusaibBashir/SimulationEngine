@@ -59,3 +59,6 @@ examples/welch_*.csv
 ex[0-9]*
 libdes.a
 obj/
+trace_*.md
+docs/
+*.txt

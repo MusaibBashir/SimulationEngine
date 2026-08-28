@@ -8,9 +8,10 @@ v10 makes every one of those fields **text**. Not for convenience — because a
 spreadsheet cell can hold `"EXPO(0.8)"` and cannot hold a lambda, and the next
 two versions are a document layer and a terminal front end.
 
-Status: **509/509 checks** (293 in v9), clean under GCC 14.2 and Clang 19.1 with
-`-Wall -Wextra -Wpedantic`, clean under MSVC AddressSanitizer, and all 15
-examples byte-identical to their captured baselines.
+Status: **543/543 checks** (293 in v9), clean under GCC 14.2 and Clang 19.1 with
+`-Wall -Wextra -Wpedantic`, clean under MSVC AddressSanitizer and under WSL
+Linux GCC with ASan **and UBSan**, and all 15 examples byte-identical to their
+captured baselines.
 
 ---
 
@@ -117,18 +118,30 @@ For the same reason, `set()` on an undeclared variable throws rather than
 auto-declaring. Arena would create it for you; here a typo would otherwise
 become a second variable nobody notices.
 
-## 6. A v9 item solved by construction
+## 6. A v9 item, and an overclaim caught in review
 
 Item 5 on the v9 list — *"streams for every block; Delay durations and Decide
-draws still share the common stream"* — needed no feature.
+draws still share the common stream"* — is closed.
 
 They shared a stream because they shared a **code path**. Once every sampling
-site is a distinct AST node, `useStream()` recurses into each one and they are
-independent. There is a test that changes a Delay's duration and asserts the
-service stream does not shift.
+site is a distinct AST node, `useStream()` recurses into each one, so the
+*capability* did fall out for free.
 
-Generalising something made the middle smaller for the fifth time in this
-project.
+**But the wiring did not.** The first version of this section claimed the item
+was solved by construction, and it was not: `assignStreams()` still named only
+Create interarrivals and Process services, exactly as in v9. Worse, the test
+that claimed to prove it **could not fail** — it used `constant()` for the
+Delay, and `Constant::draw` consumes nothing from the stream by design, so the
+Delay was never a sampling site at all.
+
+Both are fixed: `assignStreams()` now names Delay, Decide and Assign
+expressions too, and the test uses a Decide-by-chance, which still draws from
+the *shared* stream, to show that changing a Delay's duration no longer shifts
+which way entities branch. Under the old wiring it did.
+
+The lesson is not about streams. **A test that cannot fail is worse than no
+test**, because it is counted as evidence. This one survived being written,
+reviewed by me, and quoted in a changelog.
 
 ## 7. Nothing broke, and why that was a constraint
 
@@ -172,6 +185,24 @@ instead of asserting the relationship under test; the other used an accessor
 `Statistics` does not have. Both are now written to assert relationships rather
 than numbers guessed in advance — which is what they should have been.
 
+**`assignEntityType` corrupted system-wide WIP, and could hang a run.** Per-type
+`inSystem` is keyed by the entity's type, incremented at arrival and decremented
+at exit. Retyping a live entity moved it between keys, so the old type kept a
+phantom forever and the new type's decrement was swallowed by an
+`if (inSystem > 0)` guard. `refreshState` sums those counters into
+`numberInSystem()`, so `L` was wrong by two orders of magnitude — and since
+`DrainedRule` waits for `numberInSystem() == 0`, **`whenDrained()` could never
+fire**. The v9 silently-zero-WIP bug with the sign flipped, in a feature this
+version added. `retypeEntity()` now moves the count through the engine, and the
+test drains a capped model instead of asserting that a map key exists.
+
+**The stability check reported a clean bill of health on a model with ρ = 2.**
+An unknowable *arrival* mean contributed nothing to λ instead of making λ
+unknown, so λ became 0, every station's load read 0.0, and `loadIsKnown()` —
+which only ever inspected the *service* expression — still said `true`. Section
+3 above is about refusing exactly this, and the machinery was built correctly
+for one side of the calculation and not applied to the other.
+
 **A build process that outlived its build.** A backgrounded `cmake --build` left
 `cl.exe` holding a header against edits, producing permission errors that look
 like a filesystem fault and are not.
@@ -180,7 +211,7 @@ like a filesystem fault and are not.
 
 ## Verified
 
-- 509/509 checks; 216 new. They cover operator precedence and associativity
+- 543/543 checks; 250 new. They cover operator precedence and associativity
   against hand-computed values, error positions asserted character-exact, parser
   recovery reporting several problems from one call, `meanIfKnown` on all four
   of its cases, variable time-averages against a hand-worked case, warm-up
@@ -194,7 +225,11 @@ like a filesystem fault and are not.
   what was simulated.
 - 15 examples byte-identical to their baselines. `12_shared_resources` is
   excluded, and that exclusion prints on every run — see below.
-- Clean under GCC 14.2, Clang 19.1, and MSVC AddressSanitizer.
+- Clean under GCC 14.2 and Clang 19.1 (warnings), MSVC AddressSanitizer, and —
+  through WSL's Linux GCC — **AddressSanitizer and UndefinedBehaviorSanitizer**.
+  UBSan does not exist on the Windows side of this machine at all; running it
+  through WSL is how the check this project has claimed since v2 became true
+  again rather than merely stated.
 
 ## Still open
 
@@ -214,10 +249,15 @@ index deliberately, and `Resource::m_users` is a vector in construction order, s
 neither explains it. An uninitialised read fits the evidence and no sanitiser
 available on this platform detects one.
 
-**UBSan is unavailable here.** MinGW ships no `libubsan`, MinGW Clang has no
-runtime for the windows-gnu target, and MSVC has none at all. Recorded rather
-than quietly dropped, because "the sanitiser said nothing" and "the sanitiser
-did not run" look identical in a terminal.
+**A Separate duplicate is counted as an exit it never arrived for.** Found while
+fixing the retype bug, and left alone deliberately. `SeparateNode`'s duplicate
+path calls `copyAttributesFrom()`, which copies the internal `"counted"` mark
+along with everything else — so a duplicate decrements a per-type count that was
+never incremented for it. The `if (inSystem > 0)` guard in `noteExit` has been
+absorbing that since v9. Fixing it changes `NumberOut` and WIP for every model
+using `duplicate()`, which is a v9 behaviour change and not v10's to make; the
+guard now carries a comment naming the cause, and should become an assertion the
+moment the duplicate accounting is corrected.
 
 Also still open from v9, untouched: resource schedules, preemption, batch means,
 distribution fitting. Variable arrays (Arena's 1-D and 2-D) are deliberately not

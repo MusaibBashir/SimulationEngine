@@ -148,6 +148,7 @@ public:
 
 class DistributionExpression : public IExpression {
     std::unique_ptr<IDistribution> m_distribution;
+    RandomStream*                  m_stream{nullptr};
 public:
     explicit DistributionExpression(std::unique_ptr<IDistribution> d,
                                     SourceSpan span = SourceSpan{0, 0})

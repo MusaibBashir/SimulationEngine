@@ -90,6 +90,12 @@ Model& Model::attribute(const std::string& name, std::unique_ptr<IDistribution> 
     if (!d) throw ModelError("attribute '" + name + "': null distribution");
     if (name == "waitTime" || name == "stationEntry" || name == "waitHere")
         throw ModelError("attribute: '" + name + "' is reserved by the engine");
+    // The other direction of the one-namespace rule. Declared the other way
+    // round, the variable would shadow this attribute at every read while
+    // Assign kept writing it -- one of the two silently wrong.
+    if (m_variables.has(name))
+        throw ModelError("'" + name + "' is already a variable; an attribute may not share "
+                         "its name, because then one of the two would read wrong with no error");
     m_arrivalAttributes.push_back(ArrivalAttribute{name, std::move(d)});
     return *this;
 }
@@ -564,6 +570,16 @@ std::vector<Diagnostic> Model::checkExpressions() const {
 
     std::vector<Diagnostic> problems;
 
+    // An Assign may invent an attribute name, so the collision cannot be caught
+    // at declaration the way an arrival attribute's can. It is caught here.
+    for (const std::unique_ptr<INode>& n : m_nodes)
+        if (const auto* a = dynamic_cast<const AssignNode*>(n.get()))
+            for (const AssignNode::Rule& r : a->rules())
+                if (r.target == AssignTarget::Attribute && m_variables.has(r.name))
+                    problems.push_back(Diagnostic{Severity::Error, r.value->span(),
+                        "'" + r.name + "' is a declared variable; an Assign may not write an "
+                        "attribute of the same name, because every read would see the variable"});
+
     // A Create's interarrival field is evaluated with NO entity -- there isn't
     // one yet. Catching an attribute reference here is the whole reason
     // FieldContext exists.
@@ -585,12 +601,22 @@ std::vector<Diagnostic> Model::checkExpressions() const {
     return problems;
 }
 
+bool Model::arrivalRateIsKnown() const {
+    for (const CreateNode* c : m_sources)
+        if (!c->interarrival().meanIfKnown()) return false;
+    return true;
+}
+
 Model::StabilityReport Model::stability() const {
     StabilityReport r;
+    // An unknowable lambda makes EVERY station unverifiable. Letting it read as
+    // zero would report a clean bill of health on a model the check never
+    // examined -- which is worse than having no check.
+    const bool lambdaKnown = arrivalRateIsKnown();
     const VisitRatios vr = visitRatios();
     for (const Station* st : m_processes) {
         if (vr.visits.find(st) == vr.visits.end()) continue;
-        if (!st->loadIsKnown()) {
+        if (!lambdaKnown || !st->loadIsKnown()) {
             r.checked = false;
             r.unverifiable.push_back(st->name());
             continue;
@@ -658,12 +684,18 @@ void Model::validate() const {
     // and impossible if they share one operator -- checking them separately
     // would pass a model that cannot run.
     const VisitRatios vr = visitRatios();
+    // An unknowable arrival rate makes every station's load unknowable, so the
+    // checks below must skip them rather than judge them against a lambda of 0.
+    const bool lambdaKnown = arrivalRateIsKnown();
     for (const auto& res : m_resources) {
         double total = 0.0;
         int users = 0;
         for (const Station* st : m_processes) {
             if (&st->resource() != res.get()) continue;
             if (vr.visits.find(st) == vr.visits.end()) continue;
+            // Same reason as below: a station whose load is unknowable must not
+            // contribute 0.0 to a total that is then compared against 1.
+            if (!lambdaKnown || !st->loadIsKnown()) continue;
             total += offeredLoad(*st);
             ++users;
         }
@@ -679,7 +711,7 @@ void Model::validate() const {
 
     for (const Station* st : m_processes) {
         if (vr.visits.find(st) == vr.visits.end()) continue;   // unreachable block
-        if (!st->loadIsKnown()) continue;   // reported by stability(), not guessed at
+        if (!lambdaKnown || !st->loadIsKnown()) continue;   // stability() reports these
         const double rho = offeredLoad(*st);
         if (rho >= 1.0 && !m_allowOverload) {
             std::ostringstream os;

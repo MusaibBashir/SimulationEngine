@@ -47,8 +47,11 @@ Narrative in `V10_READLOG.md`.
 - `Station`, `DelayNode` and `CreateNode` hold **expressions**, not
   distributions. There is no distribution field left in the engine: `EXPO(0.8)`
   is a function in the grammar that owns an `IDistribution`.
-- Every sampling site gets its own stream, because each is now a distinct AST
-  node — this closes item 5 on the v9 list with no feature written for it.
+- Every sampling site gets its own stream: `useStream()` recurses through the
+  expression tree, and `assignStreams()` now names Delay, Decide and Assign
+  expressions as well as Create interarrivals and Process services. This closes
+  item 5 on the v9 list. (An earlier draft of this entry claimed it fell out
+  "with no feature written for it" — the capability did, the wiring did not.)
 - `DecideNode::Branch` owns its condition and is therefore move-only.
 - The trace header reads the arrival expression from the **source** rather than
   from the copy kept for the stability check, which a text-built model never
@@ -58,6 +61,17 @@ Narrative in `V10_READLOG.md`.
 
 - A pre-existing MSVC `C4244` in `reportArenaStyle`, hidden by incremental
   builds since v9.
+- `assignEntityType` corrupted per-type and system-wide WIP and could stop
+  `whenDrained()` from ever firing.
+- The stability check treated an unknowable *arrival* mean as zero load, passing
+  models it had never examined.
+- `parseExpression()` threw on user text like `WEIB(0, 1)` instead of returning
+  a diagnostic; `Constant` now throws rather than asserting, so `NDEBUG` cannot
+  let a negative duration through.
+- The variable/attribute one-namespace rule was enforced in only one direction.
+- A negative literal argument (`UNIF(-1, 3)`) defeated constant-argument
+  detection and silently lost its knowable mean.
+- `DecideNode::reset()` did not reset its branch conditions.
 
 ### Compatibility
 

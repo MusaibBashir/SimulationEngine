@@ -145,6 +145,7 @@ private:
     };
     std::map<std::string, TypeStats> m_byType;
     void noteArrival(Entity* e);
+    void retypeEntity(Entity* e, const std::string& type);
     void noteExit(Entity* e);
     void updateAllIntegrals(SimTime upTo);
 
@@ -169,6 +170,9 @@ public:
     SimTime now() const override;
 
     double variableAverage(const std::string& name) const;
+
+    // Prints nothing when every block was verified -- silence means checked.
+    void reportStability(std::ostream& os) const;
 
     Model& model() { return m_model; }
     const Model& model() const { return m_model; }

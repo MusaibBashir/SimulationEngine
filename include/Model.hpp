@@ -117,7 +117,6 @@ public:
     Model& attribute(const std::string& name, std::unique_ptr<IDistribution> d);
     void assignOnArrival(const std::string& n, std::unique_ptr<IDistribution> d) { attribute(n, std::move(d)); }
     const std::vector<ArrivalAttribute>& arrivalAttributes() const { return m_arrivalAttributes; }
-    IDistribution& interarrival() { return *m_interarrival; }
 
     // --- blocks ---------------------------------------------------------
     // Each returns *this so a whole flowchart reads as one statement. Where you
@@ -250,6 +249,11 @@ public:
         double                   maxUtilisation{0.0};
     };
     StabilityReport stability() const;
+
+    // False when ANY source's interarrival mean cannot be computed in
+    // advance. Then lambda is unknown, so no station's offered load is
+    // knowable either -- however simple its own service time looks.
+    bool arrivalRateIsKnown() const;
 
     // Every expression in the model, checked against declared names before the
     // run. v11 calls the same walk and turns each Diagnostic into a cell

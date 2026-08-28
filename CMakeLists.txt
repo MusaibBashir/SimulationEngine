@@ -56,7 +56,13 @@ add_library(des_engine STATIC
 target_include_directories(des_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 if(MSVC)
-    set(DES_WARNINGS /W4)
+    # /EHsc is NOT optional. Without it MSVC compiles with unwind semantics
+    # disabled, so a throw that has to unwind -- v10 catches a distribution
+    # constructor's ModelError to turn it into a Diagnostic -- calls abort()
+    # instead, and on Windows abort() opens a MODAL DIALOG that an automated
+    # run has nobody to click. The engine has thrown since v5; the setting was
+    # simply never stated, and the compiler had been warning C4530 about it.
+    set(DES_WARNINGS /W4 /EHsc)
 else()
     set(DES_WARNINGS -Wall -Wextra -Wpedantic)
 endif()

@@ -16,6 +16,11 @@ could NOT verify: Machine
 (their service times are expressions whose mean cannot be
  computed before the run -- not the same as 'no load')
 
+
+*** STABILITY NOT VERIFIED for: Machine
+*** Their offered load depends on an expression whose mean cannot be
+*** computed before the run, so the check could not be applied. That is
+*** NOT the same as a load of zero.
 === simulation report =====================================
 seed                     : 2026
 termination              : TimeLimit(480)

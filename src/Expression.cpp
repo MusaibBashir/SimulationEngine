@@ -204,9 +204,16 @@ std::optional<double> DistributionExpression::meanIfKnown() const {
 }
 
 ExpressionPtr DistributionExpression::clone() const {
-    return std::make_unique<DistributionExpression>(m_distribution->clone(), m_span);
+    // IDistribution::clone() does not copy the stream pointer, so carry it
+    // here -- otherwise cloning an expression silently unstreams half of it.
+    auto c = std::make_unique<DistributionExpression>(m_distribution->clone(), m_span);
+    c->useStream(m_stream);
+    return c;
 }
 
-void DistributionExpression::useStream(RandomStream* s) { m_distribution->useStream(s); }
+void DistributionExpression::useStream(RandomStream* s) {
+    m_stream = s;
+    m_distribution->useStream(s);
+}
 
 }  // namespace des

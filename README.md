@@ -54,8 +54,10 @@ bash tools/baseline.sh check   # every example still byte-identical
 ```
 
 `tools/verify.sh` finds a C++17-capable compiler itself and refuses one that is
-too old. **UBSan is unavailable on Windows here** — MinGW ships no `libubsan`
-and MSVC has none — and the script says so rather than skipping it silently.
+too old. **UBSan does not exist on the Windows side** — MinGW ships no
+`libubsan` and MSVC has none — so the script runs ASan and UBSan through **WSL's
+Linux GCC** instead, and skips that leg loudly if WSL is absent rather than
+passing silently.
 
 Before and after any refactor — entities are destroyed at departure, so a
 routing mistake becomes a use-after-free, and this is what proves it hasn't:
