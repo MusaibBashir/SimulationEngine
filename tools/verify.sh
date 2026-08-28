@@ -41,7 +41,11 @@ CLANGXX="${WINLIBS_BIN:+$WINLIBS_BIN/clang++.exe}"
 [ -x "$GXX" ]     || GXX="$(command -v g++ || true)"
 [ -x "$CLANGXX" ] || CLANGXX="$(command -v clang++ || true)"
 
-WARN_FLAGS="-std=c++17 -Wall -Wextra -Wpedantic -Iinclude -Itests"
+# -fsyntax-only: this leg wants DIAGNOSTICS, not a binary. Skipping codegen and
+# linking makes it roughly three times faster, and every -Wall/-Wextra warning
+# that matters here is a front-end one. Link errors are still caught -- the
+# CMake/MSVC build does that, and the ASan leg links the whole suite.
+WARN_FLAGS="-std=c++17 -Wall -Wextra -Wpedantic -fsyntax-only -Iinclude -Itests"
 # TWO link units, because both have a main(): the demo program and the test
 # suite. Compiling only the first would leave tests/ unchecked by GCC and
 # Clang -- and from v10 on, tests/ is where most of the new code lives.
@@ -72,7 +76,7 @@ compile_unit() {
     local cc="$1" label="$2" unit="$3" sources="$4"
     local out; out="$(mktemp)"
     # shellcheck disable=SC2086
-    if "$cc" $WARN_FLAGS $sources -o "$out.exe" 2>"$out"; then
+    if "$cc" $WARN_FLAGS $sources 2>"$out"; then
         if grep -q "warning:" "$out"; then
             grep "warning:" "$out" | head -20
             printf '%s (%s): WARNINGS\n' "$label" "$unit"; FAILED=1
@@ -83,7 +87,7 @@ compile_unit() {
         head -30 "$out"
         printf '%s (%s): BUILD FAILED\n' "$label" "$unit"; FAILED=1
     fi
-    rm -f "$out" "$out.exe"
+    rm -f "$out"
 }
 
 warnings() {
@@ -107,7 +111,12 @@ asan() {
     # 'C:/Program'". MSYS_NO_PATHCONV would also work; this is clearer.
     powershell.exe -NoProfile -Command '
         $ErrorActionPreference = "Stop"
-        cmake -S . -B cmake-build-asan -DCMAKE_CXX_FLAGS="/fsanitize=address /EHsc /Zi" | Out-Null
+        # Configure ONCE. A full reconfigure per run cost more than the build
+        # it was preparing for; CMake re-runs itself when CMakeLists.txt
+        # changes, so reusing the cache is safe.
+        if (-not (Test-Path "cmake-build-asan/CMakeCache.txt")) {
+            cmake -S . -B cmake-build-asan -DCMAKE_CXX_FLAGS="/fsanitize=address /EHsc /Zi" | Out-Null
+        }
         cmake --build cmake-build-asan --target des_tests --config Debug 2>&1 |
             Select-String -Pattern "error|warning C" | Select-Object -First 10
         $msvc = Get-ChildItem "C:\Program Files (x86)\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64" -Directory -ErrorAction SilentlyContinue |
