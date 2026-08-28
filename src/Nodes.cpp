@@ -19,6 +19,14 @@ namespace des {
 // ------------------------------------------------------------------- Delay --
 
 DelayNode::DelayNode(std::string name, std::unique_ptr<IDistribution> duration)
+    : INode(std::move(name)),
+      m_duration(duration ? ExpressionPtr(std::make_unique<DistributionExpression>(
+                                std::move(duration)))
+                          : ExpressionPtr()) {
+    if (!m_duration) throw ModelError("delay '" + m_name + "': null duration");
+}
+
+DelayNode::DelayNode(std::string name, ExpressionPtr duration)
     : INode(std::move(name)), m_duration(std::move(duration)) {
     if (!m_duration) throw ModelError("delay '" + m_name + "': null duration");
 }
@@ -26,7 +34,8 @@ DelayNode::DelayNode(std::string name, std::unique_ptr<IDistribution> duration)
 void DelayNode::enter(NodeContext& ctx, Entity* e) {
     m_stats.recordArrival(ctx.now());
     ++m_inTransit;
-    const SimTime d = m_duration->draw(ctx.rng());
+    EvalContext dctx = ctx.evaluationContext(e);
+    const SimTime d = static_cast<SimTime>(asNumber(m_duration->evaluate(dctx)));
     e->setAttribute("delayStart", ctx.now());
     ctx.scheduleReturn(ctx.now() + d, e, this);
     if (ctx.trace().isOn()) {

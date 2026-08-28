@@ -20,13 +20,14 @@
 #include "Common.hpp"
 #include "Node.hpp"
 #include "Distribution.hpp"
+#include "Expression.hpp"
 
 namespace des {
 
 class CreateNode : public INode {
 private:
     std::string m_entityType;
-    std::unique_ptr<IDistribution> m_interarrival;
+    ExpressionPtr m_interarrival;
     SimTime   m_firstAt{0.0};
     long long m_maxArrivals{-1};      // -1 means "keep going until time runs out"
     long long m_created{0};
@@ -36,6 +37,10 @@ private:
 public:
     CreateNode(std::string name, std::string entityType,
                std::unique_ptr<IDistribution> interarrival,
+               long long maxArrivals = -1, SimTime firstAt = 0.0,
+               int entitiesPerArrival = 1);
+    CreateNode(std::string name, std::string entityType,
+               ExpressionPtr interarrival,
                long long maxArrivals = -1, SimTime firstAt = 0.0,
                int entitiesPerArrival = 1);
 
@@ -52,8 +57,8 @@ public:
     long long created() const { return m_created; }
     long long maxArrivals() const { return m_maxArrivals; }
     int entitiesPerArrival() const { return m_perArrival; }
-    IDistribution& interarrival() { return *m_interarrival; }
-    const IDistribution& interarrival() const { return *m_interarrival; }
+    IExpression& interarrival() { return *m_interarrival; }
+    const IExpression& interarrival() const { return *m_interarrival; }
     bool exhausted() const { return m_maxArrivals >= 0 && m_created >= m_maxArrivals; }
 };
 

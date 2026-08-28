@@ -22,9 +22,28 @@ Station::Station(std::string name, Resource* resource, int unitsNeeded,
       m_resource(resource),
       m_unitsNeeded(unitsNeeded),
       m_queue(m_name + "Queue", std::move(rule)),
-      m_service(std::move(service)) {
+      m_service(service ? ExpressionPtr(std::make_unique<DistributionExpression>(
+                              std::move(service)))
+                        : ExpressionPtr()) {
     if (!m_resource) throw ModelError("process '" + m_name + "': null resource");
     if (!m_service)  throw ModelError("process '" + m_name + "': null service distribution");
+    if (m_unitsNeeded < 1 || m_unitsNeeded > m_resource->capacity())
+        throw ModelError("process '" + m_name + "' needs " + std::to_string(m_unitsNeeded) +
+                         " units of a resource with capacity " +
+                         std::to_string(m_resource->capacity()) + " -- it could never start");
+    m_resource->addUser(this);
+}
+
+Station::Station(std::string name, Resource* resource, int unitsNeeded,
+                 std::unique_ptr<IQueueRule> rule,
+                 ExpressionPtr service)
+    : INode(std::move(name)),
+      m_resource(resource),
+      m_unitsNeeded(unitsNeeded),
+      m_queue(m_name + "Queue", std::move(rule)),
+      m_service(std::move(service)) {
+    if (!m_resource) throw ModelError("process '" + m_name + "': null resource");
+    if (!m_service)  throw ModelError("process '" + m_name + "': null service expression");
     if (m_unitsNeeded < 1 || m_unitsNeeded > m_resource->capacity())
         throw ModelError("process '" + m_name + "' needs " + std::to_string(m_unitsNeeded) +
                          " units of a resource with capacity " +
@@ -52,8 +71,11 @@ void Station::setUnitsNeeded(int units) {
     m_unitsNeeded = units;
 }
 
-SimTime Station::drawService(const Entity& e, RandomStream& rng) {
-    if (m_serviceAttribute.empty()) return m_service->draw(rng);
+SimTime Station::drawService(NodeContext& ctx, const Entity& e) {
+    if (m_serviceAttribute.empty()) {
+        EvalContext ectx = ctx.evaluationContext(&e);
+        return static_cast<SimTime>(asNumber(m_service->evaluate(ectx)));
+    }
     assert(e.hasAttribute(m_serviceAttribute) &&
            "station reads service time from an attribute the entity does not have");
     const SimTime t = e.attribute(m_serviceAttribute);
@@ -63,7 +85,16 @@ SimTime Station::drawService(const Entity& e, RandomStream& rng) {
 
 double Station::loadPerVisit() const {
     if (!m_serviceAttribute.empty()) return 0.0;
-    return m_service->mean() * m_unitsNeeded / m_resource->capacity();
+    const auto mean = m_service->meanIfKnown();
+    if (!mean) return 0.0;          // unknowable; loadIsKnown() says so
+    return *mean * m_unitsNeeded / m_resource->capacity();
+}
+
+bool Station::loadIsKnown() const {
+    // A service time read from an attribute was never checkable either, and
+    // has said so by returning 0 since v5.
+    if (!m_serviceAttribute.empty()) return true;
+    return m_service->meanIfKnown().has_value();
 }
 
 // -------------------------------------------------------- resource user --
@@ -100,7 +131,7 @@ void Station::beginService(NodeContext& ctx, Entity* e, SimTime waited) {
     e->setAttribute("waitHere", waited);
     e->setAttribute("waitTime", e->attribute("waitTime") + waited);
 
-    const Activity service(m_name, ctx.now(), drawService(*e, ctx.rng()));
+    const Activity service(m_name, ctx.now(), drawService(ctx, *e));
     ctx.scheduleReturn(service.endTime(), e, this);
 
     if (ctx.trace().isOn()) {

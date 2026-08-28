@@ -27,11 +27,14 @@ namespace des {
 // also report a meaningless utilisation.
 // ---------------------------------------------------------------------------
 class DelayNode : public INode {
-    std::unique_ptr<IDistribution> m_duration;
+    ExpressionPtr m_duration;
     Statistics m_stats;
     int m_inTransit{0};
 public:
     DelayNode(std::string name, std::unique_ptr<IDistribution> duration);
+    DelayNode(std::string name, ExpressionPtr duration);
+    const IExpression& durationExpression() const { return *m_duration; }
+    IExpression& durationExpression() { return *m_duration; }
     void enter(NodeContext& ctx, Entity* e) override;
     void onScheduledEvent(NodeContext& ctx, Entity* e) override;
     void reset() override;

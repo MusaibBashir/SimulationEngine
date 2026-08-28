@@ -149,6 +149,11 @@ public:
     // per entity passing through, divided by capacity; 0 if it holds no
     // resource. Returning 0 means "not checkable", not "definitely fine".
     virtual double loadPerVisit() const { return 0.0; }
+
+    // v10: false when the mean cannot be computed in advance, which is
+    // NOT the same as "no load". A block that returns false is reported
+    // as unverified rather than passing the stability check silently.
+    virtual bool loadIsKnown() const { return true; }
 };
 
 }  // namespace des

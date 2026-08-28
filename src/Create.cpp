@@ -16,6 +16,23 @@ CreateNode::CreateNode(std::string name, std::string entityType,
                        long long maxArrivals, SimTime firstAt, int entitiesPerArrival)
     : INode(std::move(name)),
       m_entityType(std::move(entityType)),
+      m_interarrival(interarrival
+                         ? ExpressionPtr(std::make_unique<DistributionExpression>(
+                               std::move(interarrival)))
+                         : ExpressionPtr()),
+      m_firstAt(firstAt),
+      m_maxArrivals(maxArrivals),
+      m_perArrival(entitiesPerArrival) {
+    if (!m_interarrival) throw ModelError("create '" + m_name + "': null interarrival");
+    if (m_perArrival < 1) throw ModelError("create '" + m_name + "': entities per arrival >= 1");
+    if (m_firstAt < 0.0)  throw ModelError("create '" + m_name + "': first arrival cannot be negative");
+}
+
+CreateNode::CreateNode(std::string name, std::string entityType,
+                       ExpressionPtr interarrival,
+                       long long maxArrivals, SimTime firstAt, int entitiesPerArrival)
+    : INode(std::move(name)),
+      m_entityType(std::move(entityType)),
       m_interarrival(std::move(interarrival)),
       m_firstAt(firstAt),
       m_maxArrivals(maxArrivals),
@@ -36,7 +53,12 @@ void CreateNode::onScheduledEvent(NodeContext& ctx, Entity* /*unused*/) {
     // the stream is fed no matter what happens downstream -- and forgetting it
     // is the classic first-run bug where a simulation stops after one entity.
     if (!exhausted()) {
-        const SimTime next = ctx.now() + m_interarrival->draw(ctx.rng());
+        // NO ENTITY: an interarrival time is drawn before the entity it
+        // describes exists. Model::validate rejects an attribute reference
+        // in this field before the run rather than throwing mid-run.
+        EvalContext ectx = ctx.evaluationContext(nullptr);
+        const SimTime next = ctx.now() +
+                             static_cast<SimTime>(asNumber(m_interarrival->evaluate(ectx)));
         ctx.scheduleNextArrival(next, this);
     }
 

@@ -63,6 +63,16 @@ void SimulationSystem::assignStreams() {
         it->second.setAntithetic(m_antithetic);
         d->useStream(&it->second);
     };
+    // v10: an expression may contain several sampling sites, and useStream
+    // recurses into every one of them. That is what finally separates a Delay's
+    // draws from a Decide's -- they shared a stream because they shared a code
+    // path, not because anyone wanted them to.
+    auto giveExpr = [&](IExpression* e, const std::string& role) {
+        if (!e) return;
+        auto it = m_streams.emplace(role, m_rng.substream(role)).first;
+        it->second.setAntithetic(m_antithetic);
+        e->useStream(&it->second);
+    };
 
     // v9: the SOURCES own the interarrival distributions now. Model::interarrival()
     // is only the copy kept for the stability check, and streaming that copy
@@ -71,13 +81,13 @@ void SimulationSystem::assignStreams() {
     // antithetic unit test caught it, which is what that test is for.
     for (std::size_t i = 0; i < m_model.sourceCount(); ++i) {
         CreateNode& c = m_model.sourceAt(i);
-        give(&c.interarrival(), "arrivals:" + c.name());
+        giveExpr(&c.interarrival(), "arrivals:" + c.name());
     }
     for (const auto& a : m_model.arrivalAttributes())
         give(a.distribution.get(), "attribute:" + a.name);
     for (std::size_t i = 0; i < m_model.stationCount(); ++i) {
         Station& s = m_model.stationAt(i);
-        give(&s.serviceDistribution(), "service:" + s.name());
+        giveExpr(&s.serviceExpression(), "service:" + s.name());
     }
     // Blocks with their own randomness (Delay durations, Decide draws) keep
     // using the shared stream. Naming every one of them would be the complete

@@ -768,4 +768,151 @@ void runExpressionTests() {
             check(threw, "text assigned to a numeric variable throws rather than storing 0");
         }
     }
+
+    section("Durations as expressions");
+    {
+        // A parsed EXPO must give the IDENTICAL run to a constructed one.
+        auto wait = [](bool useText) {
+            SimulationSystem sim(31337u);
+            Model& m = sim.model();
+            if (useText) m.arrivals("EXPO(1.0)").station("T", 1, FIFO, "EXPO(0.8)");
+            else         m.arrivals(exponential(1.0)).station("T", 1, FIFO, exponential(0.8));
+            m.entryAt("T");
+            sim.stopAt(500.0).initialise();
+            sim.run();
+            return sim.model().station("T")->stats().averageWaitingTime();
+        };
+        checkClose(wait(true), wait(false), 1e-12,
+                   "a parsed EXPO drives the run IDENTICALLY to a constructed one");
+
+        // A service time that depends on the entity -- impossible before v10.
+        {
+            SimulationSystem sim(11u);
+            sim.model().attribute("size", constant(3.0))
+                       .arrivals(constant(5.0))
+                       .station("Cut", 1, FIFO, "size * 0.5")
+                       .entryAt("Cut");
+            sim.stopAt(50.0).initialise();
+            sim.run();
+            // Arrivals every 5, service 1.5, capacity 1 -- nothing ever
+            // queues, so time at the block IS the service time.
+            checkClose(sim.model().station("Cut")->stats().averageTimeInSystem(), 1.5, 1e-9,
+                       "service time computed from an entity attribute");
+        }
+
+        // A Delay written as text.
+        {
+            SimulationSystem sim(12u);
+            sim.model().arrivals(constant(2.0))
+                       .delay("Move", "1.5")
+                       .station("W", 1, FIFO, constant(0.1))
+                       .route("Move", "W")
+                       .entryAt("Move");
+            sim.stopAt(20.0).initialise();
+            sim.run();
+            checkClose(sim.model().nodeAs<DelayNode>("Move").stats().averageTimeInSystem(),
+                       1.5, 1e-9, "a Delay written as text holds for the stated time");
+        }
+
+        // An interarrival field has NO entity: an attribute there must be
+        // caught before the run, not throw halfway through it.
+        {
+            SimulationSystem sim(1u);
+            bool threw = false;
+            try {
+                sim.model().attribute("size", constant(1.0))
+                           .arrivals("size * 2")
+                           .station("X", 1, FIFO, constant(1.0))
+                           .entryAt("X");
+                sim.stopAt(10.0).initialise();
+            } catch (const ModelError&) { threw = true; }
+            check(threw, "an attribute in an interarrival field is refused at initialise()");
+        }
+
+        // An unknown name anywhere is refused before the run.
+        {
+            SimulationSystem sim(1u);
+            bool threw = false;
+            try {
+                sim.model().arrivals(constant(1.0))
+                           .station("X", 1, FIFO, "nosuchname * 2")
+                           .entryAt("X");
+                sim.stopAt(10.0).initialise();
+            } catch (const ModelError&) { threw = true; }
+            check(threw, "an unknown name in a service field is refused before the run");
+        }
+
+        // v9 open item 5: two blocks' draws are independent, because they are
+        // separate AST nodes rather than one shared code path.
+        {
+            // Capacity 50 so nothing queues, and a fixed entity count so the
+            // SAME number of service draws happen either way. Time at the block
+            // is then exactly the service time, and the service stream is
+            // untouched by what the Delay did.
+            auto serviceAt = [](double delayDuration) {
+                SimulationSystem sim(777u);
+                sim.useSeparateStreams();
+                sim.model().arrivals("EXPO(1.0)")
+                           .delay("Move", constant(delayDuration))
+                           .station("T", 50, FIFO, "EXPO(0.8)")
+                           .route("Move", "T")
+                           .entryAt("Move");
+                sim.stopAfter(100).initialise();
+                sim.run();
+                return sim.model().station("T")->stats().averageTimeInSystem();
+            };
+            checkClose(serviceAt(1.0), serviceAt(2.0), 1e-12,
+                       "changing a Delay's duration does not shift the service stream");
+        }
+    }
+
+    section("Stability with unknowable means");
+    {
+        // A constant-argument distribution keeps a knowable mean, so the
+        // overload refusal fires exactly as it did in v9.
+        {
+            SimulationSystem sim(1u);
+            bool threw = false;
+            try {
+                sim.model().arrivals("EXPO(1.0)")
+                           .station("Slow", 1, FIFO, "EXPO(2.0)")
+                           .entryAt("Slow");
+                sim.stopAt(10.0).initialise();
+            } catch (const ModelError&) { threw = true; }
+            check(threw, "rho >= 1 is still refused when the mean is knowable");
+        }
+
+        // A computed service time has NO knowable mean. The engine must say so
+        // -- not pass silently, and not refuse a model it cannot judge.
+        {
+            SimulationSystem sim(2u);
+            sim.model().variable("Rate", 2.0)
+                       .arrivals("EXPO(1.0)")
+                       .station("Var", 1, FIFO, "EXPO(Rate)")
+                       .entryAt("Var");
+            sim.stopAt(10.0).initialise();          // must NOT throw
+            const Model::StabilityReport r = sim.model().stability();
+            check(!r.checked, "a computed mean makes the check inconclusive");
+            check(r.unverifiable.size() == 1 && r.unverifiable[0] == "Var",
+                  "the report names the block it could not verify");
+        }
+
+        // A fully knowable model still reports as checked.
+        {
+            SimulationSystem sim(3u);
+            sim.model().arrivals("EXPO(2.0)")
+                       .station("Fast", 1, FIFO, "EXPO(0.5)")
+                       .entryAt("Fast");
+            sim.stopAt(10.0).initialise();
+            const Model::StabilityReport r = sim.model().stability();
+            check(r.checked, "a knowable model reports as checked");
+            check(r.unverifiable.empty(), "and names nothing as unverifiable");
+            checkClose(r.maxUtilisation, 0.25, 1e-9, "and reports the offered load");
+        }
+
+        check(expr("5")->meanIfKnown().has_value(), "a bare number has a known mean");
+        checkClose(*expr("EXPO(0.8)")->meanIfKnown(), 0.8, 1e-12, "EXPO(0.8) mean is 0.8");
+        check(!expr("NQ(X) * 2")->meanIfKnown().has_value(),
+              "model state has no known mean");
+    }
 }

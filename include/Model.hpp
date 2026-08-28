@@ -85,6 +85,12 @@ public:
 
     // Shorthand for the single-source case: creates a source called "Arrivals".
     Model& arrivals(std::unique_ptr<IDistribution> d);
+    // v10: the same fields written as text. EXPO(0.8), 5, or size * 0.5 --
+    // Arena makes no distinction and neither does this.
+    Model& arrivals(const std::string& interarrivalText);
+    Model& source(const std::string& name, const std::string& entityType,
+                  const std::string& interarrivalText, long long maxArrivals = -1,
+                  SimTime firstAt = 0.0, int entitiesPerArrival = 1);
 
     // *** v9: run a model whose queues grow without bound. ***
     // The stability check has refused rho >= 1 since v5, and for a STEADY-STATE
@@ -126,10 +132,17 @@ public:
     // through v6 behaviour, and still the right thing for a plain queue.
     Model& station(const std::string& name, int capacity,
                    QueueDiscipline discipline, std::unique_ptr<IDistribution> service);
+    Model& station(const std::string& name, int capacity,
+                   QueueDiscipline discipline, const std::string& serviceText);
+    Model& station(const std::string& name, int capacity,
+                   QueueDiscipline discipline, ExpressionPtr service);
 
     // A Process that seizes `units` of an already-declared SHARED resource.
     Model& stationUsing(const std::string& name, const std::string& resourceName,
                         QueueDiscipline discipline, std::unique_ptr<IDistribution> service,
+                        int units = 1);
+    Model& stationUsing(const std::string& name, const std::string& resourceName,
+                        QueueDiscipline discipline, const std::string& serviceText,
                         int units = 1);
 
     // v7: balking and reneging, configured on an existing Process block.
@@ -161,6 +174,7 @@ public:
         return station(name, capacity, discipline, std::move(service));
     }
     Model& delay(const std::string& name, std::unique_ptr<IDistribution> duration);
+    Model& delay(const std::string& name, const std::string& durationText);
     Model& assign(const std::string& name, const std::string& attributeName,
                   std::unique_ptr<IDistribution> value);
     // v10. assignTo writes an attribute from text; assignVariable writes a
@@ -227,6 +241,20 @@ public:
     std::size_t nodeCount() const { return m_nodes.size(); }
     INode& nodeAt(std::size_t i) { return *m_nodes[i]; }
     const INode& nodeAt(std::size_t i) const { return *m_nodes[i]; }
+
+    // v10: an expression's mean may be unknowable, so the offered-load check
+    // cannot always be applied. Reporting that is not the same as passing.
+    struct StabilityReport {
+        bool                     checked{true};
+        std::vector<std::string> unverifiable;   // block names
+        double                   maxUtilisation{0.0};
+    };
+    StabilityReport stability() const;
+
+    // Every expression in the model, checked against declared names before the
+    // run. v11 calls the same walk and turns each Diagnostic into a cell
+    // reference instead of throwing.
+    std::vector<Diagnostic> checkExpressions() const;
 
     // --- analysis ---
     VisitRatios visitRatios() const;
