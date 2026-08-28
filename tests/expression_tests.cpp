@@ -271,4 +271,163 @@ void runExpressionTests() {
             checkClose(asNumber(pc->evaluate(ctx)), 1.0, 1e-12, "a cloned predicate evaluates");
         }
     }
+
+    section("Parser");
+    {
+        Entity e(1, 0.0);
+        e.setAttribute("defects", 3.0);
+        RandomStream rng(1234u);
+        EvalContext ctx(&e, nullptr, nullptr, &rng);
+
+        auto value = [&](const char* s) {
+            ParseResult r = parseExpression(s);
+            check(!hasErrors(r.diagnostics), std::string("parses cleanly: ") + s);
+            return asNumber(r.expr->evaluate(ctx));
+        };
+
+        checkClose(value("1 + 2 * 3"),      7.0, 1e-12, "* binds tighter than +");
+        checkClose(value("(1 + 2) * 3"),    9.0, 1e-12, "parentheses override");
+        checkClose(value("2 ^ 3 ^ 2"),    512.0, 1e-12, "^ is RIGHT-associative: 2^(3^2)");
+        checkClose(value("10 - 3 - 2"),     5.0, 1e-12, "- is LEFT-associative");
+        checkClose(value("100 / 10 / 2"),   5.0, 1e-12, "/ is LEFT-associative");
+        checkClose(value("-2 ^ 2"),        -4.0, 1e-12, "unary minus binds looser than ^");
+        checkClose(value("1 + 2 > 2"),      1.0, 1e-12, "arithmetic binds tighter than comparison");
+        checkClose(value("1 > 2 || 3 > 2"), 1.0, 1e-12, "|| is loosest");
+        checkClose(value("0 && 1 || 1"),    1.0, 1e-12, "&& binds tighter than ||");
+        checkClose(value("!0"),             1.0, 1e-12, "logical not");
+        checkClose(value("7 % 3"),          1.0, 1e-12, "modulo");
+        checkClose(value("defects > 2"),    1.0, 1e-12, "a name in a comparison");
+        checkClose(value("2 <= 2 != 0"),    1.0, 1e-12, "comparisons chain left-associatively");
+
+        checkClose(value("MIN(3, 1, 2)"),   1.0, 1e-12, "MIN is variadic");
+        checkClose(value("MAX(3, 1, 2)"),   3.0, 1e-12, "MAX is variadic");
+        checkClose(value("ABS(-4)"),        4.0, 1e-12, "ABS");
+        checkClose(value("ROUND(2.6)"),     3.0, 1e-12, "ROUND");
+        checkClose(value("TRUNC(2.6)"),     2.0, 1e-12, "TRUNC");
+        checkClose(value("SQRT(9)"),        3.0, 1e-12, "SQRT");
+        checkClose(value("MOD(7, 3)"),      1.0, 1e-12, "MOD");
+        checkClose(value("LN(EXP(1))"),     1.0, 1e-9,  "LN and EXP are inverses");
+        checkClose(value("MAX(1, MIN(5, 3))"), 3.0, 1e-12, "calls nest");
+
+        // A parsed distribution must draw IDENTICALLY to a constructed one --
+        // they are the same objects underneath.
+        {
+            RandomStream a(4242u), b(4242u);
+            EvalContext actx(nullptr, nullptr, nullptr, &a);
+            ParseResult r = parseExpression("EXPO(0.8)");
+            check(!hasErrors(r.diagnostics), "EXPO(0.8) parses");
+            auto plain = exponential(0.8);
+            checkClose(asNumber(r.expr->evaluate(actx)), plain->draw(b), 1e-12,
+                       "a parsed EXPO draws identically to exponential(0.8)");
+            checkClose(*r.expr->meanIfKnown(), 0.8, 1e-12, "constant args keep a knowable mean");
+        }
+        {
+            ParseResult r = parseExpression("TRIA(1, 2, 3)");
+            check(!hasErrors(r.diagnostics), "TRIA parses");
+            checkClose(*r.expr->meanIfKnown(), 2.0, 1e-12, "TRIA(1,2,3) mean is 2");
+        }
+        {
+            // Arena's DISC takes CUMULATIVE probabilities; Discrete takes
+            // individual ones. Mean 1*0.3 + 2*0.5 + 3*0.2 = 1.9.
+            ParseResult r = parseExpression("DISC(0.3, 1, 0.8, 2, 1.0, 3)");
+            check(!hasErrors(r.diagnostics), "DISC parses");
+            checkClose(*r.expr->meanIfKnown(), 1.9, 1e-9,
+                       "DISC reads its probabilities as cumulative, as Arena does");
+        }
+        {
+            // A computed argument cannot have a mean known in advance.
+            ParseResult r = parseExpression("EXPO(defects)");
+            check(!hasErrors(r.diagnostics), "EXPO with a computed argument parses");
+            check(!r.expr->meanIfKnown().has_value(),
+                  "a computed distribution argument has no knowable mean");
+            check(asNumber(r.expr->evaluate(ctx)) > 0.0, "and it still draws");
+        }
+
+        // Error POSITIONS, character-exact: v11 puts a cursor on this offset.
+        {
+            ParseResult r = parseExpression("EXPO(0.8");
+            check(hasErrors(r.diagnostics), "unclosed paren is an error");
+            check(r.diagnostics[0].message.find("expected ')'") != std::string::npos,
+                  "the message names what was expected");
+            check(r.diagnostics[0].span.offset == 8, "diagnostic points at the end of input");
+        }
+        {
+            ParseResult r = parseExpression("1 + ");
+            check(hasErrors(r.diagnostics), "a dangling operator is an error");
+            check(r.diagnostics[0].span.offset == 4, "diagnostic at the missing operand");
+        }
+        {
+            ParseResult r = parseExpression("EXPOO(1)");
+            check(hasErrors(r.diagnostics), "an unknown function is an error");
+            check(r.diagnostics[0].message.find("EXPOO") != std::string::npos,
+                  "the message names the function");
+        }
+        {
+            ParseResult r = parseExpression("EXPO(1, 2)");
+            check(hasErrors(r.diagnostics), "wrong arity is an error");
+            check(r.diagnostics[0].message.find("1 argument") != std::string::npos,
+                  "the message says how many arguments were expected");
+        }
+        {
+            ParseResult r = parseExpression("DISC(0.5, 1, 1.0)");
+            check(hasErrors(r.diagnostics), "DISC with an odd argument count is an error");
+        }
+        {
+            ParseResult r = parseExpression("NQ(1 + 1)");
+            check(hasErrors(r.diagnostics), "NQ of a computed value is an error");
+            check(r.diagnostics[0].message.find("NAME of a block") != std::string::npos,
+                  "the message says NQ wants a block name");
+        }
+        {
+            ParseResult r = parseExpression("1 2");
+            check(hasErrors(r.diagnostics), "trailing junk is an error");
+        }
+
+        // One parse reports MANY problems -- v11 shows every bad cell at once.
+        {
+            ParseResult r = parseExpression("1 @ 2 $ 3");
+            check(r.diagnostics.size() >= 2, "one parse reports more than one problem");
+        }
+
+        // NQ captures the block NAME rather than resolving it as a variable.
+        {
+            ParseResult r = parseExpression("NQ(Teller)");
+            check(!hasErrors(r.diagnostics), "NQ(Teller) parses");
+            check(r.expr->describe() == "NQ(Teller)", "NQ keeps the block name verbatim");
+            std::vector<Diagnostic> d;
+            ValidationContext vc;
+            r.expr->validate(vc, d);
+            check(!hasErrors(d), "the block name is not validated as a variable");
+        }
+        {
+            ParseResult r = parseExpression("NQ(\"Teller\")");
+            check(!hasErrors(r.diagnostics), "a quoted block name is accepted too");
+            check(r.expr->describe() == "NQ(Teller)", "and means the same thing");
+        }
+
+        {
+            Entity ball(2, 0.0);
+            ball.setType("Ball");
+            EvalContext bctx(&ball, nullptr, nullptr, nullptr);
+            ParseResult r = parseExpression("Entity.Type == \"Ball\"");
+            check(!hasErrors(r.diagnostics), "a string comparison parses");
+            checkClose(asNumber(r.expr->evaluate(bctx)), 1.0, 1e-12, "entity type compares equal");
+        }
+
+        // expr() throws: on the C++ API a malformed expression IS a programmer
+        // error, and there is no cell to point at.
+        {
+            bool threw = false;
+            try { expr("1 +"); } catch (const ModelError&) { threw = true; }
+            check(threw, "expr() throws on a malformed expression");
+            check(expr("2 + 2") != nullptr, "expr() returns a usable tree");
+        }
+
+        // clone() survives a round trip through the parser's node kinds.
+        {
+            ParseResult r = parseExpression("MIN(defects, 10) + 1");
+            auto copy = r.expr->clone();
+            checkClose(asNumber(copy->evaluate(ctx)), 4.0, 1e-12, "a cloned call tree evaluates");
+        }
+    }
 }

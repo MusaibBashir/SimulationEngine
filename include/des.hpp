@@ -42,6 +42,8 @@
 #include "EvalContext.hpp"
 #include "VariableStore.hpp"
 #include "Expression.hpp"
+#include "Functions.hpp"
+#include "Parser.hpp"
 #include "TerminationRule.hpp"
 #include "Trace.hpp"
 #include "Node.hpp"

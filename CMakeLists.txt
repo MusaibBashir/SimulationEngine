@@ -23,6 +23,8 @@ add_library(des_engine STATIC
     src/EvalContext.cpp
     src/VariableStore.cpp
     src/Expression.cpp
+    src/Functions.cpp
+    src/Parser.cpp
     src/RandomStream.cpp
     src/StreamTests.cpp
     src/Distribution.cpp
