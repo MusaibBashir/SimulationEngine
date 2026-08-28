@@ -62,3 +62,9 @@ obj/
 trace_*.md
 docs/
 *.txt
+# Test artefacts written by the suite into the working directory
+/trace_text.md
+/trace_code.md
+/out.txt
+/err.txt
+/asan_out.txt
