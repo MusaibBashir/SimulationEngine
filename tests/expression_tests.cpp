@@ -1,6 +1,9 @@
 // ============================================================================
 // tests/expression_tests.cpp  --  v10: the expression layer
 // ============================================================================
+#include <fstream>
+#include <iterator>
+#include <string>
 #include "harness.hpp"
 #include "des.hpp"
 
@@ -914,5 +917,70 @@ void runExpressionTests() {
         checkClose(*expr("EXPO(0.8)")->meanIfKnown(), 0.8, 1e-12, "EXPO(0.8) mean is 0.8");
         check(!expr("NQ(X) * 2")->meanIfKnown().has_value(),
               "model state has no known mean");
+    }
+
+    section("The text path and the code path trace identically");
+    {
+        // This project's own argument, applied to itself: a refactor that
+        // changes behaviour shows up as a DIFF, not as a slightly-off average.
+        // If the text-built model and the code-built model agree EVENT FOR
+        // EVENT across a model using every converted field, the text path is
+        // correct. A near-miss average would not be evidence.
+        // An Assign is deliberately NOT in this model. A distribution DRAWS
+        // and an expression COMPUTES, so the two spellings consume different
+        // amounts of randomness and could never trace alike -- that is a real
+        // difference, not a defect, and Task 9 tests Assign on its own terms.
+        auto buildBothWays = [](bool useText, const char* tracePath) {
+            SimulationSystem sim(20260828u);
+            Model& m = sim.model();
+            m.attribute("priority", uniform(0.0, 4.0));
+            if (useText) {
+                m.arrivals("EXPO(1.0)")
+                 .station("Teller", 2, FIFO, "TRIA(0.5, 1.0, 2.5)")
+                 .decideWhen("Recheck", "priority > 3")
+                 .delay("Walk", "0.25")
+                 .station("Extra", 1, FIFO, "EXPO(0.4)");
+            } else {
+                m.arrivals(exponential(1.0))
+                 .station("Teller", 2, FIFO, triangular(0.5, 1.0, 2.5))
+                 .decideByCondition("Recheck",
+                     [](const Entity& e){ return e.attribute("priority") > 3.0; })
+                 .delay("Walk", constant(0.25))
+                 .station("Extra", 1, FIFO, exponential(0.4));
+            }
+            m.route("Teller", "Recheck")
+             .routeTrue("Recheck", "Walk")
+             .route("Walk", "Extra")
+             .entryAt("Teller");
+            sim.enableTrace(tracePath, TraceLevel::Events);
+            sim.stopAt(150.0).initialise();
+            sim.run();
+        };
+        buildBothWays(true,  "trace_text.md");
+        buildBothWays(false, "trace_code.md");
+
+        std::ifstream ta("trace_text.md", std::ios::binary);
+        std::ifstream tb("trace_code.md", std::ios::binary);
+        check(ta.good() && tb.good(), "both traces were written");
+        const std::string textTrace((std::istreambuf_iterator<char>(ta)),
+                                     std::istreambuf_iterator<char>());
+        const std::string codeTrace((std::istreambuf_iterator<char>(tb)),
+                                     std::istreambuf_iterator<char>());
+        // Compare the EVENT TABLE, not the whole file. The header prints each
+        // field's description, and "EXPO(1)" against "Exponential(mean=1)" is
+        // the two spellings reporting themselves honestly -- a real difference
+        // between what was typed, not a difference in what was simulated. The
+        // events are where the claim lives.
+        auto eventsOf = [](const std::string& trace) {
+            const std::size_t at = trace.find("| t | event |");
+            return at == std::string::npos ? std::string() : trace.substr(at);
+        };
+        const std::string textEvents = eventsOf(textTrace);
+        const std::string codeEvents = eventsOf(codeTrace);
+
+        check(!textEvents.empty(), "the trace contains an event table");
+        check(textEvents.size() > 5000, "the event table is substantial, not a stub");
+        check(textEvents == codeEvents,
+              "the text-built model traces IDENTICALLY to the code-built one, event for event");
     }
 }

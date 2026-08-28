@@ -701,7 +701,14 @@ void Model::validate() const {
 
 std::string Model::describe() const {
     std::ostringstream os;
-    os << "arrivals ~ " << (m_interarrival ? m_interarrival->describe() : "<none>") << "\n";
+    // Ask the SOURCE, not the copy kept for the stability check. A model built
+    // with arrivals("EXPO(1.0)") never fills that copy in, and reporting
+    // "<none>" for a model that plainly has arrivals is the kind of quietly
+    // wrong line this project keeps hunting. For a distribution-built model
+    // both routes print the same string.
+    os << "arrivals ~ "
+       << (m_sources.empty() ? std::string("<none>") : m_sources.front()->interarrival().describe())
+       << "\n";
     for (const auto& a : m_arrivalAttributes)
         os << "  attribute " << a.name << " ~ " << a.distribution->describe() << "\n";
     for (const auto& n : m_nodes) os << "  " << n->describe() << "\n";
