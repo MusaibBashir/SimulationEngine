@@ -24,6 +24,7 @@
 #include "ModelError.hpp"
 #include "Diagnostic.hpp"
 #include "Value.hpp"
+#include "Lexer.hpp"
 #include "Entity.hpp"
 #include "Resource.hpp"
 #include "EntityQueue.hpp"
