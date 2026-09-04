@@ -627,74 +627,69 @@ Model::StabilityReport Model::stability() const {
     return r;
 }
 
-void Model::validate() const {
-    if (m_nodes.empty())      throw ModelError("model has no blocks");
-    {
-        const std::vector<Diagnostic> problems = checkExpressions();
-        if (hasErrors(problems))
-            throw ModelError("this model has expression errors:\n" +
-                             formatDiagnostics(problems));
-    }
-    if (m_sources.empty())    throw ModelError("model has no arrival source -- call arrivals() or source()");
-    if (m_entry == nullptr)   throw ModelError("model has no entry block -- call entryAt()");
+// The structural checks, COLLECTED rather than thrown. Somebody editing a model
+// file needs every problem at once; an exception can carry one. validate() is
+// this function plus a throw, and the message strings are shared between them
+// so the two can never drift.
+//
+// The expression check stays in validate() rather than moving here, because it
+// produces one combined message and v11's compiler has already reported those
+// against individual cells by the time it calls this.
+std::vector<Diagnostic> Model::checkStructure() const {
+    std::vector<Diagnostic> problems;
+    auto fail = [&problems](std::string message) {
+        problems.push_back(Diagnostic{Severity::Error, SourceSpan{}, std::move(message)});
+    };
+
+    if (m_nodes.empty())    fail("model has no blocks");
+    if (m_sources.empty())  fail("model has no arrival source -- call arrivals() or source()");
+    if (m_entry == nullptr) fail("model has no entry block -- call entryAt()");
     for (const CreateNode* c : m_sources)
         if (c->next() == nullptr)
-            throw ModelError("source '" + c->name() + "' feeds nothing -- route() it to a block");
+            fail("source '" + c->name() + "' feeds nothing -- route() it to a block");
 
     // A routing loop means entities never leave, the run never drains, and the
-    // symptom is a program that simply does not stop with no clue why. Follow
-    // both branches of every Decide.
-    std::set<const INode*> onPath;
-    std::vector<const INode*> stack{m_entry};
-    std::set<const INode*> seen;
-    while (!stack.empty()) {
-        const INode* n = stack.back();
-        stack.pop_back();
-        if (!n || !seen.insert(n).second) continue;
-        onPath.insert(n);
-        if (auto* d = dynamic_cast<const DecideNode*>(n)) {
-            if (d->trueBranch()) stack.push_back(d->trueBranch());
-        }
-        if (n->next()) stack.push_back(n->next());
+    // symptom is a program that simply does not stop with no clue why.
+    if (m_entry != nullptr) {
+        std::set<const INode*> visiting, done;
+        std::string loopAt;
+        struct Rec {
+            static void dfs(const INode* n, std::set<const INode*>& visiting,
+                            std::set<const INode*>& done, std::string& loopAt) {
+                if (!n || done.count(n) || !loopAt.empty()) return;
+                if (!visiting.insert(n).second) { loopAt = n->name(); return; }
+                if (auto* d = dynamic_cast<const DecideNode*>(n))
+                    dfs(d->trueBranch(), visiting, done, loopAt);
+                dfs(n->next(), visiting, done, loopAt);
+                visiting.erase(n);
+                done.insert(n);
+            }
+        };
+        Rec::dfs(m_entry, visiting, done, loopAt);
+        if (!loopAt.empty())
+            fail("routing loop through block '" + loopAt +
+                 "': entities would never leave the system");
     }
-    // Cycle detection: a proper DFS colouring, because the reachability walk
-    // above cannot tell a diamond (fine) from a loop (fatal).
-    std::set<const INode*> visiting, done;
-    struct Rec {
-        static void dfs(const INode* n, std::set<const INode*>& visiting,
-                        std::set<const INode*>& done) {
-            if (!n || done.count(n)) return;
-            if (!visiting.insert(n).second)
-                throw ModelError("routing loop through block '" + n->name() +
-                                 "': entities would never leave the system");
-            if (auto* d = dynamic_cast<const DecideNode*>(n)) dfs(d->trueBranch(), visiting, done);
-            dfs(n->next(), visiting, done);
-            visiting.erase(n);
-            done.insert(n);
-        }
-    };
-    Rec::dfs(m_entry, visiting, done);
 
-    // The stability check: every process on the route must keep up with the work
-    // reaching it. rho >= 1 is not a warning, it is a broken model -- the queue
-    // grows for as long as you run, so "average wait" is a function of run
-    // length rather than a property of the system.
+    // Every process on the route must keep up with the work reaching it.
+    // rho >= 1 is not a warning, it is a broken model: the queue grows for as
+    // long as you run, so "average wait" is a function of run length rather
+    // than a property of the system.
+    //
     // v7: a SHARED resource must be judged on the TOTAL work reaching every
-    // block that uses it. Two machines each at rho = 0.6 are fine on their own
-    // and impossible if they share one operator -- checking them separately
-    // would pass a model that cannot run.
+    // block that uses it. Two machines each at rho = 0.6 are fine alone and
+    // impossible if they share one operator.
     const VisitRatios vr = visitRatios();
     // An unknowable arrival rate makes every station's load unknowable, so the
     // checks below must skip them rather than judge them against a lambda of 0.
     const bool lambdaKnown = arrivalRateIsKnown();
+
     for (const auto& res : m_resources) {
         double total = 0.0;
         int users = 0;
         for (const Station* st : m_processes) {
             if (&st->resource() != res.get()) continue;
             if (vr.visits.find(st) == vr.visits.end()) continue;
-            // Same reason as below: a station whose load is unknowable must not
-            // contribute 0.0 to a total that is then compared against 1.
             if (!lambdaKnown || !st->loadIsKnown()) continue;
             total += offeredLoad(*st);
             ++users;
@@ -705,7 +700,7 @@ void Model::validate() const {
                << users << " blocks sharing it need a combined offered load of "
                << total << " (>= 1). Each may look fine alone; together they "
                   "cannot keep up.";
-            throw ModelError(os.str());
+            fail(os.str());
         }
     }
 
@@ -726,9 +721,24 @@ void Model::validate() const {
             if (!vr.exact)
                 os << " (Flow rates are approximate here: a condition-based Decide "
                       "or a batch split means the true split is an output of the run.)";
-            throw ModelError(os.str());
+            fail(os.str());
         }
     }
+    return problems;
+}
+
+void Model::validate() const {
+    // The throwing form C++ callers have always had, in the order they have
+    // always had it. checkStructure() is the same checks collected into a list.
+    if (m_nodes.empty()) throw ModelError("model has no blocks");
+    {
+        const std::vector<Diagnostic> problems = checkExpressions();
+        if (hasErrors(problems))
+            throw ModelError("this model has expression errors:\n" +
+                             formatDiagnostics(problems));
+    }
+    for (const Diagnostic& d : checkStructure())
+        if (d.severity == Severity::Error) throw ModelError(d.message);
 }
 
 std::string Model::describe() const {

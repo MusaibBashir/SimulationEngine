@@ -260,6 +260,10 @@ public:
     // reference instead of throwing.
     std::vector<Diagnostic> checkExpressions() const;
 
+    // The structural checks, collected rather than thrown, so a person
+    // editing a model file gets every problem at once.
+    std::vector<Diagnostic> checkStructure() const;
+
     // --- analysis ---
     VisitRatios visitRatios() const;
     double offeredLoad(const Station& s) const;

@@ -497,4 +497,58 @@ void runDocumentTests() {
                   "a bad distribution parameter is a diagnostic, not a throw");
         }
     }
+
+    section("Model::checkStructure");
+    {
+        {
+            SimulationSystem sim(1u);
+            sim.model().arrivals(constant(1.0));   // no entry block, source unwired
+            const std::vector<Diagnostic> problems = sim.model().checkStructure();
+            check(!problems.empty(), "checkStructure returns problems rather than throwing");
+            check(hasErrors(problems), "and marks them as errors");
+            // The point of collecting: BOTH problems, not just the first.
+            check(problems.size() >= 2,
+                  "a model with two structural faults reports two, not one");
+        }
+
+        // validate() must still throw EXACTLY as it did, with the same message.
+        {
+            SimulationSystem sim(2u);
+            sim.model().arrivals(constant(1.0));
+            std::string what;
+            try { sim.model().validate(); }
+            catch (const ModelError& e) { what = e.what(); }
+            check(!what.empty(), "validate() still throws");
+            check(what.find("entry") != std::string::npos ||
+                  what.find("source") != std::string::npos,
+                  "with the message it always had");
+        }
+
+        {
+            SimulationSystem sim(3u);
+            sim.model().arrivals(constant(1.0))
+                       .station("W", 1, FIFO, constant(0.5))
+                       .entryAt("W");
+            sim.model().wireSources();
+            check(!hasErrors(sim.model().checkStructure()),
+                  "a sound model produces no structural problems");
+        }
+
+        // A routing loop is collected, not thrown out of the DFS.
+        {
+            SimulationSystem sim(4u);
+            sim.model().arrivals(constant(1.0))
+                       .station("A", 1, FIFO, constant(0.1))
+                       .station("B", 1, FIFO, constant(0.1))
+                       .route("A", "B")
+                       .route("B", "A")
+                       .entryAt("A");
+            sim.model().wireSources();
+            const std::vector<Diagnostic> problems = sim.model().checkStructure();
+            bool loop = false;
+            for (const Diagnostic& d : problems)
+                if (d.message.find("routing loop") != std::string::npos) loop = true;
+            check(loop, "a routing loop is reported as a diagnostic");
+        }
+    }
 }
