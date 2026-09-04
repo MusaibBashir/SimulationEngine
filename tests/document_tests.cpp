@@ -125,4 +125,117 @@ void runDocumentTests() {
         try { doc.moveRow("Process", 0, 9); } catch (const ModelError&) { threw = true; }
         check(threw, "moving past the end throws");
     }
+
+    section("The .des format");
+    {
+        const std::string src =
+            "version = 1\n"
+            "\n"
+            "# The teller queue. Comments survive a round trip.\n"
+            "[Resource]\n"
+            "Name     = Teller\n"
+            "Capacity = 2\n"
+            "\n"
+            "[Process]\n"
+            "Name       = Serve\n"
+            "Resource   = Teller\n"
+            "Service    = EXPO(0.8)\n";
+
+        ReadResult r = readDocument(src);
+        check(!hasErrors(r.diagnostics), "a clean document reads without errors");
+        check(r.formatVersion == 1, "the version line is read");
+        check(r.document.rowCount("Resource") == 1, "one Resource row");
+        check(r.document.rowCount("Process") == 1, "one Process row");
+        check(r.document.cell("Resource", 0, "Name") == "Teller", "cells are read");
+        check(r.document.cell("Process", 0, "Service") == "EXPO(0.8)",
+              "an expression needs no quoting: the value is raw to end of line");
+        check(r.document.cellLine("Process", 0, "Service") == 11,
+              "each cell remembers the line it came from");
+
+        // ROUND TRIP IS BYTE-IDENTICAL. Anything less means a front end
+        // silently rewrites a file somebody opened and saved unchanged.
+        check(writeDocument(r.document) == src,
+              "read then write returns the identical bytes, comments included");
+
+        const std::string two =
+            "version = 1\n"
+            "\n"
+            "[DecideBranch]\n"
+            "Decide = Sort\n"
+            "To = Fast\n"
+            "\n"
+            "[DecideBranch]\n"
+            "Decide = Sort\n"
+            "To = Slow\n";
+        ReadResult t = readDocument(two);
+        check(t.document.rowCount("DecideBranch") == 2, "repeated headers make rows");
+        check(t.document.cell("DecideBranch", 0, "To") == "Fast", "first row first");
+        check(t.document.cell("DecideBranch", 1, "To") == "Slow", "second row second");
+        check(writeDocument(t.document) == two, "and that round-trips too");
+
+        {
+            ReadResult bad = readDocument("version = 1\n[Process\nName = X\n");
+            check(hasErrors(bad.diagnostics), "an unclosed header is an error");
+            check(bad.diagnostics[0].span.offset == 2,
+                  "reported against the line it is on");
+        }
+        {
+            ReadResult bad = readDocument("version = 1\n[Process]\nName\n");
+            check(hasErrors(bad.diagnostics), "a line with no '=' is an error");
+        }
+        {
+            ReadResult bad = readDocument("version = 1\nName = X\n");
+            check(hasErrors(bad.diagnostics), "a cell before any header is an error");
+        }
+        {
+            ReadResult bad = readDocument("[Process]\nName = X\n");
+            check(hasErrors(bad.diagnostics), "a missing version line is an error");
+        }
+        {
+            ReadResult bad = readDocument("version = 1\n[Process]\nOne\nTwo\n");
+            check(bad.diagnostics.size() >= 2, "one read reports more than one problem");
+        }
+        {
+            ReadResult bad = readDocument("version = 2\n[Process]\nName = X\n");
+            check(hasErrors(bad.diagnostics),
+                  "a version this engine does not read is an error, not a guess");
+        }
+    }
+
+    section("Round-trip is a property, not an example");
+    {
+        // Build in code, write, read back, write again: the second and third
+        // forms must agree. A canonical writer that is not idempotent would
+        // churn every file on every save.
+        ModelDocument d;
+        d.addRow("Resource");
+        d.setCell("Resource", 0, "Name", "Nurse");
+        d.setCell("Resource", 0, "Capacity", "2");
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Triage");
+        d.setCell("Process", 0, "Service", "TRIA(1, 2, 3)");
+
+        const std::string once = writeDocument(d);
+        ReadResult back = readDocument(once);
+        check(!hasErrors(back.diagnostics), "canonical output reads back cleanly");
+        check(writeDocument(back.document) == once, "and writing it again is stable");
+        check(back.document.cell("Process", 0, "Service") == "TRIA(1, 2, 3)",
+              "values survive the trip unchanged");
+
+        // An unknown column is written back, not dropped.
+        ModelDocument u;
+        u.addRow("Resource");
+        u.setCell("Resource", 0, "Name", "X");
+        u.setCell("Resource", 0, "FromTheFuture", "keep me");
+        const std::string text = writeDocument(u);
+        check(text.find("FromTheFuture = keep me") != std::string::npos,
+              "an unknown column survives being written");
+
+        // Editing a document that came from a file switches it to canonical
+        // form rather than replaying stale source lines.
+        ReadResult e = readDocument("version = 1\n\n[Resource]\nName = A\n");
+        e.document.setCell("Resource", 0, "Name", "B");
+        check(writeDocument(e.document).find("Name = B") != std::string::npos,
+              "an edit is written, not the line it replaced");
+    }
 }

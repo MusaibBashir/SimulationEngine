@@ -28,6 +28,7 @@ add_library(des_engine STATIC
     src/ModuleSchema.cpp
     src/ModuleSchemas.cpp
     src/ModelDocument.cpp
+    src/DocumentFormat.cpp
     src/RandomStream.cpp
     src/StreamTests.cpp
     src/Distribution.cpp
