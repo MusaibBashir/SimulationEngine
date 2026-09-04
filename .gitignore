@@ -60,8 +60,20 @@ ex[0-9]*
 libdes.a
 obj/
 trace_*.md
-docs/
+# docs/* rather than docs/ : git cannot re-include anything inside an EXCLUDED
+# DIRECTORY, so `docs/` followed by `!docs/superpowers/` silently does nothing.
+# Excluding the CONTENTS instead leaves the negation able to work.
+docs/*
+# The design record is part of the project, like the readlogs it continues.
+# Specs and plans are versioned; anything else under docs/ is not.
+!docs/superpowers/
+
 *.txt
+# The trace baselines are .txt and they ARE the byte-identical gate. Ignored,
+# a newly captured baseline would be silently refused and the gate would cover
+# fewer examples than it appears to -- a gate that stops being a gate without
+# saying so.
+!tests/baseline/*.txt
 # Test artefacts written by the suite into the working directory
 /trace_text.md
 /trace_code.md
