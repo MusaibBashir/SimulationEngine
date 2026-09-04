@@ -1,6 +1,7 @@
 #include "Compiler.hpp"
 #include <cstdlib>
 #include "ModuleSchema.hpp"
+#include "Parser.hpp"
 
 namespace des {
 namespace {
@@ -162,6 +163,35 @@ void checkReferences(const ModelDocument& doc, std::vector<Diagnostic>& out) {
     }
 }
 
+// --- pass 3: expressions ---------------------------------------------------
+void checkExpressionCells(const ModelDocument& doc, std::vector<Diagnostic>& out) {
+    const ModuleRegistry& reg = ModuleRegistry::instance();
+
+    for (const std::string& type : doc.types()) {
+        const ModuleSchema* schema = reg.find(type);
+        if (schema == nullptr) continue;
+
+        const std::size_t rows = doc.rowCount(type);
+        for (std::size_t r = 0; r < rows; ++r) {
+            for (const Column& c : schema->columns) {
+                if (c.type != ColumnType::Expression) continue;
+                const std::string text = doc.cell(type, r, c.id);
+                if (text.empty()) continue;    // required-and-empty is pass 1's
+
+                ParseResult parsed = parseExpression(text);
+                for (Diagnostic& d : parsed.diagnostics) {
+                    // The span is left exactly as v10 measured it -- an offset
+                    // WITHIN the cell -- and the cell is wrapped around it. Both
+                    // survive, which is what puts a cursor on the right
+                    // character of the right cell.
+                    d.cell = CellRef{type, r, c.id};
+                    out.push_back(std::move(d));
+                }
+            }
+        }
+    }
+}
+
 }  // namespace
 
 bool compileInto(const ModelDocument& doc, Model& model,
@@ -173,9 +203,10 @@ bool compileInto(const ModelDocument& doc, Model& model,
     // layer is to report every bad cell, not the first.
     checkSchema(doc, diagnostics);
     checkReferences(doc, diagnostics);
+    checkExpressionCells(doc, diagnostics);
     if (hasErrors(diagnostics)) return false;
 
-    // Passes 2 to 4 arrive in the tasks that follow.
+    // The structure pass arrives with the build, in the next task.
     return false;
 }
 

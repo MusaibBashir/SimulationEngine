@@ -441,4 +441,60 @@ void runDocumentTests() {
                   "the schema pass and the reference pass both report, in one compile");
         }
     }
+
+    section("Compile: the expression pass");
+    {
+        ModelDocument d;
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Service", "EXPO(0.8");   // unclosed
+
+        CompileResult r = compile(d);
+        check(complainedAbout(r.diagnostics, "Service", "expected ')'"),
+              "a malformed expression is reported at its cell, with v10's message");
+
+        // v10 gives the offset WITHIN the cell; v11 wraps the cell around it.
+        // Both survive, which is what puts a cursor on the right character of
+        // the right cell.
+        std::size_t offset = 999;
+        for (const Diagnostic& g : r.diagnostics)
+            if (g.cell && g.cell->column == "Service") offset = g.span.offset;
+        check(offset == 8, "the offset within the cell survives");
+
+        {
+            ModelDocument m;
+            m.addRow("Process");
+            m.setCell("Process", 0, "Name", "A");
+            m.setCell("Process", 0, "Service", "1 +");
+            m.addRow("Delay");
+            m.setCell("Delay", 0, "Name", "B");
+            m.setCell("Delay", 0, "Duration", "EXPOO(1)");
+            CompileResult c = compile(m);
+            check(complainedAbout(c.diagnostics, "Service") &&
+                  complainedAbout(c.diagnostics, "Duration"),
+                  "every bad expression is reported, not just the first");
+        }
+
+        {
+            ModelDocument m;
+            m.addRow("Delay");
+            m.setCell("Delay", 0, "Name", "B");
+            m.setCell("Delay", 0, "Duration", "TRIA(1, 2, 3)");
+            CompileResult c = compile(m);
+            check(!complainedAbout(c.diagnostics, "Duration"),
+                  "a valid expression produces no diagnostic");
+        }
+
+        {
+            // A bad distribution parameter is a diagnostic, not an exception --
+            // v10 made parseExpression never throw, and this is where that pays.
+            ModelDocument m;
+            m.addRow("Delay");
+            m.setCell("Delay", 0, "Name", "B");
+            m.setCell("Delay", 0, "Duration", "WEIB(0, 1)");
+            CompileResult c = compile(m);
+            check(complainedAbout(c.diagnostics, "Duration"),
+                  "a bad distribution parameter is a diagnostic, not a throw");
+        }
+    }
 }
