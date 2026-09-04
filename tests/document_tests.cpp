@@ -238,4 +238,95 @@ void runDocumentTests() {
         check(writeDocument(e.document).find("Name = B") != std::string::npos,
               "an edit is written, not the line it replaced");
     }
+
+    section("Compile: the schema pass");
+    {
+        ModelDocument d;
+        d.addRow("Resource");
+        d.setCell("Resource", 0, "Name", "Teller");
+        d.setCell("Resource", 0, "Capacity", "notanumber");
+        d.setCell("Resource", 0, "Nonsense", "x");
+
+        CompileResult r = compile(d);
+        check(hasErrors(r.diagnostics), "bad cells are reported");
+
+        bool sawType = false, sawUnknown = false;
+        for (const Diagnostic& g : r.diagnostics) {
+            check(g.cell.has_value(), "every schema diagnostic names a cell");
+            if (g.cell && g.cell->column == "Capacity") {
+                sawType = true;
+                check(g.cell->moduleType == "Resource" && g.cell->row == 0,
+                      "and names the right module and row");
+            }
+            if (g.cell && g.cell->column == "Nonsense") {
+                sawUnknown = true;
+                check(g.severity == Severity::Warning,
+                      "an unknown column is a WARNING: it is preserved, not dropped");
+            }
+        }
+        check(sawType, "a non-numeric Integer cell is reported");
+        check(sawUnknown, "an unknown column is reported");
+
+        {
+            ModelDocument m;
+            m.addRow("Resource");
+            m.setCell("Resource", 0, "Capacity", "1");
+            CompileResult c = compile(m);
+            bool sawMissing = false;
+            for (const Diagnostic& g : c.diagnostics)
+                if (g.cell && g.cell->column == "Name") sawMissing = true;
+            check(sawMissing, "a missing required cell is reported against that column");
+        }
+
+        {
+            ModelDocument m;
+            m.addRow("Process");
+            m.setCell("Process", 0, "Name", "P");
+            m.setCell("Process", 0, "Service", "1");
+            m.setCell("Process", 0, "Discipline", "SIDEWAYS");
+            CompileResult c = compile(m);
+            bool named = false;
+            for (const Diagnostic& g : c.diagnostics)
+                if (g.cell && g.cell->column == "Discipline" &&
+                    g.message.find("FIFO") != std::string::npos) named = true;
+            check(named, "a bad enum lists the spellings that are allowed");
+        }
+
+        {
+            ModelDocument m;
+            m.addRow("FromTheFuture");
+            m.setCell("FromTheFuture", 0, "X", "1");
+            CompileResult c = compile(m);
+            bool warned = false;
+            for (const Diagnostic& g : c.diagnostics)
+                if (g.cell && g.cell->moduleType == "FromTheFuture" &&
+                    g.severity == Severity::Warning) warned = true;
+            check(warned, "an unknown module type warns rather than erroring");
+            check(!hasErrors(c.diagnostics),
+                  "and does not by itself make the document invalid");
+        }
+
+        {
+            ModelDocument m;
+            m.addRow("Batch");
+            m.setCell("Batch", 0, "Name", "B");
+            m.setCell("Batch", 0, "Size", "3");
+            m.setCell("Batch", 0, "Permanent", "yes");
+            CompileResult c = compile(m);
+            bool boolBad = false;
+            for (const Diagnostic& g : c.diagnostics)
+                if (g.cell && g.cell->column == "Permanent") boolBad = true;
+            check(boolBad, "a Boolean cell must be true or false");
+        }
+
+        {
+            // An optional column left blank is not a problem.
+            ModelDocument m;
+            m.addRow("Resource");
+            m.setCell("Resource", 0, "Name", "R");
+            m.setCell("Resource", 0, "Capacity", "1");
+            CompileResult c = compile(m);
+            check(!hasErrors(c.diagnostics), "a complete row passes the schema pass");
+        }
+    }
 }

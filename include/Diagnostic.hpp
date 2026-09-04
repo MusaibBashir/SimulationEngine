@@ -11,6 +11,7 @@
 
 #pragma once
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,10 +28,21 @@ struct SourceSpan {
 
 enum class Severity { Error, Warning };
 
+// v11: which cell a diagnostic came from, when it came from one. Additive, so
+// every v10 caller compiles unchanged -- the expression layer keeps filling in
+// only the span, and the compiler wraps cell identity around it. That is the
+// join v10 was built toward: the parser still never learns what a table is.
+struct CellRef {
+    std::string moduleType;
+    std::size_t row{0};        // 0-based POSITION, as a person counts rows
+    std::string column;
+};
+
 struct Diagnostic {
     Severity    severity{Severity::Error};
     SourceSpan  span;
     std::string message;
+    std::optional<CellRef> cell;   // v11: set only when it came from a cell
 };
 
 // True if any diagnostic in the list is an Error (Warnings alone are fine).

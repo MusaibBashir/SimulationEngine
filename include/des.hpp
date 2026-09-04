@@ -48,6 +48,7 @@
 #include "ModuleSchemas.hpp"
 #include "ModelDocument.hpp"
 #include "DocumentFormat.hpp"
+#include "Compiler.hpp"
 #include "TerminationRule.hpp"
 #include "Trace.hpp"
 #include "Node.hpp"
