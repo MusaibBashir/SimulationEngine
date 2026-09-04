@@ -43,6 +43,18 @@ struct Diagnostic {
     SourceSpan  span;
     std::string message;
     std::optional<CellRef> cell;   // v11: set only when it came from a cell
+
+    Diagnostic() = default;
+
+    // A CONSTRUCTOR, not aggregate initialisation, and the reason is the whole
+    // point of adding `cell` this way: fifteen v10 sites write
+    // Diagnostic{severity, span, message}, and under -Wextra an aggregate would
+    // warn at every one of them about the member they do not set. A defaulted
+    // parameter keeps those sites correct AND quiet, which is what "additive"
+    // has to mean if the warning gate is to stay clean.
+    Diagnostic(Severity s, SourceSpan sp, std::string m,
+               std::optional<CellRef> c = std::nullopt)
+        : severity(s), span(sp), message(std::move(m)), cell(std::move(c)) {}
 };
 
 // True if any diagnostic in the list is an Error (Warnings alone are fine).
