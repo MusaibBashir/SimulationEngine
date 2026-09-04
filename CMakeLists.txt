@@ -27,6 +27,7 @@ add_library(des_engine STATIC
     src/Parser.cpp
     src/ModuleSchema.cpp
     src/ModuleSchemas.cpp
+    src/ModelDocument.cpp
     src/RandomStream.cpp
     src/StreamTests.cpp
     src/Distribution.cpp

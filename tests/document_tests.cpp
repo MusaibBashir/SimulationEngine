@@ -80,4 +80,49 @@ void runDocumentTests() {
             }
         }
     }
+
+    section("ModelDocument");
+    {
+        ModelDocument doc;
+        check(doc.rowCount("Process") == 0, "an empty document has no rows");
+
+        doc.addRow("Process");
+        doc.setCell("Process", 0, "Name", "Teller");
+        doc.setCell("Process", 0, "Service", "EXPO(0.8)");
+        check(doc.rowCount("Process") == 1, "addRow adds a row");
+        check(doc.cell("Process", 0, "Name") == "Teller", "cells round-trip");
+        check(doc.cell("Process", 0, "Nope").empty(), "an unset cell reads empty");
+        check(!doc.hasCell("Process", 0, "Nope"), "and reports itself absent");
+
+        doc.addRow("Process");
+        doc.setCell("Process", 1, "Name", "Inspect");
+        check(doc.rowCount("Process") == 2, "a second row");
+
+        // ORDER IS SEMANTIC. moveRow exists because reordering DecideBranch
+        // rows changes which condition wins, and faking it with remove-then-add
+        // would lose the row's other cells.
+        doc.moveRow("Process", 1, 0);
+        check(doc.cell("Process", 0, "Name") == "Inspect", "moveRow reorders");
+        check(doc.cell("Process", 1, "Name") == "Teller", "and keeps the other row");
+        check(doc.cell("Process", 1, "Service") == "EXPO(0.8)",
+              "and every cell of the moved row travels with it");
+
+        doc.removeRow("Process", 0);
+        check(doc.rowCount("Process") == 1, "removeRow removes one");
+        check(doc.cell("Process", 0, "Name") == "Teller", "the survivor shifts down");
+
+        // A document may hold module types nobody declared a schema for.
+        doc.addRow("SomethingFromV13");
+        doc.setCell("SomethingFromV13", 0, "Whatever", "kept");
+        check(doc.rowCount("SomethingFromV13") == 1, "unknown types are storable");
+        check(doc.types().size() == 2, "types() lists every module type present");
+
+        bool threw = false;
+        try { doc.cell("Process", 9, "Name"); } catch (const ModelError&) { threw = true; }
+        check(threw, "an out-of-range row throws rather than reading empty");
+
+        threw = false;
+        try { doc.moveRow("Process", 0, 9); } catch (const ModelError&) { threw = true; }
+        check(threw, "moving past the end throws");
+    }
 }

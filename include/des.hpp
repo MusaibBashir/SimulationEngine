@@ -46,6 +46,7 @@
 #include "Parser.hpp"
 #include "ModuleSchema.hpp"
 #include "ModuleSchemas.hpp"
+#include "ModelDocument.hpp"
 #include "TerminationRule.hpp"
 #include "Trace.hpp"
 #include "Node.hpp"
