@@ -1,0 +1,7 @@
+# Git on Windows normalises line endings, which silently CORRUPTS binary files.
+# The reference manual is a PDF: without this it would be checked out with CRLF
+# substitutions and stop opening. The sizes happen to match today because the
+# file has no bare LF bytes in the wrong place -- that is luck, not a guarantee.
+*.pdf binary
+*.png binary
+*.exe binary
