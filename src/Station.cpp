@@ -60,6 +60,11 @@ void Station::setBalking(std::size_t queueLength, INode* balkTo) {
 
 void Station::setReneging(std::unique_ptr<IDistribution> patience, INode* renegeTo) {
     if (!patience) throw ModelError("process '" + m_name + "': null patience distribution");
+    m_patience = std::make_unique<DistributionExpression>(std::move(patience));
+    m_renegeTo = renegeTo;
+}
+void Station::setReneging(ExpressionPtr patience, INode* renegeTo) {
+    if (!patience) throw ModelError("process '" + m_name + "': null patience expression");
     m_patience = std::move(patience);
     m_renegeTo = renegeTo;
 }
@@ -152,7 +157,9 @@ void Station::joinQueue(NodeContext& ctx, Entity* e) {
     // v7: start the patience timer. See onRenegeTimeout for why nothing is ever
     // cancelled when the entity is served instead.
     if (m_patience) {
-        const SimTime giveUpAt = ctx.now() + m_patience->draw(ctx.rng());
+        EvalContext pctx = ctx.evaluationContext(e);
+        const SimTime giveUpAt =
+            ctx.now() + static_cast<SimTime>(asNumber(m_patience->evaluate(pctx)));
         ctx.scheduleRenegeCheck(giveUpAt, e, this);
     }
 

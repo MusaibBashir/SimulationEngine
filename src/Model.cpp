@@ -201,6 +201,18 @@ Model& Model::balkAt(const std::string& processName, std::size_t queueLength,
 }
 
 Model& Model::renegeAfter(const std::string& processName,
+                          const std::string& patienceText,
+                          const std::string& renegeTo) {
+    INode* target = nullptr;
+    if (!renegeTo.empty()) {
+        target = node(renegeTo);
+        if (!target) throw ModelError("renegeAfter: no block named '" + renegeTo + "'");
+    }
+    nodeAs<Station>(processName).setReneging(expr(patienceText), target);
+    return *this;
+}
+
+Model& Model::renegeAfter(const std::string& processName,
                           std::unique_ptr<IDistribution> patience,
                           const std::string& renegeTo) {
     INode* target = nullptr;
@@ -277,6 +289,11 @@ AssignNode& Model::assignBlock(const std::string& name) {
     AssignNode* raw = owned.get();
     add(std::move(owned));
     return *raw;
+}
+
+Model& Model::assign(const std::string& name) {
+    assignBlock(name);
+    return *this;
 }
 
 Model& Model::assignTo(const std::string& block, const std::string& attributeName,

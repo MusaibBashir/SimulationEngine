@@ -324,8 +324,13 @@ void runDocumentTests() {
                 if (g.cell && g.cell->moduleType == "FromTheFuture" &&
                     g.severity == Severity::Warning) warned = true;
             check(warned, "an unknown module type warns rather than erroring");
-            check(!hasErrors(c.diagnostics),
-                  "and does not by itself make the document invalid");
+            // The document IS invalid -- it has no blocks the engine knows --
+            // but nothing about the unknown type itself is an error.
+            bool errorAboutIt = false;
+            for (const Diagnostic& g : c.diagnostics)
+                if (g.severity == Severity::Error && g.cell &&
+                    g.cell->moduleType == "FromTheFuture") errorAboutIt = true;
+            check(!errorAboutIt, "and nothing about it is reported as an error");
         }
 
         {
@@ -342,13 +347,17 @@ void runDocumentTests() {
         }
 
         {
-            // An optional column left blank is not a problem.
+            // An optional column left blank is not a problem. The document as
+            // a whole is still not a runnable model -- it has no source and no
+            // entry -- so this asserts what it means: the SCHEMA pass is happy.
             ModelDocument m;
             m.addRow("Resource");
             m.setCell("Resource", 0, "Name", "R");
             m.setCell("Resource", 0, "Capacity", "1");
             CompileResult c = compile(m);
-            check(!hasErrors(c.diagnostics), "a complete row passes the schema pass");
+            check(!complainedAbout(c.diagnostics, "Name") &&
+                  !complainedAbout(c.diagnostics, "Capacity"),
+                  "a complete row draws no complaint about its own cells");
         }
     }
 
@@ -549,6 +558,131 @@ void runDocumentTests() {
             for (const Diagnostic& d : problems)
                 if (d.message.find("routing loop") != std::string::npos) loop = true;
             check(loop, "a routing loop is reported as a diagnostic");
+        }
+    }
+
+    section("Compile: building the Model");
+    {
+        ModelDocument d;
+        d.addRow("Variable");
+        d.setCell("Variable", 0, "Name", "Served");
+        d.setCell("Variable", 0, "Initial Value", "0");
+
+        d.addRow("Resource");
+        d.setCell("Resource", 0, "Name", "Teller");
+        d.setCell("Resource", 0, "Capacity", "2");
+
+        d.addRow("Create");
+        d.setCell("Create", 0, "Name", "Arrivals");
+        d.setCell("Create", 0, "Interarrival", "EXPO(1.0)");
+        d.setCell("Create", 0, "Next", "Serve");
+
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Resource", "Teller");
+        d.setCell("Process", 0, "Units", "1");
+        d.setCell("Process", 0, "Discipline", "FIFO");
+        d.setCell("Process", 0, "Service", "EXPO(0.8)");
+        d.setCell("Process", 0, "Next", "Out");
+
+        d.addRow("Dispose");
+        d.setCell("Dispose", 0, "Name", "Out");
+
+        CompileResult r = compile(d);
+        check(!hasErrors(r.diagnostics), "a sound document compiles cleanly");
+        check(r.model != nullptr, "and produces a Model");
+        check(r.structureChecked, "and the structure pass ran");
+
+        if (r.model != nullptr) {
+            check(r.model->node("Serve") != nullptr, "the Process block exists");
+            check(r.model->resourceNamed("Teller") != nullptr, "the Resource exists");
+            check(r.model->variables().has("Served"), "the Variable was declared");
+            check(r.model->station("Serve")->resource().capacity() == 2,
+                  "the Process seizes the SHARED Resource, not a private one");
+        }
+
+        // A document that cannot build says so, and does not claim the
+        // structure was checked.
+        {
+            ModelDocument m;
+            m.addRow("Dispose");
+            m.setCell("Dispose", 0, "Name", "Out");
+            CompileResult c = compile(m);
+            check(c.model == nullptr, "a model with no source does not compile");
+            check(hasErrors(c.diagnostics), "and says why");
+        }
+    }
+
+    section("Compile: child rows keep their file order");
+    {
+        ModelDocument d;
+        d.addRow("Create");
+        d.setCell("Create", 0, "Name", "In");
+        d.setCell("Create", 0, "Interarrival", "1");
+        d.setCell("Create", 0, "Next", "Stamp");
+
+        d.addRow("Assign");
+        d.setCell("Assign", 0, "Name", "Stamp");
+        d.setCell("Assign", 0, "Next", "Sort");
+        d.addRow("AssignField");
+        d.setCell("AssignField", 0, "Assign", "Stamp");
+        d.setCell("AssignField", 0, "Target", "Attribute");
+        d.setCell("AssignField", 0, "Name", "size");
+        d.setCell("AssignField", 0, "Value", "3");
+        d.addRow("AssignField");
+        d.setCell("AssignField", 1, "Assign", "Stamp");
+        d.setCell("AssignField", 1, "Target", "Attribute");
+        d.setCell("AssignField", 1, "Name", "doubled");
+        d.setCell("AssignField", 1, "Value", "size * 2");   // reads the field above
+
+        d.addRow("Decide");
+        d.setCell("Decide", 0, "Name", "Sort");
+        d.setCell("Decide", 0, "Type", "Condition");
+        d.setCell("Decide", 0, "Next", "Small");
+        d.addRow("DecideBranch");
+        d.setCell("DecideBranch", 0, "Decide", "Sort");
+        d.setCell("DecideBranch", 0, "Condition", "doubled > 4");
+        d.setCell("DecideBranch", 0, "To", "Big");
+
+        d.addRow("Dispose"); d.setCell("Dispose", 0, "Name", "Big");
+        d.addRow("Dispose"); d.setCell("Dispose", 1, "Name", "Small");
+
+        CompileResult r = compile(d);
+        check(!hasErrors(r.diagnostics), "the document compiles");
+        check(r.model != nullptr, "and builds");
+        if (r.model != nullptr) {
+            check(r.model->nodeAs<AssignNode>("Stamp").rules().size() == 2,
+                  "both Assign fields landed, and no placeholder with them");
+            check(r.model->nodeAs<AssignNode>("Stamp").rules()[0].name == "size",
+                  "IN FILE ORDER: the second field reads what the first wrote");
+            check(r.model->nodeAs<DecideNode>("Sort").branches().size() == 1,
+                  "the Decide got its branch");
+        }
+    }
+
+    section("Compile: a compiled document runs");
+    {
+        ModelDocument d;
+        d.addRow("Create");
+        d.setCell("Create", 0, "Name", "In");
+        d.setCell("Create", 0, "Interarrival", "EXPO(1.0)");
+        d.setCell("Create", 0, "Next", "Serve");
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Service", "EXPO(0.5)");
+        d.setCell("Process", 0, "Next", "Out");
+        d.addRow("Dispose");
+        d.setCell("Dispose", 0, "Name", "Out");
+
+        SimulationSystem sim(1234u);
+        std::vector<Diagnostic> problems;
+        const bool built = compileInto(d, sim.model(), problems);
+        check(built, "compileInto builds into a SimulationSystem's own Model");
+        check(!hasErrors(problems), "with no diagnostics");
+        if (built) {
+            sim.stopAt(100.0).initialise();
+            sim.run();
+            check(sim.results().exited > 0, "and the compiled model actually runs");
         }
     }
 }
