@@ -44,6 +44,8 @@
 #include "Expression.hpp"
 #include "Functions.hpp"
 #include "Parser.hpp"
+#include "ModuleSchema.hpp"
+#include "ModuleSchemas.hpp"
 #include "TerminationRule.hpp"
 #include "Trace.hpp"
 #include "Node.hpp"

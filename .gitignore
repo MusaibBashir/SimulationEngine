@@ -80,3 +80,6 @@ docs/*
 /out.txt
 /err.txt
 /asan_out.txt
+
+# Python bytecode from tools/
+__pycache__/
