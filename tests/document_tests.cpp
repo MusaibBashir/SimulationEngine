@@ -10,6 +10,28 @@ using des_test::check;
 using des_test::checkClose;
 using des_test::section;
 
+namespace {
+
+// Asking "did anything complain about this cell?" as a VALUE, because the
+// obvious spelling -- looping over the diagnostics and checking inside the
+// loop -- runs zero times when the list is empty and therefore cannot fail.
+// v10 shipped a test with exactly that shape and it was counted as evidence.
+bool complainedAbout(const std::vector<Diagnostic>& ds, const std::string& column) {
+    for (const Diagnostic& d : ds)
+        if (d.cell && d.cell->column == column) return true;
+    return false;
+}
+
+bool complainedAbout(const std::vector<Diagnostic>& ds, const std::string& column,
+                     const std::string& needle) {
+    for (const Diagnostic& d : ds)
+        if (d.cell && d.cell->column == column &&
+            d.message.find(needle) != std::string::npos) return true;
+    return false;
+}
+
+}  // namespace
+
 void runDocumentTests() {
     section("Module schemas");
     {
@@ -327,6 +349,96 @@ void runDocumentTests() {
             m.setCell("Resource", 0, "Capacity", "1");
             CompileResult c = compile(m);
             check(!hasErrors(c.diagnostics), "a complete row passes the schema pass");
+        }
+    }
+
+    section("Compile: the reference pass");
+    {
+        ModelDocument d;
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Service", "1");
+        d.setCell("Process", 0, "Resource", "Nurse");     // never declared
+
+        CompileResult r = compile(d);
+        check(complainedAbout(r.diagnostics, "Resource", "Nurse"),
+              "an unresolved reference is reported AT THE CELL that holds it");
+
+        {
+            ModelDocument m;
+            m.addRow("Resource");
+            m.setCell("Resource", 0, "Name", "Nurse");
+            m.setCell("Resource", 0, "Capacity", "1");
+            m.addRow("Process");
+            m.setCell("Process", 0, "Name", "Serve");
+            m.setCell("Process", 0, "Service", "1");
+            m.setCell("Process", 0, "Resource", "Nurse");
+            CompileResult c = compile(m);
+            check(!complainedAbout(c.diagnostics, "Resource"),
+                  "a resolvable reference produces no diagnostic");
+        }
+
+        {
+            ModelDocument m;
+            m.addRow("Process");
+            m.setCell("Process", 0, "Name", "A");
+            m.setCell("Process", 0, "Service", "1");
+            m.setCell("Process", 0, "Next", "B");
+            m.addRow("Dispose");
+            m.setCell("Dispose", 0, "Name", "B");
+            CompileResult c = compile(m);
+            check(!complainedAbout(c.diagnostics, "Next"),
+                  "an exit pointing at any flowchart block resolves");
+        }
+
+        {
+            ModelDocument m;
+            m.addRow("Process");
+            m.setCell("Process", 0, "Name", "A");
+            m.setCell("Process", 0, "Service", "1");
+            m.setCell("Process", 0, "Next", "");
+            CompileResult c = compile(m);
+            check(!complainedAbout(c.diagnostics, "Next"),
+                  "an empty exit is not an unresolved reference");
+        }
+
+        {
+            ModelDocument m;
+            m.addRow("DecideBranch");
+            m.setCell("DecideBranch", 0, "Decide", "Ghost");
+            CompileResult c = compile(m);
+            check(complainedAbout(c.diagnostics, "Decide"),
+                  "a child row naming a missing parent is reported");
+        }
+
+        {
+            // An exit may not point at a DATA module: a Resource is not a place
+            // an entity can go.
+            ModelDocument m;
+            m.addRow("Resource");
+            m.setCell("Resource", 0, "Name", "Nurse");
+            m.setCell("Resource", 0, "Capacity", "1");
+            m.addRow("Process");
+            m.setCell("Process", 0, "Name", "A");
+            m.setCell("Process", 0, "Service", "1");
+            m.setCell("Process", 0, "Next", "Nurse");
+            CompileResult c = compile(m);
+            check(complainedAbout(c.diagnostics, "Next"),
+                  "an exit pointing at a data module is refused");
+        }
+
+        {
+            // Both passes report: a bad enum AND a broken reference at once.
+            ModelDocument m;
+            m.addRow("Process");
+            m.setCell("Process", 0, "Name", "A");
+            m.setCell("Process", 0, "Service", "1");
+            m.setCell("Process", 0, "Discipline", "SIDEWAYS");
+            m.setCell("Process", 0, "Resource", "Ghost");
+            CompileResult c = compile(m);
+            check(complainedAbout(c.diagnostics, "Discipline") &&
+                  complainedAbout(c.diagnostics, "Resource"),
+                  "the schema pass and the reference pass both report, in one compile");
         }
     }
 }

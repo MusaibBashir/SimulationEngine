@@ -105,6 +105,63 @@ void checkSchema(const ModelDocument& doc, std::vector<Diagnostic>& out) {
     }
 }
 
+// --- pass 2: references ----------------------------------------------------
+// "Block" is the pseudo-type meaning "any flowchart block", which is what an
+// exit column points at. Everything else names one real module type.
+bool isDeclared(const ModelDocument& doc, const std::string& targetType,
+                const std::string& name) {
+    const ModuleRegistry& reg = ModuleRegistry::instance();
+
+    auto rowNames = [&doc](const std::string& type, std::vector<std::string>& into) {
+        const std::size_t rows = doc.rowCount(type);
+        for (std::size_t r = 0; r < rows; ++r) {
+            const std::string n = doc.cell(type, r, "Name");
+            if (!n.empty()) into.push_back(n);
+        }
+    };
+
+    std::vector<std::string> names;
+    if (targetType == "Block") {
+        for (const ModuleSchema& s : reg.all())
+            if (s.kind == ModuleKind::Flowchart) rowNames(s.typeName, names);
+    } else {
+        rowNames(targetType, names);
+    }
+    for (const std::string& n : names)
+        if (n == name) return true;
+    return false;
+}
+
+void checkReferences(const ModelDocument& doc, std::vector<Diagnostic>& out) {
+    const ModuleRegistry& reg = ModuleRegistry::instance();
+
+    for (const std::string& type : doc.types()) {
+        const ModuleSchema* schema = reg.find(type);
+        if (schema == nullptr) continue;   // already warned about in pass 1
+
+        const std::size_t rows = doc.rowCount(type);
+        for (std::size_t r = 0; r < rows; ++r) {
+            for (const Column& c : schema->columns) {
+                if (c.type != ColumnType::Reference) continue;
+                const std::string value = doc.cell(type, r, c.id);
+
+                // An EMPTY exit is not an unresolved reference: the engine
+                // already spells "leaves the system" as a null next.
+                if (value.empty()) continue;
+
+                if (!isDeclared(doc, c.referencedType, value))
+                    out.push_back(Diagnostic{
+                        Severity::Error, SourceSpan{},
+                        "no " + (c.referencedType == "Block"
+                                     ? std::string("block")
+                                     : c.referencedType) +
+                            " named '" + value + "'",
+                        CellRef{type, r, c.id}});
+            }
+        }
+    }
+}
+
 }  // namespace
 
 bool compileInto(const ModelDocument& doc, Model& model,
@@ -112,7 +169,10 @@ bool compileInto(const ModelDocument& doc, Model& model,
     (void)model;
     if (structureChecked != nullptr) *structureChecked = false;
 
+    // Both passes run even when the first found errors: the point of the
+    // layer is to report every bad cell, not the first.
     checkSchema(doc, diagnostics);
+    checkReferences(doc, diagnostics);
     if (hasErrors(diagnostics)) return false;
 
     // Passes 2 to 4 arrive in the tasks that follow.
