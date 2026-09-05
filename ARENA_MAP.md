@@ -33,6 +33,40 @@ A translation table, for when the coursework is written in Arena's vocabulary.
 | **Warm-up period** | `warmUpFor(t)` | |
 | **Number of replications** | `Experiment::replications(n)` | |
 
+
+## The spreadsheets (v11)
+
+Arena's modules appear as spreadsheets; so do these. Every module type publishes
+its columns at runtime through `ModuleRegistry`, and a `.des` file is those
+spreadsheets written down — see **A model as a file** in `README.md`.
+
+| Arena data module | Here | Columns |
+|---|---|---|
+| **Variable** | `[Variable]` | Name, Initial Value |
+| **Entity** | `[Entity]` | Name |
+| **Resource** | `[Resource]` | Name, Capacity |
+| **Expression** | `[Expression]` | Name, Value |
+| **Queue** | `[Queue]` | Name, Process, Discipline — **read-only** |
+
+The flowchart modules each have a table too — `[Create]`, `[Process]`,
+`[Delay]`, `[Assign]`, `[Decide]`, `[Batch]`, `[Separate]`, `[Record]`,
+`[Dispose]` — with the same fields the C++ calls above take, plus the exits.
+
+**These spreadsheets are flat.** Arena puts a Decide's branches and an Assign's
+fields in a grid *inside* the module's dialog. Here they are their own tables,
+`[DecideBranch]` and `[AssignField]`, each with a column naming its parent. The
+reason is that a front end reads the schema at runtime: a module added in a
+later version has to render in an unmodified front end, which only holds if
+there is one shape to render. A nested grid would be a second shape.
+
+The cost is that **row order is semantic** — a Decide takes the first branch
+that matches, and an Assign runs its fields in order, so a later field reads
+what an earlier one wrote.
+
+**Routing is a column, not a connection.** Arena draws a line from one module to
+the next. A terminal front end cannot, so `Next`, `Duplicate`, `Balk To` and
+`Renege To` are cells. A blank exit means the entity leaves the system.
+
 ## Report line → what to call
 
 | Arena report line | Here |
@@ -63,7 +97,7 @@ A translation table, for when the coursework is written in Arena's vocabulary.
 `Empirical` and `Deterministic` have **no Arena spelling** and stay
 programmatic-only. Variable arrays (1-D and 2-D) are not implemented.
 
-## Three differences worth knowing
+## Differences worth knowing
 
 **A variable that does not exist.** Arena creates a Variable the moment you
 assign to one. Here `assignVariable` to an undeclared name throws, because
@@ -84,3 +118,15 @@ behaviour, use a permanent batch and no Separate — and know that is what you d
 unless you say `allowOverload()`, and then stamps the report with a warning. For
 a terminating run that is legitimate; for a steady-state study the numbers are
 meaningless, and the difference is not visible in the output otherwise.
+
+**Queue is read-only here.** Arena's Queue data module lets you set a queue's
+discipline and whether it is shared. This engine has no queue object apart from
+its Process: the discipline is a constructor argument to `Station` and the queue
+is a member. An editable Queue module would hold the same fact twice, so the
+schema marks it `readOnly` and a front end renders it as a view. The discipline
+is set on the Process row.
+
+**A model file carries no run length.** Arena's Run Setup is part of the model.
+There is no Run or Replicate module here yet, so `des run model.des [until]`
+takes the horizon on the command line and prints the default it used rather than
+inventing one silently.

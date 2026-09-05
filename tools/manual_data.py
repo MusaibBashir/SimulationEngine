@@ -7,7 +7,7 @@ the call-flow chapters. Prose is passed to reportlab as markup, so use &amp;,
 &lt; and &gt; rather than the bare characters.
 """
 
-VERSION_LINE = "v10 — the expression layer · 543 checks · 86 types · 578 public members"
+VERSION_LINE = "v11 — the document layer · 779 checks · 95 types"
 
 FRONT_MATTER = (
     "A discrete-event simulation engine in the spirit of Arena's Basic Process "
@@ -34,6 +34,17 @@ TYPE_DOC = {
     "SystemState": "A snapshot of the whole system: number in system, number queued, server status. Summed across stations rather than owned by any one of them.",
     "Statistics": "The accumulators behind every reported average. Holds counts, totals and two time integrals, and knows the difference between a tally average and a time-weighted one.",
     "ModelError": "Thrown when a model is wired wrongly — a programmer's mistake, where stopping is the right response. Contrast Diagnostic, which is how a user's mistake is reported.",
+
+    # -- the document layer (v11)
+    "ColumnType": "What kind of value a column holds: Text, Identifier, Integer, Real, Boolean, Enum, Expression or Reference. The schema pass checks a cell against this, and a front end picks an editor from it.",
+    "ModuleKind": "Whether a module is Data (a Resource, a Variable), Flowchart (a block entities pass through), or Child (a row belonging to another row, such as one branch of a Decide).",
+    "Column": "One column of a module's spreadsheet: its name, type, whether it is required, its default, the values an Enum allows, and for a Reference the module type it must name. 'Block' is the pseudo-target meaning any flowchart block, which is what an exit column points at.",
+    "ModuleSchema": "Everything a front end needs to render one module type: its name, its kind, its columns, whether it is read-only, and for a child table the column naming its parent. Queue is the one read-only schema, because this engine has no queue object apart from its Process.",
+    "ModuleRegistry": "The published set of schemas, a singleton built once at startup. A front end asks it what module types exist and what columns each has, so a module added in a later version renders without the front end changing.",
+    "ModelDocument": "Rows of text cells, grouped by module type and addressed by POSITION. Unlike a Model it may be invalid, half-finished and contradictory, which is what makes it editable. It also keeps the source lines it was read from, so writing it back reproduces the file byte for byte.",
+    "ReadResult": "What reading a .des file produces: the document, the diagnostics found while reading it, and the format version the file declared. Reading never throws — a malformed line becomes a diagnostic and reading continues.",
+    "CellRef": "Which cell a diagnostic came from: module type, row position, column name. It composes with v10's SourceSpan rather than replacing it, so the character offset the parser measured survives inside the cell the compiler names.",
+    "CompileResult": "What compiling a document produces: a Model when it succeeded, the diagnostics either way, and whether the structural pass actually ran. That last flag matters because the structure pass cannot run with broken references, and reporting a model as checked when it was not is the failure this project keeps refusing.",
 
     # -- queues and resources
     "EntityQueue": "A waiting line: a deque of entities plus a pluggable rule that chooses which one leaves next. Tracks its own maximum observed length.",
@@ -160,6 +171,18 @@ COMMON_DOC = {
 
 # ----------------------------------------------- per-type member prose --
 MEMBER_DOC = {
+    "ModelDocument::rows": "Every row of a module type, in file order. Order is semantic: a Decide takes the first branch that matches, an Assign runs its fields in order.",
+    "ModelDocument::removeRow": "Deletes a row by position. Every later row shifts down, which is why nothing holds a row index across an edit.",
+    "ModelDocument::moveRow": "Moves a row to another position. It exists because row order is part of the model, not a display preference.",
+    "ModuleRegistry::instance": "The one registry. Built on first use from buildSchemas().",
+    "ModuleRegistry::find": "The schema for a module type, or null. Null is not an error: an unknown type is preserved and warned about, never dropped.",
+    "ModuleRegistry::all": "Every schema, in the order a front end should list them.",
+    "ModuleSchema::column": "The named column, or null.",
+    "ModelDocument::addRow": "Appends an empty row to a module type's table and returns its position.",
+    "ModelDocument::setCell": "Writes one cell as text, marking the row edited so the writer re-emits it in canonical form.",
+    "ModelDocument::cell": "Reads one cell as text. An absent cell is the empty string, which the build pass then reads as the schema's default.",
+    "ModelDocument::rowCount": "How many rows a module type has.",
+    "ModelDocument::types": "Every module type present, in the order they first appeared. The build pass follows this, so it is the order blocks are created in.",
     "Clock::advanceTo": "Moves time forward. Refuses to go backwards — the invariant the class exists to protect.",
     "Clock::now": "The current simulation time.",
     "Entity::attribute": "Reads a numeric attribute. Returns 0.0 when absent, which is why callers that care check hasAttribute() first.",
@@ -387,7 +410,7 @@ CHAPTERS = [
    ("text", "Inside the run loop the integrals for the interval that just ended are closed "
             "<b>before</b> the clock moves, and the clock moves <b>before</b> any state "
             "changes. Swap any two of those and every time-weighted average goes quietly "
-            "wrong, with no error anywhere. Chapter 10 shows the order explicitly."),
+            "wrong, with no error anywhere. Chapter 11 shows the order explicitly."),
   ]),
 
  (2, "Foundations",
@@ -451,7 +474,35 @@ CHAPTERS = [
               "VariableStore"]),
   ]),
 
- (6, "The Flowchart",
+ (6, "The Document Layer",
+  "How a model stopped being a program and became a set of spreadsheets.",
+  [
+   ("text", "v10 made a model's fields text; v11 makes the model itself data. Every module "
+            "type publishes its columns through ModuleRegistry, a ModelDocument holds rows "
+            "of those cells as text, the .des reader and writer round-trip them byte for "
+            "byte, and compile() turns a document into a Model or into diagnostics that "
+            "point at individual cells. The engine never learns what a document is."),
+   ("h3", "Why a document is not a Model"),
+   ("text", "A Model must always be valid: a route names a block that exists, a Process "
+            "names a resource that was declared. A document being edited is none of those "
+            "things - it is half-finished and contradictory most of the time it is open. "
+            "Two types, therefore, and one direction of travel between them."),
+   ("h3", "Rows are addressed by position"),
+   ("text", "Never by a stable id, because the two disagree the moment a row moves - and "
+            "row order is semantic here. A Decide takes the first branch that matches and "
+            "an Assign runs its fields in order, so reordering two rows changes what the "
+            "model does."),
+   ("h3", "Four passes, all of which run"),
+   ("text", "Schema, then references, then expressions, then structure. Every pass runs "
+            "even when an earlier one found errors, because the point of the layer is to "
+            "report every bad cell rather than the first. The structure pass is the one "
+            "exception: it cannot run with broken references, so it is skipped and "
+            "structureChecked says so."),
+   ("types", ["ColumnType", "ModuleKind", "Column", "ModuleSchema", "ModuleRegistry",
+              "ModelDocument", "ReadResult", "CellRef", "CompileResult"]),
+  ]),
+
+ (7, "The Flowchart",
   "The blocks entities move through, and the narrow window each one gets on the engine.",
   [
    ("text", "A model is a graph of blocks. Each does one job to an entity and decides where "
@@ -463,7 +514,7 @@ CHAPTERS = [
               "DisposeNode", "Station", "CreateNode"]),
   ]),
 
- (7, "The Model",
+ (8, "The Model",
   "What is simulated, kept separate from the machinery that simulates it.",
   [
    ("text", "The engine takes a Model and runs it, and knows nothing about tellers or "
@@ -479,7 +530,7 @@ CHAPTERS = [
    ("types", ["Model"]),
   ]),
 
- (8, "Running a Simulation",
+ (9, "Running a Simulation",
   "The engine, the stopping rules, and the trace that makes a run checkable by hand.",
   [
    ("text", "SimulationSystem owns the clock, the event list, the entities, the random "
@@ -491,7 +542,7 @@ CHAPTERS = [
               "TraceLevel", "Trace"]),
   ]),
 
- (9, "Experiments",
+ (10, "Experiments",
   "Why one run is one sample, and what to do about it.",
   [
    ("text", "A single run is one observation of a random variable. Quoting it to four "
@@ -504,7 +555,7 @@ CHAPTERS = [
    ("types", ["ReplicationResult", "Summary", "Experiment"]),
   ]),
 
- (10, "Call Flows",
+ (11, "Call Flows",
   "What calls what, in order, when a model is built and run.",
   [
    ("text", "These traces follow examples/16_expressions.cpp, which exercises every part of "
@@ -585,9 +636,21 @@ CHAPTERS = [
     "A by-chance Decide takes ONE draw and walks it against the cumulative probabilities. "
     "Drawing once per branch would burn several random numbers and would not give the "
     "branch probabilities you asked for."),
+   ("diagram", "8 - des check model.des",
+    [("readDocumentFile(path)", "lines become rows of text cells", "never throws"),
+     ("compileInto(doc, model, out)", "four passes, then the build", ""),
+     ("checkSchema", "every cell against its column type", "unknown columns WARN"),
+     ("checkReferences", "every name against what was declared", "reports AT the cell"),
+     ("checkExpressionCells", "v10 parses, v11 adds the CellRef", "span survives inside"),
+     ("buildBlocks", "Variables, Resources, blocks, children, exits", "exits last"),
+     ("Model::checkStructure()", "what validate() throws, as a list", "skipped if refs broke")],
+    "Blocks are created before their exits are wired for the same reason wireSources() "
+    "exists: the order a model is described in must not matter, and route() refuses a "
+    "target that does not exist yet. Every pass runs, so one command reports every bad "
+    "cell rather than the first."),
   ]),
 
- (11, "Free Functions",
+ (12, "Free Functions",
   "The factories and helpers that are not members of anything.",
   [
    ("h3", "Distribution factories, from Build.hpp"),

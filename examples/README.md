@@ -336,6 +336,62 @@ done nothing. Anything that is *your* mistake must be checked in every build;
 
 ---
 
+## Model files (v11)
+
+A model does not have to be a program. `examples/models/` holds four written by
+hand:
+
+| File | What it shows |
+|---|---|
+| `teller.des` | The smallest model the format can express: Create, Process, Dispose |
+| `decide.des` | An Assign stamping an attribute, then a Decide by condition |
+| `variables.des` | A Variable written by an Assign, and a service time that reads an attribute |
+| `shared.des` | Two Processes seizing one Resource |
+
+```sh
+./build/des check examples/models/teller.des
+./build/des run   examples/models/teller.des 480
+```
+
+**The format.** One record per module row, headed by its module type in square
+brackets, one `Key = Value` per line. `#` starts a comment. Blank lines and
+comments survive a read-and-write unchanged — a front end that silently
+reformatted your file would be worse than one that could not save at all.
+
+```
+version = 1
+
+[Process]
+Name       = Serve
+Capacity   = 1
+Discipline = FIFO
+Service    = EXPO(0.8)
+Next       = Out
+```
+
+`check` reports **every** bad cell in one pass, naming the module, the row and
+the column, and the offset inside the cell when the expression parser found one:
+
+```
+teller.des: Process row 1, Service (col 9): error: expected ')'
+```
+
+**The traps:**
+
+- **Row order is semantic.** A Decide takes the first `[DecideBranch]` that
+  matches; an Assign runs its `[AssignField]` rows in order, so a later field
+  reads what an earlier one wrote. Moving two records past each other in a text
+  editor changes what the model does.
+- **An empty exit means "leaves the system"**, not an error. `Next =` with
+  nothing after it is a departure.
+- **Unknown columns and unknown module types are kept and warned about**, never
+  dropped. A file written by a later version opens here with everything intact.
+- **Routing is a column.** `Next`, `Duplicate`, `Balk To` and `Renege To` are
+  cells, because a terminal cannot draw a connection.
+- **Queue is read-only.** Set the discipline on the Process row.
+- **A model file carries no run length.** `des run` takes it as an argument and
+  prints the default it used.
+
 ## Mistakes to avoid
 
 **Reading one block's utilisation as its resource's.** With a shared pool, each
