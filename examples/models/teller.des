@@ -1,0 +1,17 @@
+version = 1
+
+# A single teller. The smallest model the format can express.
+[Create]
+Name         = Arrivals
+Interarrival = EXPO(1.0)
+Next         = Serve
+
+[Process]
+Name       = Serve
+Capacity   = 1
+Discipline = FIFO
+Service    = EXPO(0.8)
+Next       = Out
+
+[Dispose]
+Name = Out

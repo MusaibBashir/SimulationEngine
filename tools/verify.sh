@@ -49,11 +49,19 @@ CLANGXX="${WINLIBS_BIN:+$WINLIBS_BIN/clang++.exe}"
 # that matters here is a front-end one. Link errors are still caught -- the
 # CMake/MSVC build does that, and the ASan leg links the whole suite.
 WARN_FLAGS="-std=c++17 -Wall -Wextra -Wpedantic -fsyntax-only -Iinclude -Itests"
-# TWO link units, because both have a main(): the demo program and the test
+# THREE link units, because each has a main(): the demo, the CLI and the test
 # suite. Compiling only the first would leave tests/ unchecked by GCC and
 # Clang -- and from v10 on, tests/ is where most of the new code lives.
+#
+# The test list is spelled out rather than globbed, and that cost something:
+# tests/document_tests.cpp was added in v11 and NOT added here, so the whole
+# of v11's test code went through MSVC and nothing else while this script
+# went on printing VERIFY CLEAN. It is a glob now. The reason CMakeLists.txt
+# does not glob -- a stale cache silently dropping a file -- does not apply
+# to a shell script that re-expands on every run.
 SOURCES="main.cpp src/*.cpp"
-TEST_SOURCES="tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp src/*.cpp"
+CLI_SOURCES="cli/main.cpp src/*.cpp"
+TEST_SOURCES="tests/*.cpp src/*.cpp"
 FAILED=0
 
 banner() { printf '\n=== %s ===\n' "$1"; }
@@ -97,12 +105,14 @@ warnings() {
     if [ -n "$GXX" ] && check_version "$GXX" gcc; then
         banner "GCC $("$GXX" -dumpversion) -Wall -Wextra -Wpedantic"
         compile_unit "$GXX" GCC engine "$SOURCES"
+        compile_unit "$GXX" GCC cli    "$CLI_SOURCES"
         compile_unit "$GXX" GCC tests  "$TEST_SOURCES"
     fi
 
     if [ -n "$CLANGXX" ] && check_version "$CLANGXX" clang; then
         banner "Clang $("$CLANGXX" -dumpversion) -Wall -Wextra -Wpedantic"
         compile_unit "$CLANGXX" Clang engine "$SOURCES"
+        compile_unit "$CLANGXX" Clang cli    "$CLI_SOURCES"
         compile_unit "$CLANGXX" Clang tests  "$TEST_SOURCES"
     fi
 }

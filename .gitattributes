@@ -5,3 +5,12 @@
 *.pdf binary
 *.png binary
 *.exe binary
+
+# Shell scripts must stay LF: bash refuses a script whose lines end in CR.
+*.sh text eol=lf
+
+# Model files must stay LF for a harder reason. The round-trip guarantee is
+# BYTE-identical, and the reader drops CR while the writer emits LF -- so a
+# file checked out with CRLF would come back different the moment a front end
+# saved it, and the property this format is built on would be false on Windows.
+*.des text eol=lf

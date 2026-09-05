@@ -49,17 +49,46 @@ BASELINE_DIR="tests/baseline"
 # exclusion every time, because a gate that silently skips a case is how a
 # gate stops being a gate.
 EXCLUDED="12_shared_resources"
-# The Visual Studio generator puts per-config binaries in a subdirectory, and
-# examples in one of their own. Not build/example_* -- that is the Makefile
-# layout this project does not use here.
-EXAMPLE_DIR="build/examples/Debug"
+# ---------------------------------------------------------------------------
+# WHERE THE BINARIES ARE, and why this is not a constant.
+# ---------------------------------------------------------------------------
+# This was hardcoded to build/examples/Debug, which is where the Visual Studio
+# generator puts them. The build directory was later reconfigured with MinGW
+# Makefiles, which puts them in build/examples -- and the Visual Studio output
+# from before the switch was still sitting there. So the gate went on running
+# binaries built weeks earlier, printed BASELINE CLEAN, and proved nothing
+# about the code that had changed since.
+#
+# A gate pointed at a stale artefact is the same failure as a test that cannot
+# fail: it reports a success it never measured. Hence both of the following --
+# ask the generator where it puts things, and refuse to run binaries older than
+# the sources they were built from.
+EXAMPLE_DIR="build/examples"
+if grep -qi 'CMAKE_GENERATOR:INTERNAL=Visual Studio' build/CMakeCache.txt 2>/dev/null; then
+    EXAMPLE_DIR="build/examples/Debug"
+fi
 
 usage() { printf 'usage: %s [capture|check]\n' "$0"; exit 2; }
+
+# Refuse to gate a build that predates the code. The newest engine or example
+# source against the newest binary: anything older cannot contain the change
+# being gated.
+assert_fresh() {
+    local newest_src newest_exe
+    newest_src="$(ls -t include/*.hpp src/*.cpp examples/*.cpp 2>/dev/null | head -1)"
+    newest_exe="$(ls -t "$EXAMPLE_DIR"/*.exe 2>/dev/null | head -1)"
+    [ -n "$newest_src" ] && [ -n "$newest_exe" ] || return 0
+    if [ "$newest_src" -nt "$newest_exe" ]; then
+        printf 'STALE BUILD: %s is newer than %s\n' "$newest_src" "$newest_exe" >&2
+        printf 'Rebuild before gating:  cmake --build build\n' >&2
+        exit 1
+    fi
+}
 
 examples() {
     if [ ! -d "$EXAMPLE_DIR" ]; then
         printf 'No examples at %s -- build first:\n' "$EXAMPLE_DIR" >&2
-        printf '  cmake --build build --config Debug\n' >&2
+        printf '  cmake --build build\n' >&2
         exit 1
     fi
     ls "$EXAMPLE_DIR"/*.exe 2>/dev/null
@@ -81,6 +110,7 @@ is_excluded() {
 }
 
 capture() {
+    assert_fresh
     mkdir -p "$BASELINE_DIR"
     local n=0 skipped=0
     for exe in $(examples); do
@@ -97,6 +127,7 @@ capture() {
 }
 
 check() {
+    assert_fresh
     if [ ! -d "$BASELINE_DIR" ]; then
         printf 'No baselines. Run: bash tools/baseline.sh capture\n' >&2
         exit 1
@@ -129,6 +160,15 @@ check() {
 
     printf '\n%d examples checked, %d differ, %d without a baseline, %d excluded\n' \
            "$checked" "$failed" "$missing" "$skipped"
+    # A gate that measured nothing must never print CLEAN. The first
+    # version of assert_fresh proved the point by accident: it called
+    # exit inside $(examples), which killed only the subshell, so the
+    # loop below ran over an empty list and this reported CLEAN over
+    # zero examples.
+    if [ "$checked" -eq 0 ]; then
+        printf 'BASELINE FAILED: nothing was checked\n'
+        return 1
+    fi
     [ "$failed" -eq 0 ] || { printf 'BASELINE FAILED\n'; return 1; }
     printf 'BASELINE CLEAN\n'
 }

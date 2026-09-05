@@ -76,7 +76,13 @@ target_compile_options(des_engine PRIVATE ${DES_WARNINGS})
 # ----------------------------------------------------------------------------
 # Programs
 # ----------------------------------------------------------------------------
-add_executable(des main.cpp)
+add_executable(des_demo main.cpp)
+target_link_libraries(des_demo PRIVATE des_engine)
+target_compile_options(des_demo PRIVATE ${DES_WARNINGS})
+
+# The CLI takes the name `des`: `des check model.des` is the product and the
+# five-scenario program above is a demo.
+add_executable(des cli/main.cpp)
 target_link_libraries(des PRIVATE des_engine)
 target_compile_options(des PRIVATE ${DES_WARNINGS})
 
@@ -102,7 +108,8 @@ add_test(NAME unit_tests COMMAND des_tests)
 
 # ---------------------------------------------------------------------------
 #   cmake -S . -B build && cmake --build build
-#   ./build/des              the demonstration scenarios
+#   ./build/des_demo         the demonstration scenarios
+#   ./build/des check m.des  compile a model file and report
 #   ./build/des_tests        the unit suite  (or: cd build && ctest)
 #   ./build/examples/01_hello_mm1
 #

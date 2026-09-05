@@ -35,7 +35,8 @@ sim.stopAt(480.0).execute().report();
 
 ```
 cmake -S . -B build && cmake --build build
-./build/des          # five demonstration scenarios
+./build/des_demo     # five demonstration scenarios
+./build/des          # the model-file tool: des check / des run
 ./build/des_tests    # the unit suite
 cd build && ctest
 ```
