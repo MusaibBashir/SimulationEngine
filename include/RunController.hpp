@@ -81,4 +81,60 @@ struct RunSnapshot {
 // change it.
 RunSnapshot snapshotOf(const SimulationSystem& sim);
 
+class RunController {
+public:
+    // Declared HERE and not taken from Experiment: Experiment is refactored
+    // onto this class, so naming Experiment::Builder in this header would make
+    // the two include each other.
+    using ModelBuilder = std::function<void(SimulationSystem&)>;
+
+    RunController(RunSetup setup, ModelBuilder build);
+    ~RunController();
+
+    RunController(const RunController&) = delete;
+    RunController& operator=(const RunController&) = delete;
+
+    RunState           state()   const { return m_state; }
+    const std::string& failure() const { return m_failure; }
+
+    // Do at most maxEvents events, rolling on to the next replication when one
+    // ends. Returns how many it actually did, which is 0 when paused, finished,
+    // cancelled or failed -- a front end that polls past the end is normal, not
+    // an error.
+    std::size_t advance(std::size_t maxEvents);
+
+    void pause();
+    void resume();
+    void cancel();
+
+    RunProgress progress() const;
+    RunSnapshot snapshot() const;
+
+    const std::vector<ReplicationResult>&   results() const { return m_results; }
+    const std::vector<std::vector<double>>& series()  const { return m_series; }
+
+    // Drives to the end. Loops on STATE rather than on advance()'s return
+    // value: a replication that produced no events at all would return 0 and
+    // strand a caller that trusted the count, with the study unfinished.
+    void runToCompletion();
+
+private:
+    bool startRun();     // false when there is nothing left to start
+    void finishRun();
+
+    RunSetup     m_setup;
+    ModelBuilder m_build;
+    RunState     m_state{RunState::Ready};
+    std::string  m_failure;
+
+    int       m_replication{0};     // 0-based index of the one in progress
+    bool      m_mirrorHalf{false};  // antithetic: the mirrored half of a pair
+    long long m_events{0};
+
+    std::unique_ptr<SimulationSystem> m_sim;
+    ReplicationResult                 m_firstHalf;   // antithetic pairing
+    std::vector<ReplicationResult>    m_results;
+    std::vector<std::vector<double>>  m_series;
+};
+
 }  // namespace des

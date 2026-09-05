@@ -152,4 +152,66 @@ void runRuntimeTests() {
                    "a snapshot agrees with the report at the same instant");
         check(s.exited == r.exited, "on the count too");
     }
+    section("The controller drives one replication");
+    {
+        auto build = [](SimulationSystem& sim) {
+            sim.model().arrivals("EXPO(1.0)")
+                       .station("Serve", 1, FIFO, "EXPO(0.8)")
+                       .entryAt("Serve");
+            sim.stopAt(200.0);
+        };
+
+        RunSetup setup;                       // one replication, seed 12345
+        RunController c(setup, build);
+        check(c.state() == RunState::Ready, "a controller starts Ready");
+        check(c.progress().replication == 0, "and on no replication yet");
+
+        const std::size_t first = c.advance(10);
+        check(first == 10, "advance(10) does ten events");
+        check(c.state() == RunState::Running, "and it is now Running");
+        check(c.progress().replication == 1, "on replication 1");
+        check(c.snapshot().now > 0.0, "with a clock that has moved");
+
+        c.pause();
+        check(c.state() == RunState::Paused, "pause() pauses");
+        check(c.advance(1000) == 0, "and a paused controller does NO events");
+        const SimTime held = c.progress().now;
+        check(c.advance(1000) == 0, "however many times it is asked");
+        check(c.progress().now == held, "with the clock held exactly where it was");
+
+        c.resume();
+        check(c.state() == RunState::Running, "resume() resumes");
+        c.runToCompletion();
+        check(c.state() == RunState::Finished, "and it finishes");
+        check(c.results().size() == 1, "with one replication result");
+        check(c.results()[0].served > 0, "that served somebody");
+
+        check(c.advance(10) == 0, "advance() after the end is 0, not an error");
+    }
+
+    section("Cancel is terminal, and a failure keeps its reason");
+    {
+        auto build = [](SimulationSystem& sim) {
+            sim.model().arrivals("EXPO(1.0)")
+                       .station("Serve", 1, FIFO, "EXPO(0.8)")
+                       .entryAt("Serve");
+            sim.stopAt(1000.0);
+        };
+        RunController c(RunSetup{}, build);
+        c.advance(50);
+        c.cancel();
+        check(c.state() == RunState::Cancelled, "cancel() cancels");
+        check(c.advance(50) == 0, "and nothing runs afterwards");
+        c.resume();
+        check(c.state() == RunState::Cancelled, "resume() cannot undo it");
+        check(c.snapshot().now > 0.0, "the run so far is still readable");
+
+        RunController bad(RunSetup{}, [](SimulationSystem& sim) {
+            sim.model().arrivals("EXPO(1.0)").entryAt("NoSuchBlock");
+            sim.stopAt(10.0);
+        });
+        bad.runToCompletion();
+        check(bad.state() == RunState::Failed, "a model that will not build Fails");
+        check(!bad.failure().empty(), "and says why");
+    }
 }
