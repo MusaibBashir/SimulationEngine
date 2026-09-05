@@ -1,5 +1,9 @@
 #include "RunController.hpp"
 
+#include <iomanip>
+#include "Compiler.hpp"
+#include "ModelDocument.hpp"
+#include <algorithm>
 #include "Build.hpp"
 #include "Model.hpp"
 #include "ModelError.hpp"
@@ -123,6 +127,10 @@ void RunController::finishRun() {
     res.utilisation         = entry.stats().utilisation(measured, entry.resource().capacity());
     res.measuredTime        = measured;
     if (m_setup.observeInterval > 0.0) m_series.push_back(m_sim->observations());
+    // HERE, while the system is still alive: report() is a view of a
+    // SimulationSystem, and the system does not survive this function.
+    m_lastReport.str(std::string());
+    m_sim->report(m_lastReport);
     m_sim.reset();
 
     if (m_setup.antithetic && !m_mirrorHalf) {
@@ -192,7 +200,14 @@ RunProgress RunController::progress() const {
     // 1-based, and it counts REPLICATIONS rather than runs: with antithetic
     // pairing one replication is two runs, and `replications(n)` means n pairs
     // to the caller who asked for it.
-    p.replication = (m_state == RunState::Ready) ? 0 : m_replication + 1;
+    //
+    // CLAMPED, because m_replication has already been incremented past the
+    // last one by the time the study finishes. Unclamped it printed
+    // 'replication 4 of 3' -- found by running des run by hand, not by a
+    // test, which is why there is now a test.
+    p.replication = (m_state == RunState::Ready)
+                        ? 0
+                        : std::min(m_replication + 1, m_setup.replications);
     if (m_sim) {
         p.now = m_sim->now();
         if (const ITerminationRule* rule = m_sim->termination())
@@ -203,6 +218,55 @@ RunProgress RunController::progress() const {
 
 RunSnapshot RunController::snapshot() const {
     return m_sim ? snapshotOf(*m_sim) : RunSnapshot{};
+}
+
+std::unique_ptr<RunController>
+RunController::fromDocument(const ModelDocument& doc, std::vector<Diagnostic>& out,
+                            std::optional<SimTime> lengthOverride) {
+    RunSetup setup = readRunSetup(doc, out);
+    if (lengthOverride) setup.length = lengthOverride;
+
+    // Compile once, HERE, so a bad cell is reported before a single event runs
+    // rather than from inside the first replication, where a caller has no
+    // diagnostics list to receive it.
+    {
+        Model probe;
+        if (!compileInto(doc, probe, out)) return nullptr;
+    }
+
+    ModelDocument copy = doc;
+    auto build = [copy](SimulationSystem& sim) {
+        std::vector<Diagnostic> ignored;
+        // Unreachable in practice: the same document compiled a moment ago.
+        // A ModelError rather than a silent return because reaching it would
+        // mean compileInto is not a function of its input, which is a
+        // programmer error and not a user's.
+        if (!compileInto(copy, sim.model(), ignored))
+            throw ModelError("the document stopped compiling between replications");
+    };
+    return std::unique_ptr<RunController>(new RunController(setup, std::move(build)));
+}
+
+void RunController::report(std::ostream& os) const {
+    if (m_results.size() == 1) {
+        os << m_lastReport.str();
+        return;
+    }
+    os << "\n=== " << m_results.size() << " replications ===\n";
+    os << std::fixed << std::setprecision(4);
+    const auto line = [&](const char* label, double ReplicationResult::* field) {
+        std::vector<double> xs;
+        for (const ReplicationResult& r : m_results) xs.push_back(r.*field);
+        os << "  " << std::setw(24) << std::left << label << std::right
+           << std::setw(12) << Summary::mean(xs)
+           << "  +/- " << std::setw(10) << Summary::halfWidth95(xs) << "\n";
+    };
+    line("average wait",   &ReplicationResult::averageWait);
+    line("time in system", &ReplicationResult::averageTimeInSystem);
+    line("Lq",             &ReplicationResult::Lq);
+    line("L",              &ReplicationResult::L);
+    line("utilisation",    &ReplicationResult::utilisation);
+    os << "===========================================================\n";
 }
 
 }  // namespace des

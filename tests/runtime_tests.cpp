@@ -235,6 +235,9 @@ void runRuntimeTests() {
         check(c.results()[0].seed != c.results()[1].seed,
               "each with its own seed, or the sample has no variance");
 
+        check(c.progress().replication <= c.progress().replications,
+              "and never reports a replication number past the last one");
+
         // The decisive claim of this task: a study driven in pieces gives the
         // SAME numbers as Experiment's own loop, which is the loop this
         // replaces.
@@ -314,5 +317,57 @@ void runRuntimeTests() {
                 if (g.cell && g.cell->column == "Length") badCell = true;
             check(badCell, "a non-numeric Length is reported AT the cell");
         }
+    }
+    section("A controller built straight from a document");
+    {
+        ModelDocument d;
+        d.addRow("Run");
+        d.setCell("Run", 0, "Name", "Setup");
+        d.setCell("Run", 0, "Length", "120");
+        d.setCell("Run", 0, "Replications", "3");
+        d.addRow("Create");
+        d.setCell("Create", 0, "Name", "In");
+        d.setCell("Create", 0, "Interarrival", "EXPO(1.0)");
+        d.setCell("Create", 0, "Next", "Serve");
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Service", "EXPO(0.6)");
+        d.setCell("Process", 0, "Next", "Out");
+        d.addRow("Dispose");
+        d.setCell("Dispose", 0, "Name", "Out");
+
+        std::vector<Diagnostic> problems;
+        std::unique_ptr<RunController> c = RunController::fromDocument(d, problems);
+        check(c != nullptr, "a valid document produces a controller");
+        check(!hasErrors(problems), "with no diagnostics");
+        if (c) {
+            c->runToCompletion();
+            check(c->state() == RunState::Finished, "and it runs to the end");
+            check(c->results().size() == 3,
+                  "THREE replications, because the document said so");
+            check(c->results()[0].seed != c->results()[2].seed,
+                  "each with its own seed");
+        }
+
+        // The override the CLI needs: a length on the command line beats the
+        // one in the file, and the file is not edited to say so.
+        std::vector<Diagnostic> ignored;
+        std::unique_ptr<RunController> shorter =
+            RunController::fromDocument(d, ignored, SimTime{40.0});
+        check(shorter != nullptr, "an override still builds");
+        if (shorter) {
+            shorter->runToCompletion();
+            check(shorter->results()[0].measuredTime < 60.0,
+                  "and the override WINS over the file's Length");
+        }
+
+        ModelDocument bad;
+        bad.addRow("Process");
+        bad.setCell("Process", 0, "Name", "Lonely");
+        bad.setCell("Process", 0, "Service", "EXPO(1");
+        std::vector<Diagnostic> out;
+        check(RunController::fromDocument(bad, out) == nullptr,
+              "a document that will not compile produces NO controller");
+        check(hasErrors(out), "and says why, at the cell");
     }
 }

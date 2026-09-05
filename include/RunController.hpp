@@ -18,6 +18,8 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <ostream>
+#include <sstream>
 #include <string>
 #include <vector>
 #include "Common.hpp"
@@ -88,6 +90,21 @@ public:
     // the two include each other.
     using ModelBuilder = std::function<void(SimulationSystem&)>;
 
+    // Reads the [Run] module, then compiles once so every bad cell is
+    // reported before anything runs. Returns null when it did not compile.
+    //
+    // It KEEPS A COPY of the document, because each replication needs a
+    // fresh SimulationSystem with a fresh Model built into it: a Model can be
+    // neither reused across replications nor copied. The builder it installs
+    // is 'compile this document into that system', and it runs once per
+    // replication. A document is rows of strings; copying one is cheap.
+    //
+    // lengthOverride is what `des run model.des 900` needs: the command line
+    // beats the file, without the file being edited to say so.
+    static std::unique_ptr<RunController>
+    fromDocument(const ModelDocument& doc, std::vector<Diagnostic>& out,
+                 std::optional<SimTime> lengthOverride = std::nullopt);
+
     RunController(RunSetup setup, ModelBuilder build);
     ~RunController();
 
@@ -109,6 +126,11 @@ public:
 
     RunProgress progress() const;
     RunSnapshot snapshot() const;
+
+    // One replication prints the run's own report; several print the
+    // confidence intervals, because quoting one number out of thirty runs
+    // is the thing v4 exists to stop.
+    void report(std::ostream& os) const;
 
     const std::vector<ReplicationResult>&   results() const { return m_results; }
     const std::vector<std::vector<double>>& series()  const { return m_series; }
@@ -135,6 +157,9 @@ private:
     ReplicationResult                 m_firstHalf;   // antithetic pairing
     std::vector<ReplicationResult>    m_results;
     std::vector<std::vector<double>>  m_series;
+    // Taken while the system is alive: report() is a VIEW of a
+    // SimulationSystem, and the system does not survive its replication.
+    std::ostringstream                m_lastReport;
 };
 
 }  // namespace des
