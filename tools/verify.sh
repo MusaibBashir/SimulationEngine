@@ -145,6 +145,10 @@ asan() {
     fi
 }
 
+# It runs the binary FROM THE REPOSITORY ROOT, not from /tmp as it used to:
+# v11's decisive test reads the shipped .des files by relative path, and the
+# normal invocation of this suite is ./build/des_tests.exe from the root, so
+# /tmp was the odd one out. Its artefacts are ones .gitignore already names.
 # The only place on this machine where UBSan actually exists. MinGW ships no
 # libubsan and MSVC has none at all, but WSL's Linux GCC has both sanitisers --
 # so the check the README has claimed since v2 can finally be run for real.
@@ -161,7 +165,7 @@ sanitisers() {
     out="$(wsl.exe -d Ubuntu -e bash -lc "cd '$(wslpath -a "$ROOT" 2>/dev/null || echo .)' && \
         g++ -std=c++17 -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer \
             -Iinclude -Itests tests/*.cpp src/*.cpp -o /tmp/des_san 2>&1 | head -20 && \
-        cd /tmp && ./des_san 2>&1 | grep -E 'runtime error|ERROR: |SUMMARY|checks passed|FAIL'" \
+        /tmp/des_san 2>&1 | grep -E 'runtime error|ERROR: |SUMMARY|checks passed|FAIL'" \
         2>&1 | tr -d '\000')"
     printf '%s\n' "$out"
     if printf '%s' "$out" | grep -qE 'runtime error|ERROR: |FAIL'; then

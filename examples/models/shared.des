@@ -1,0 +1,28 @@
+version = 1
+
+# Two activities competing for one pool of clerks. A Resource is declared once
+# and named by every Process that seizes it.
+[Resource]
+Name     = Clerk
+Capacity = 2
+
+[Create]
+Name         = Arrivals
+Interarrival = EXPO(1.0)
+Max Arrivals = 200
+Next         = Intake
+
+[Process]
+Name     = Intake
+Resource = Clerk
+Service  = EXPO(0.5)
+Next     = Review
+
+[Process]
+Name     = Review
+Resource = Clerk
+Service  = EXPO(0.7)
+Next     = Out
+
+[Dispose]
+Name = Out

@@ -83,3 +83,5 @@ docs/*
 
 # Python bytecode from tools/
 __pycache__/
+/doc_trace.md
+/cpp_trace.md

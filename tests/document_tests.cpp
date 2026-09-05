@@ -1,6 +1,11 @@
 // ============================================================================
 // tests/document_tests.cpp  --  v11: the document layer
 // ============================================================================
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <iterator>
+#include <sstream>
 #include <string>
 #include "harness.hpp"
 #include "des.hpp"
@@ -28,6 +33,73 @@ bool complainedAbout(const std::vector<Diagnostic>& ds, const std::string& colum
         if (d.cell && d.cell->column == column &&
             d.message.find(needle) != std::string::npos) return true;
     return false;
+}
+
+// The .des files live beside the examples, and the suite is not always run
+// from the repository root -- the sanitiser leg runs the binary from /tmp so
+// its trace files land nowhere important. CMake and tools/verify.sh both pass
+// the real directory in; the fallback is for a hand-rolled g++ from the root.
+#ifndef DES_MODEL_DIR
+#define DES_MODEL_DIR "examples/models"
+#endif
+
+std::string modelPath(const std::string& file) {
+    return std::string(DES_MODEL_DIR) + "/" + file;
+}
+
+using Builder = std::function<void(Model&)>;
+
+std::string fileContents(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+}
+
+// Build, run, and hand back the trace. The SimulationSystem is destroyed
+// BEFORE the file is read: the trace stream is only flushed when it closes,
+// and reading a half-written file would compare two truncations.
+std::string traceOf(const std::string& out, const Builder& build) {
+    {
+        SimulationSystem sim(20260904u);
+        build(sim.model());
+        sim.enableTrace(out, TraceLevel::Events);
+        sim.stopAt(200.0).initialise();
+        sim.run();
+    }
+    return fileContents(out);
+}
+
+Builder compiledFrom(const char* file) {
+    return [file](Model& m) {
+        const std::string path = modelPath(file);
+        ReadResult read = readDocumentFile(path);
+        check(!hasErrors(read.diagnostics), std::string("reads: ") + file);
+        std::vector<Diagnostic> problems;
+        check(compileInto(read.document, m, problems),
+              std::string("compiles: ") + file);
+        check(!hasErrors(problems), std::string("without diagnostics: ") + file);
+    };
+}
+
+// A failure here is a defect in the compiler, so say WHERE rather than only
+// that the two differ. Printing the first differing line is the difference
+// between an afternoon and five minutes.
+void reportFirstDifference(const char* file, const std::string& a, const std::string& b) {
+    std::istringstream sa(a), sb(b);
+    std::string la, lb;
+    for (int line = 1; ; ++line) {
+        la.clear();
+        lb.clear();
+        const bool gotA = static_cast<bool>(std::getline(sa, la));
+        const bool gotB = static_cast<bool>(std::getline(sb, lb));
+        if (!gotA && !gotB) return;
+        if (la != lb) {
+            std::cout << "  " << file << " first differs at line " << line << "\n"
+                      << "    from file: " << la << "\n"
+                      << "    from code: " << lb << "\n";
+            return;
+        }
+    }
 }
 
 }  // namespace
@@ -684,5 +756,81 @@ void runDocumentTests() {
             sim.run();
             check(sim.results().exited > 0, "and the compiled model actually runs");
         }
+    }
+
+    section("A document runs identically to the same model in C++");
+    {
+        // The claim this whole layer rests on, tested the way v10 tested its
+        // own: same seed, same model expressed two ways, traces compared event
+        // for event. A near-miss average would not be evidence.
+        //
+        // Whole-file comparison is right here, unlike v10's: both runs are
+        // built through the same Model API, so the model description in the
+        // trace header is identical too. A difference there is a real one.
+        auto sameTrace = [](const char* file, const Builder& inCode) {
+            const std::string fromDoc = traceOf("doc_trace.md", compiledFrom(file));
+            const std::string fromCpp = traceOf("cpp_trace.md", inCode);
+            check(fromDoc.size() > 500, std::string(file) + ": the trace is substantial");
+            const bool same = (fromDoc == fromCpp);
+            check(same, std::string(file) +
+                  ": compiled from a FILE, runs identically to the same model in C++");
+            if (!same) reportFirstDifference(file, fromDoc, fromCpp);
+        };
+
+        sameTrace("teller.des", [](Model& m) {
+            m.source("Arrivals", "Entity", "EXPO(1.0)")
+             .station("Serve", 1, FIFO, "EXPO(0.8)")
+             .dispose("Out")
+             .route("Arrivals", "Serve")
+             .route("Serve", "Out")
+             .entryAt("Serve");
+        });
+
+        // Blocks in the order the document creates them -- grouped by module
+        // type, then by row. That is not an accident of the build pass: a
+        // spreadsheet has one table per type, so there is no other order for it
+        // to use, and a hand-written model has to match it to compare.
+        sameTrace("decide.des", [](Model& m) {
+            m.source("Arrivals", "Entity", "EXPO(1.0)", 200)
+             .assign("Stamp")
+             .decideNWayByCondition("Sort")
+             .station("Big", 1, FIFO, "EXPO(1.5)")
+             .station("Small", 1, FIFO, "EXPO(0.4)")
+             .dispose("Out")
+             .assignTo("Stamp", "size", "UNIF(0, 10)")
+             .branchWhen("Sort", "size > 7", "Big")
+             .route("Arrivals", "Stamp")
+             .route("Stamp", "Sort")
+             .route("Sort", "Small")
+             .route("Big", "Out")
+             .route("Small", "Out")
+             .entryAt("Stamp");
+        });
+
+        sameTrace("variables.des", [](Model& m) {
+            m.variable("served", 0.0)
+             .source("Arrivals", "Entity", "EXPO(1.0)", 150)
+             .assign("Stamp")
+             .station("Serve", 1, FIFO, "work")
+             .dispose("Out")
+             .assignTo("Stamp", "work", "UNIF(0.2, 1.2)")
+             .assignVariable("Stamp", "served", "served + 1")
+             .route("Arrivals", "Stamp")
+             .route("Stamp", "Serve")
+             .route("Serve", "Out")
+             .entryAt("Stamp");
+        });
+
+        sameTrace("shared.des", [](Model& m) {
+            m.resource("Clerk", 2)
+             .source("Arrivals", "Entity", "EXPO(1.0)", 200)
+             .stationUsing("Intake", "Clerk", FIFO, "EXPO(0.5)", 1)
+             .stationUsing("Review", "Clerk", FIFO, "EXPO(0.7)", 1)
+             .dispose("Out")
+             .route("Arrivals", "Intake")
+             .route("Intake", "Review")
+             .route("Review", "Out")
+             .entryAt("Intake");
+        });
     }
 }

@@ -90,6 +90,12 @@ add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_test
 target_link_libraries(des_tests PRIVATE des_engine)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
 
+# The decisive v11 test reads the shipped .des files. The suite is not always
+# run from the repository root -- the sanitiser leg runs it from /tmp -- so the
+# directory is compiled in rather than assumed.
+target_compile_definitions(des_tests PRIVATE
+    DES_MODEL_DIR=""\"${CMAKE_CURRENT_SOURCE_DIR}/examples/models\""")
+
 # One executable per example, all into build/examples/.
 # GLOB is used HERE and nowhere else: examples are standalone demos, so a newly
 # added one silently missing is a nuisance rather than a phantom link error.
