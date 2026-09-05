@@ -115,4 +115,41 @@ void runRuntimeTests() {
         check(!blind->progress(sim).has_value(),
               "and refuses when NONE of them do");
     }
+    section("A snapshot of a run in progress");
+    {
+        SimulationSystem sim(99u);
+        sim.model().variable("Served", 0.0)
+                   .resource("Clerk", 2)
+                   .arrivals("EXPO(1.0)")
+                   .stationUsing("Desk", "Clerk", FIFO, "EXPO(1.4)")
+                   .entryAt("Desk");
+        sim.stopAt(100.0).initialise();
+        for (int i = 0; i < 400 && sim.canStep(); ++i) sim.stepOnce();
+
+        const RunSnapshot s = snapshotOf(sim);
+        check(s.now > 0.0, "the snapshot carries the clock");
+        check(s.arrived > 0, "and what has arrived");
+        check(s.blocks.size() == 1, "one block");
+        check(s.blocks[0].name == "Desk", "named");
+        check(s.resources.size() == 1 && s.resources[0].name == "Clerk",
+              "and the shared resource, which Model could not enumerate before");
+        check(s.resources[0].capacity == 2.0, "with its capacity");
+        check(s.variables.size() == 1 && s.variables[0].name == "Served",
+              "and every declared variable");
+
+        // Taking a snapshot must not perturb the run: it reads, it does not
+        // draw, and a caller that watches must get the same numbers as one
+        // that does not.
+        const double before = s.now;
+        for (int i = 0; i < 5; ++i) (void)snapshotOf(sim);
+        check(snapshotOf(sim).now == before, "and taking one does not advance anything");
+
+        // A snapshot and the report are two views of one run. If they can
+        // disagree, one of them is inventing a number, and a watcher would see
+        // figures that never appear in the result.
+        const RunResults r = sim.results();
+        checkClose(s.blocks[0].utilisation, r.station("Desk").utilisation, 1e-12,
+                   "a snapshot agrees with the report at the same instant");
+        check(s.exited == r.exited, "on the count too");
+    }
 }

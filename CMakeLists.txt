@@ -30,6 +30,7 @@ add_library(des_engine STATIC
     src/ModelDocument.cpp
     src/DocumentFormat.cpp
     src/Compiler.cpp
+    src/RunController.cpp
     src/RandomStream.cpp
     src/StreamTests.cpp
     src/Distribution.cpp
