@@ -109,6 +109,11 @@ private:
 
     bool m_initialised{false};
 
+    // v12: an EndSimulation event has fired. run() used to `return` out of
+    // its own loop for this, which a caller-owned loop cannot see. Reset by
+    // initialise(), like every other piece of run state.
+    bool m_stopped{false};
+
     // --- v4: warm-up removal and observation series ---
     SimTime m_warmUp{0.0};              // 0 means no warm-up period
     SimTime m_warmUpEnded{0.0};         // when measurement actually began
@@ -214,6 +219,7 @@ public:
     const SystemState& state() const { return m_state; }
     const FutureEventList& fel() const { return m_fel; }
     const RandomStream& randomStream() const { return m_rng; }
+    const ITerminationRule* termination() const { return m_termination.get(); }
     std::size_t liveEntityCount() const { return m_entities.size(); }
 
     // --- running ---
@@ -222,6 +228,12 @@ public:
                        Entity* e = nullptr, INode* node = nullptr);
     void initialise();
     void run();
+
+    // v12: one event, so a caller can own the loop and therefore pause,
+    // cancel and watch between events. run() is `while (stepOnce()) {}` --
+    // the same loop, with the caller holding the handle.
+    bool canStep() const;
+    bool stepOnce();
     // v12: the regression harness compares report TEXT, so it needs one as a
     // string. Redirecting std::cout would also work and is worse -- a global
     // side effect, inside a harness whose entire value is that its result can
