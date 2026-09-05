@@ -1,0 +1,25 @@
+
+*** STABILITY NOT VERIFIED for: Serve
+*** Their offered load depends on an expression whose mean cannot be
+*** computed before the run, so the check could not be applied. That is
+*** NOT the same as a load of zero.
+=== simulation report =====================================
+seed                     : 12345
+termination              : AnyOf[TimeLimit(480)]
+total simulated time     : 157.7410
+warm-up discarded        : 0.0000
+measured period          : 157.7410
+entities arrived         : 150
+entities exited          : 150
+average total wait       : 0.5968
+average time in system   : 1.3098
+max total wait           : 2.9314
+time-avg in queue (Lq)   : 0.5675
+time-avg in system (L)   : 1.2455
+still waiting at stop    : 0
+live entity objects      : 0
+
+  station        cap   served    avg wait   time-avg Q    util   maxQ
+  -----------------------------------------------------------------
+  Serve           1      150      0.5968       0.5675  0.6780      4
+===========================================================

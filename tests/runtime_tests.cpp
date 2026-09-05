@@ -370,4 +370,33 @@ void runRuntimeTests() {
               "a document that will not compile produces NO controller");
         check(hasErrors(out), "and says why, at the cell");
     }
+    section("The regression harness");
+    {
+        const std::string dir = "tests/regression";
+        RegressionReport a = runRegression(dir, false, false);
+        check(a.cases > 0, "the manifest names at least one model");
+        check(a.failures == 0, "and every model matches its expectation");
+        check(a.missing == 0, "with no expectation missing");
+        check(a.ok(), "so the harness is clean");
+
+        RegressionReport b = runRegression(dir, false, false);
+        check(a.failures == b.failures && a.cases == b.cases,
+              "running it twice gives the same verdict");
+
+        // A gate that measured nothing must never report success. baseline.sh
+        // shipped without this and reported BASELINE CLEAN over zero examples.
+        RegressionReport empty = runRegression("tests/regression_empty", false, false);
+        check(empty.cases == 0, "the empty fixture names no models");
+        check(!empty.ok(), "and an empty manifest is a FAILURE, not a pass");
+
+        RegressionReport missing = runRegression("tests/regression_nowhere", false, false);
+        check(!missing.ok(), "a directory with no manifest is a failure too");
+
+        // --capture must refuse to overwrite. Re-capturing after a change is
+        // how a gate silently stops being a gate.
+        RegressionReport recapture = runRegression(dir, true, false);
+        check(recapture.refused == recapture.cases,
+              "capture refuses every expectation that already exists");
+        check(recapture.captured == 0, "and writes none of them");
+    }
 }

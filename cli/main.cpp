@@ -1,7 +1,7 @@
 // ============================================================================
 // cli/main.cpp  --  the `des` command
 // ============================================================================
-// Two verbs for now; `regress` joins them next:
+// Three verbs, deliberately:
 //
 //     des check   model.des          compile and report; non-zero on error
 //     des run     model.des [until]  compile and run; print the report
@@ -57,12 +57,39 @@ int usage() {
     return 2;
 }
 
+int regress(int argc, char** argv) {
+    std::string dir = "tests/regression";
+    bool capture = false, force = false;
+    for (int i = 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--capture")    capture = true;
+        else if (arg == "--force") force = true;
+        else                       dir = arg;
+    }
+    const RegressionReport r = runRegression(dir, capture, force);
+    for (const RegressionOutcome& o : r.outcomes)
+        std::cout << (o.matched ? "ok      " : "DIFFERS ")
+                  << o.model << "  " << o.detail << "\n";
+    std::cout << "\n" << r.cases << " models, " << r.failures << " differ, "
+              << r.missing << " without an expectation";
+    if (r.refused > 0) std::cout << ", " << r.refused << " capture(s) refused";
+    std::cout << "\n";
+    if (capture) {
+        std::cout << r.captured << " captured\n";
+        return r.refused > 0 ? 1 : 0;
+    }
+    // A gate that measured nothing has not passed; it has not run.
+    std::cout << (r.ok() ? "REGRESSION CLEAN\n" : "REGRESSION FAILED\n");
+    return r.ok() ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     if (argc < 2) return usage();
     const std::string verb = argv[1];
 
+    if (verb == "regress") return regress(argc, argv);
     if (verb != "check" && verb != "run") return usage();
     if (verb == "check" && argc != 3) return usage();
     if (verb == "run" && (argc < 3 || argc > 4)) return usage();

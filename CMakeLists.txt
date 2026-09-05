@@ -32,6 +32,7 @@ add_library(des_engine STATIC
     src/Compiler.cpp
     src/RunSetup.cpp
     src/RunController.cpp
+    src/Regression.cpp
     src/RandomStream.cpp
     src/StreamTests.cpp
     src/Distribution.cpp

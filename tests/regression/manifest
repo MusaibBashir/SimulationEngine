@@ -1,0 +1,7 @@
+# One model per line. Every one must carry a [Run] module: an expectation whose
+# meaning depends on a horizon stored somewhere else stops being an expectation
+# the moment that horizon changes.
+examples/models/teller.des
+examples/models/decide.des
+examples/models/variables.des
+examples/models/shared.des

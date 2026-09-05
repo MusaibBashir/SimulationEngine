@@ -1,0 +1,21 @@
+=== simulation report =====================================
+seed                     : 12345
+termination              : AnyOf[TimeLimit(480)]
+total simulated time     : 188.4048
+warm-up discarded        : 0.0000
+measured period          : 188.4048
+entities arrived         : 200
+entities exited          : 200
+average total wait       : 0.3249
+average time in system   : 1.0619
+max total wait           : 5.2994
+time-avg in queue (Lq)   : 0.3449
+time-avg in system (L)   : 1.1273
+still waiting at stop    : 0
+live entity objects      : 0
+
+  station        cap   served    avg wait   time-avg Q    util   maxQ
+  -----------------------------------------------------------------
+  Big             1       70      0.7922       0.2943  0.5288      3
+  Small           1      130      0.0733       0.0506  0.2536      2
+===========================================================
