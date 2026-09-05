@@ -52,6 +52,17 @@ The flowchart modules each have a table too — `[Create]`, `[Process]`,
 `[Delay]`, `[Assign]`, `[Decide]`, `[Batch]`, `[Separate]`, `[Record]`,
 `[Dispose]` — with the same fields the C++ calls above take, plus the exits.
 
+**Run Setup** is a module here too, as of v12:
+
+| Arena | Here | Columns |
+|---|---|---|
+| **Run Setup** → Replication Parameters | `[Run]` | Name, Length, Warm-up, Replications, Base Seed, Stop When Drained, Max Entities, Separate Streams, Antithetic |
+
+At most one row, as Arena has one Run Setup. A `[Run]` naming no stopping
+condition at all is a **warning** rather than an error: a Create with
+`Max Arrivals` set is finite, its event list empties, and the run ends on its
+own.
+
 **These spreadsheets are flat.** Arena puts a Decide's branches and an Assign's
 fields in a grid *inside* the module's dialog. Here they are their own tables,
 `[DecideBranch]` and `[AssignField]`, each with a column naming its parent. The
@@ -126,7 +137,15 @@ is a member. An editable Queue module would hold the same fact twice, so the
 schema marks it `readOnly` and a front end renders it as a view. The discipline
 is set on the Process row.
 
-**A model file carries no run length.** Arena's Run Setup is part of the model.
-There is no Run or Replicate module here yet, so `des run model.des [until]`
-takes the horizon on the command line and prints the default it used rather than
-inventing one silently.
+**No Base Time Units.** Arena's Run Setup asks whether a duration is in minutes
+or hours and converts. This engine's clock is dimensionless: every duration is
+in the same unit as every other, whatever you decide that unit is. There is
+nothing to convert, and a units field would imply a conversion that does not
+happen.
+
+**A run is something you drive.** Arena runs a model and shows you an animation.
+Here `RunController` hands the loop to the caller — `advance(budget)`,
+`progress()`, `snapshot()`, `pause()`, `cancel()` — and a stopping rule reports
+how far through it is, or reports **nothing** when it cannot tell.
+`whenDrained()` is the honest nothing: whether a system will next be empty is
+not knowable in advance.

@@ -63,6 +63,12 @@ SOURCES="main.cpp src/*.cpp"
 CLI_SOURCES="cli/main.cpp src/*.cpp"
 TEST_SOURCES="tests/*.cpp src/*.cpp"
 FAILED=0
+# How many legs actually RAN. Without this the script prints VERIFY CLEAN when
+# no compiler is found at all: warnings() finds nothing to do, FAILED stays 0,
+# and a machine with no toolchain reports the same result as a clean one. Same
+# hole baseline.sh had, in the other gate. A gate that measured nothing has not
+# passed; it has not run.
+RAN=0
 
 banner() { printf '\n=== %s ===\n' "$1"; }
 
@@ -93,6 +99,7 @@ compile_unit() {
             printf '%s (%s): WARNINGS\n' "$label" "$unit"; FAILED=1
         else
             printf '%s (%s): clean\n' "$label" "$unit"
+            RAN=$((RAN + 1))
         fi
     else
         head -30 "$out"
@@ -142,6 +149,7 @@ asan() {
         printf 'ASan: FAILED\n'; FAILED=1
     else
         printf 'ASan: clean\n'
+        RAN=$((RAN + 1))
     fi
 }
 
@@ -172,6 +180,7 @@ sanitisers() {
         printf 'Sanitisers: FAILED\n'; FAILED=1
     elif printf '%s' "$out" | grep -q 'checks passed'; then
         printf 'Sanitisers: clean (ASan + UBSan)\n'
+        RAN=$((RAN + 1))
     else
         printf 'Sanitisers: INCONCLUSIVE -- no result line\n'; FAILED=1
     fi
@@ -186,5 +195,9 @@ case "${1:-all}" in
 esac
 
 banner "RESULT"
+if [ "$RAN" -eq 0 ]; then
+    printf 'VERIFY FAILED: nothing was checked\n'
+    exit 1
+fi
 if [ "$FAILED" -eq 0 ]; then printf 'VERIFY CLEAN\n'; exit 0; fi
 printf 'VERIFY FAILED\n'; exit 1

@@ -5,6 +5,79 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [12.0.0] — 2026-09-06 — "The run becomes something you can drive"
+
+A run is now something a caller owns: step it, watch it, pause it, cancel it,
+and drive many models through it and diff the results. Narrative in
+`V12_READLOG.md`.
+
+### Added
+
+- **`SimulationSystem::canStep()` and `stepOnce()`** — one event at a time.
+  `run()` is now `while (stepOnce()) {}`, the same loop with the caller holding
+  the handle.
+- **`RunController`** — the replication loop and a state machine:
+  `advance(budget)`, `pause()`, `resume()`, `cancel()`, `runToCompletion()`.
+  `fromDocument()` builds one straight from a `ModelDocument`.
+- **`RunProgress`** — replication, clock, events processed, and a
+  `std::optional<double>` fraction that is **nothing** when no rule can tell.
+- **`ITerminationRule::progress()`** — defaulted to `nullopt`, overridden by
+  `TimeLimit`, `EntityLimit` and `AnyOf`. `DrainedRule` deliberately does not
+  override it.
+- **`RunSnapshot`** — clock, counts, per-block queue and utilisation,
+  per-resource busy, per-variable value. Built on demand; nothing is added to
+  the inner loop.
+- **A `[Run]` data module** — Arena's Run Setup: Length, Warm-up, Replications,
+  Base Seed, Stop When Drained, Max Entities, Separate Streams, Antithetic. A
+  model file now carries its own run length, closing the v11 open item.
+- **`RunSetup` and `readRunSetup()`** — the `[Run]` row as a struct. A free
+  function, so v11's `compileInto` signature is untouched.
+- **`des regress`** — a manifest of models, run and diffed byte-identically.
+  `--capture` refuses to overwrite without `--force`.
+- **`SimulationSystem::report(std::ostream&)`** and
+  `reportArenaStyle(std::ostream&)`, so a report can be compared as text
+  without redirecting `std::cout`.
+- **`Model::resourceCount()` / `resourceAt()`**, and
+  **`ModelDocument::cellOrDefault()`** promoted from the compiler's private
+  helper.
+- **`tests/regression/`** — four model files with stored expectations.
+
+### Changed
+
+- **`Experiment::run()` is a wrapper over `RunController`.** One implementation
+  of the replication loop, two callers — the move v11 made with `validate()`
+  and `checkStructure()`. Every v4 replication and confidence-interval check
+  passes unchanged.
+- `des run` drives `advance()` rather than `run()`, reads `[Run]` when present,
+  and a command-line length overrides the file's.
+- The order comment in the run loop **names the pair that is load-bearing**.
+  It claimed that swapping any two of integrals/clock/handler breaks every time
+  average; measured, moving the integrals after the handler changes 11 of 15
+  examples and swapping the integrals with the clock changes nothing.
+- `.gitattributes` pins `*.expected` and the regression manifests to LF, for
+  the reason `*.des` is pinned: they are compared byte for byte.
+
+### Fixed
+
+- **The regression harness could never capture an expectation.** `readFile`
+  used `ifstream::good()` to mean "the file opened"; on the GCC this project
+  builds with, that reports true for a file that does not exist. Both readers
+  use `is_open()`.
+- **`tools/verify.sh` could print `VERIFY CLEAN` having compiled nothing.**
+  With no compiler found it had nothing to do and no way to say so -- the same
+  hole `baseline.sh` had. It counts the legs that ran and refuses to pass over
+  zero.
+- **`des run` printed "replication 4 of 3"** on a three-replication model:
+  `progress()` reported the replication index unclamped after the study ended.
+
+### Compatibility
+
+Nothing existing breaks. `run()` behaves exactly as before, all 779 v11 checks
+pass unchanged, every gated example traces byte-identically, and
+`Experiment`'s numbers are unchanged to 1e-12.
+
+---
+
 ## [11.0.0] — 2026-09-05 — "The model becomes a document"
 
 A model is now **data**: schema-described tables that round-trip through a text
