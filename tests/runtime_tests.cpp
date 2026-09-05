@@ -13,6 +13,7 @@
 using namespace des;
 using des_test::check;
 using des_test::checkClose;
+using des_test::modelPath;
 using des_test::section;
 
 void runRuntimeTests() {
@@ -398,5 +399,120 @@ void runRuntimeTests() {
         check(recapture.refused == recapture.cases,
               "capture refuses every expectation that already exists");
         check(recapture.captured == 0, "and writes none of them");
+    }
+    section("Chunk size does not change the run");
+    {
+        // The claim this whole version rests on, over every shipped model
+        // rather than one hand-made in the test. If a caller can change the
+        // answer by choosing a different budget, none of the rest is safe.
+        const char* files[] = {"teller.des", "decide.des", "variables.des", "shared.des"};
+        for (const char* file : files) {
+            auto traceOf = [file](const std::string& out, std::size_t chunk,
+                                  bool withWatcher) {
+                {
+                    SimulationSystem sim(20260905u);
+                    ReadResult read = readDocumentFile(modelPath(file));
+                    std::vector<Diagnostic> problems;
+                    if (!compileInto(read.document, sim.model(), problems))
+                        return std::string();
+                    sim.enableTrace(out, TraceLevel::Events);
+                    sim.stopAt(200.0).initialise();
+                    if (chunk == 0) {
+                        sim.run();
+                    } else {
+                        bool more = true;
+                        while (more) {
+                            more = false;
+                            for (std::size_t i = 0; i < chunk; ++i) {
+                                if (!sim.stepOnce()) break;
+                                more = true;
+                            }
+                            // A pause is the ABSENCE of a call, so this is what
+                            // one looks like from the engine's side: a watcher
+                            // reading, and nothing else happening.
+                            if (withWatcher) (void)snapshotOf(sim);
+                        }
+                    }
+                }
+                std::ifstream in(out, std::ios::binary);
+                return std::string((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            };
+
+            const std::string whole = traceOf("chunk_whole.md", 0, false);
+            check(whole.size() > 500, std::string(file) + ": the trace is substantial");
+            check(whole == traceOf("chunk_1.md", 1, false),
+                  std::string(file) + ": one event at a time is identical to run()");
+            check(whole == traceOf("chunk_13.md", 13, false),
+                  std::string(file) + ": thirteen at a time is identical to run()");
+            check(whole == traceOf("chunk_watched.md", 5, true),
+                  std::string(file) + ": and watching it changes nothing");
+        }
+    }
+    section("Budget size does not change a STUDY");
+    {
+        // The chunk test above compares stepped runs against run(), and run()
+        // IS `while (stepOnce())` -- so at that level nothing about call
+        // scheduling can change a deterministic event sequence, and those
+        // assertions are close to tautological. Proved so: skipping an
+        // iteration of the budget loop, and even a watcher that secretly
+        // called stepOnce(), left the traces identical. Only a watcher that
+        // CONSUMED RANDOMNESS was caught.
+        //
+        // This is where batch size can genuinely leak state, and therefore
+        // where the assertion has content: RunController carries a replication
+        // index, an antithetic half-flag and a captured report ACROSS advance()
+        // calls, and a budget boundary can fall anywhere relative to the end of
+        // a replication.
+        auto build = [](SimulationSystem& sim) {
+            sim.model().arrivals("EXPO(1.0)")
+                       .station("Serve", 1, FIFO, "EXPO(0.8)")
+                       .entryAt("Serve");
+            sim.stopAt(60.0);
+        };
+        RunSetup setup;
+        setup.replications = 3;
+        setup.baseSeed     = 31337u;
+
+        auto resultsAt = [&](std::size_t budget) {
+            RunController c(setup, build);
+            while (c.state() == RunState::Ready || c.state() == RunState::Running)
+                c.advance(budget);
+            return c.results();
+        };
+
+        const std::vector<ReplicationResult> big = resultsAt(1000000);
+        check(big.size() == 3, "the study ran three replications");
+        for (std::size_t budget : {std::size_t{1}, std::size_t{7}, std::size_t{97}}) {
+            const std::vector<ReplicationResult> small = resultsAt(budget);
+            check(small.size() == big.size(),
+                  "a smaller budget produces the same number of replications");
+            for (std::size_t i = 0; i < small.size() && i < big.size(); ++i) {
+                check(small[i].seed == big[i].seed,
+                      "each replication keeps its seed whatever the budget");
+                checkClose(small[i].averageWait, big[i].averageWait, 1e-12,
+                           "and its numbers, exactly");
+                checkClose(small[i].Lq, big[i].Lq, 1e-12,
+                           "including Lq");
+            }
+        }
+
+        // Antithetic pairing is the case where one replication is TWO runs, so
+        // a budget boundary can land between the halves of a pair.
+        RunSetup paired = setup;
+        paired.antithetic = true;
+        auto pairedAt = [&](std::size_t budget) {
+            RunController c(paired, build);
+            while (c.state() == RunState::Ready || c.state() == RunState::Running)
+                c.advance(budget);
+            return c.results();
+        };
+        const std::vector<ReplicationResult> pb = pairedAt(1000000);
+        const std::vector<ReplicationResult> ps = pairedAt(3);
+        check(pb.size() == 3 && ps.size() == 3,
+              "an antithetic study is still three replications, not six");
+        for (std::size_t i = 0; i < pb.size() && i < ps.size(); ++i)
+            checkClose(ps[i].averageWait, pb[i].averageWait, 1e-12,
+                       "and a budget boundary between the halves of a pair changes nothing");
     }
 }

@@ -13,6 +13,7 @@
 using namespace des;
 using des_test::check;
 using des_test::checkClose;
+using des_test::modelPath;
 using des_test::section;
 
 namespace {
@@ -33,18 +34,6 @@ bool complainedAbout(const std::vector<Diagnostic>& ds, const std::string& colum
         if (d.cell && d.cell->column == column &&
             d.message.find(needle) != std::string::npos) return true;
     return false;
-}
-
-// The .des files live beside the examples, and the suite is not always run
-// from the repository root -- the sanitiser leg runs the binary from /tmp so
-// its trace files land nowhere important. CMake and tools/verify.sh both pass
-// the real directory in; the fallback is for a hand-rolled g++ from the root.
-#ifndef DES_MODEL_DIR
-#define DES_MODEL_DIR "examples/models"
-#endif
-
-std::string modelPath(const std::string& file) {
-    return std::string(DES_MODEL_DIR) + "/" + file;
 }
 
 using Builder = std::function<void(Model&)>;

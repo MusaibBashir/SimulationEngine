@@ -18,4 +18,10 @@ void check(bool condition, const std::string& what);
 void checkClose(double got, double want, double tol, const std::string& what);
 void section(const char* name);
 
+// Where the shipped .des models are. Compiled in rather than assumed
+// relative to the working directory: the suite is run from the repository
+// root, but not by every caller. Shared because two test files now read
+// those models and one copy of the path rule is enough.
+std::string modelPath(const std::string& file);
+
 }  // namespace des_test
