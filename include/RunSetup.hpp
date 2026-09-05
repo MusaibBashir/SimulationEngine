@@ -38,4 +38,9 @@ struct RunSetup {
     SimTime observeInterval{0.0};
 };
 
+// Reads the [Run] row -- Arena's Run Setup: one row, in the document, where
+// the model is. A document with no [Run] is not an error: it means the
+// defaults. Never throws.
+RunSetup readRunSetup(const ModelDocument& doc, std::vector<Diagnostic>& out);
+
 }  // namespace des

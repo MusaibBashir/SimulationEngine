@@ -1,4 +1,5 @@
 #include "ModelDocument.hpp"
+#include "ModuleSchema.hpp"
 #include "ModelError.hpp"
 
 namespace des {
@@ -83,6 +84,16 @@ void ModelDocument::setSourceLines(std::vector<std::string> lines) {
     // Reading a file is not an edit. The reader calls this last, so the
     // document can be written back verbatim until somebody actually changes it.
     m_edited = false;
+}
+
+std::string ModelDocument::cellOrDefault(const std::string& type, std::size_t index,
+                                         const std::string& column) const {
+    const std::string v = cell(type, index, column);
+    if (!v.empty()) return v;
+    const ModuleSchema* schema = ModuleRegistry::instance().find(type);
+    if (schema == nullptr) return std::string();
+    const Column* c = schema->column(column);
+    return c == nullptr ? std::string() : c->defaultValue;
 }
 
 }  // namespace des

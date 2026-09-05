@@ -61,6 +61,17 @@ std::vector<ModuleSchema> buildSchemas() {
     s.push_back(make("Expression", ModuleKind::Data,
                      {ident("Name"), expression("Value")}));
 
+    // Arena's Run Setup. At most one row, checked by readRunSetup rather than
+    // by the schema, because "how many rows may this table have" is not a
+    // property of a column.
+    s.push_back(make("Run", ModuleKind::Data,
+                     {ident("Name"), real("Length", ""), real("Warm-up", "0"),
+                      integer("Replications", "1"), integer("Base Seed", "12345"),
+                      boolean("Stop When Drained", "false"),
+                      integer("Max Entities", ""),
+                      boolean("Separate Streams", "false"),
+                      boolean("Antithetic", "false")}));
+
     // Read-only, and the reason is worth stating where somebody will read it:
     // this engine has no queue object apart from its Process. A discipline is
     // set on the Process row, and an editable Queue module would hold that same

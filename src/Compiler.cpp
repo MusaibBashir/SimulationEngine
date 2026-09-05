@@ -207,17 +207,6 @@ QueueDiscipline disciplineFrom(const std::string& s) {
     return QueueDiscipline::FIFO;
 }
 
-// A cell's value, or the schema's default when it is absent. Every build-time
-// read goes through here so a defaulted column behaves the same whether the
-// file spelled it out or left it off.
-std::string valueOf(const ModelDocument& doc, const ModuleSchema& schema,
-                    const std::string& type, std::size_t row, const std::string& column) {
-    const std::string v = doc.cell(type, row, column);
-    if (!v.empty()) return v;
-    const Column* c = schema.column(column);
-    return c == nullptr ? std::string() : c->defaultValue;
-}
-
 long long asInteger(const std::string& s, long long fallback) {
     if (s.empty()) return fallback;
     return std::strtoll(s.c_str(), nullptr, 10);
@@ -233,9 +222,8 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
 
     // 1. Variables, before anything can reference them.
     for (std::size_t r = 0; r < doc.rowCount("Variable"); ++r) {
-        const ModuleSchema& s = *reg.find("Variable");
         model.variable(doc.cell("Variable", r, "Name"),
-                       asReal(valueOf(doc, s, "Variable", r, "Initial Value"), 0.0));
+                       asReal(doc.cellOrDefault("Variable", r, "Initial Value"), 0.0));
     }
 
     // 2. Entity rows are declarative: a type name is carried by a Create, and
@@ -243,9 +231,8 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
 
     // 3. Resources, before any Process can seize one.
     for (std::size_t r = 0; r < doc.rowCount("Resource"); ++r) {
-        const ModuleSchema& s = *reg.find("Resource");
         model.resource(doc.cell("Resource", r, "Name"),
-                       static_cast<int>(asInteger(valueOf(doc, s, "Resource", r, "Capacity"), 1)));
+                       static_cast<int>(asInteger(doc.cellOrDefault("Resource", r, "Capacity"), 1)));
     }
 
     // 4. Blocks, WITHOUT their exits.
@@ -256,7 +243,7 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
         for (std::size_t r = 0; r < doc.rowCount(type); ++r) {
             const std::string name = doc.cell(type, r, "Name");
             const auto cell = [&](const char* c) {
-                return valueOf(doc, *schema, type, r, c);
+                return doc.cellOrDefault(type, r, c);
             };
 
             if (type == "Create") {
@@ -313,9 +300,8 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
     // 5. Child rows, IN FILE ORDER: an Assign field reads what the previous one
     //    wrote, and a Decide takes the first branch that matches.
     for (std::size_t r = 0; r < doc.rowCount("AssignField"); ++r) {
-        const ModuleSchema& s = *reg.find("AssignField");
         const std::string block  = doc.cell("AssignField", r, "Assign");
-        const std::string target = valueOf(doc, s, "AssignField", r, "Target");
+        const std::string target = doc.cellOrDefault("AssignField", r, "Target");
         const std::string field  = doc.cell("AssignField", r, "Name");
         const std::string value  = doc.cell("AssignField", r, "Value");
         if (target == "Variable")        model.assignVariable(block, field, value);

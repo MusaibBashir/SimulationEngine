@@ -249,4 +249,70 @@ void runRuntimeTests() {
                        "Lq matches Experiment's, exactly");
         }
     }
+    section("A model file carries its own run length");
+    {
+        ModelDocument d;
+        d.addRow("Run");
+        d.setCell("Run", 0, "Name", "Setup");
+        d.setCell("Run", 0, "Length", "480");
+        d.setCell("Run", 0, "Warm-up", "50");
+        d.setCell("Run", 0, "Replications", "5");
+        d.setCell("Run", 0, "Base Seed", "777");
+        d.setCell("Run", 0, "Stop When Drained", "true");
+
+        std::vector<Diagnostic> problems;
+        const RunSetup s = readRunSetup(d, problems);
+        check(!hasErrors(problems), "a well-formed [Run] row reads cleanly");
+        check(s.length.has_value() && *s.length == 480.0, "Length");
+        checkClose(s.warmUp, 50.0, 1e-12, "Warm-up");
+        check(s.replications == 5, "Replications");
+        check(s.baseSeed == 777u, "Base Seed");
+        check(s.stopWhenDrained, "Stop When Drained");
+        check(!s.maxEntities.has_value(), "an unset Max Entities stays UNSET, not zero");
+
+        {
+            ModelDocument m;
+            std::vector<Diagnostic> out;
+            const RunSetup def = readRunSetup(m, out);
+            check(!hasErrors(out), "a document with no [Run] is not an error");
+            check(!def.length.has_value() && def.replications == 1,
+                  "it just means the defaults");
+        }
+        {
+            ModelDocument m;
+            m.addRow("Run"); m.setCell("Run", 0, "Name", "A");
+            m.setCell("Run", 0, "Length", "10");
+            m.addRow("Run"); m.setCell("Run", 1, "Name", "B");
+            std::vector<Diagnostic> out;
+            (void)readRunSetup(m, out);
+            bool second = false;
+            for (const Diagnostic& g : out)
+                if (g.cell && g.cell->moduleType == "Run" && g.cell->row == 1) second = true;
+            check(second, "a SECOND [Run] row is reported at that row");
+        }
+        {
+            // Legitimate: a Create with Max Arrivals is finite and the future
+            // event list empties on its own. A warning, not a refusal.
+            ModelDocument m;
+            m.addRow("Run"); m.setCell("Run", 0, "Name", "A");
+            std::vector<Diagnostic> out;
+            (void)readRunSetup(m, out);
+            check(!hasErrors(out), "a [Run] with no stopping condition is NOT an error");
+            bool warned = false;
+            for (const Diagnostic& g : out)
+                if (g.severity == Severity::Warning) warned = true;
+            check(warned, "but it warns that the run ends only when events run out");
+        }
+        {
+            ModelDocument m;
+            m.addRow("Run"); m.setCell("Run", 0, "Name", "A");
+            m.setCell("Run", 0, "Length", "soon");
+            std::vector<Diagnostic> out;
+            (void)readRunSetup(m, out);
+            bool badCell = false;
+            for (const Diagnostic& g : out)
+                if (g.cell && g.cell->column == "Length") badCell = true;
+            check(badCell, "a non-numeric Length is reported AT the cell");
+        }
+    }
 }
