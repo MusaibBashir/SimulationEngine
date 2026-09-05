@@ -75,6 +75,11 @@ public:
     // std::function rather than an abstract ModelBuilder class: there is exactly
     // one implementation shape (a lambda closing over parameters), and a
     // hierarchy for that would be ceremony.
+    //
+    // v12: the same type RunController takes. Experiment IS a RunController
+    // with a report on top, and two spellings of one function type would be two
+    // things to keep in step. Declared THERE rather than here because this
+    // header would otherwise have to include one that includes it back.
     using Builder = std::function<void(SimulationSystem&)>;
 
 private:

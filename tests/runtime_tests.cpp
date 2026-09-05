@@ -214,4 +214,39 @@ void runRuntimeTests() {
         check(bad.state() == RunState::Failed, "a model that will not build Fails");
         check(!bad.failure().empty(), "and says why");
     }
+    section("The controller drives a whole study");
+    {
+        auto build = [](SimulationSystem& sim) {
+            sim.model().arrivals("EXPO(1.0)")
+                       .station("Serve", 1, FIFO, "EXPO(0.8)")
+                       .entryAt("Serve");
+            sim.stopAt(100.0);
+        };
+        RunSetup setup;
+        setup.replications = 4;
+        setup.baseSeed     = 5000u;
+
+        RunController c(setup, build);
+        c.advance(20);
+        check(c.progress().replications == 4, "it knows how many replications");
+        c.runToCompletion();
+        check(c.state() == RunState::Finished, "and runs them all");
+        check(c.results().size() == 4, "producing four results");
+        check(c.results()[0].seed != c.results()[1].seed,
+              "each with its own seed, or the sample has no variance");
+
+        // The decisive claim of this task: a study driven in pieces gives the
+        // SAME numbers as Experiment's own loop, which is the loop this
+        // replaces.
+        Experiment e("same", build);
+        e.replications(4).baseSeed(5000u);
+        e.run();
+        check(e.results().size() == 4, "Experiment ran four too");
+        for (std::size_t i = 0; i < 4; ++i) {
+            checkClose(c.results()[i].averageWait, e.results()[i].averageWait, 1e-12,
+                       "replication matches Experiment's, exactly");
+            checkClose(c.results()[i].Lq, e.results()[i].Lq, 1e-12,
+                       "Lq matches Experiment's, exactly");
+        }
+    }
 }
