@@ -86,7 +86,7 @@ add_executable(des cli/main.cpp)
 target_link_libraries(des PRIVATE des_engine)
 target_compile_options(des PRIVATE ${DES_WARNINGS})
 
-add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp)
+add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp)
 target_link_libraries(des_tests PRIVATE des_engine)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
 

@@ -15,6 +15,7 @@
 
 #pragma once
 #include <memory>
+#include <ostream>
 #include <string>
 #include <map>
 #include <string>
@@ -221,11 +222,17 @@ public:
                        Entity* e = nullptr, INode* node = nullptr);
     void initialise();
     void run();
+    // v12: the regression harness compares report TEXT, so it needs one as a
+    // string. Redirecting std::cout would also work and is worse -- a global
+    // side effect, inside a harness whose entire value is that its result can
+    // be trusted.
+    void report(std::ostream& os) const;
     void report() const;
 
     // v9: the same numbers laid out the way Arena lays them out -- tally
     // variables, discrete-change variables, outputs -- so a run can be put
     // beside an Arena report and read line for line.
+    void reportArenaStyle(std::ostream& os) const;
     void reportArenaStyle() const;
 
     // v5 conveniences. No new behaviour -- execute() is initialise() then run(),

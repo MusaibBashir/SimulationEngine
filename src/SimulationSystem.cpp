@@ -600,27 +600,27 @@ RunResults SimulationSystem::results() const {
     return r;
 }
 
-void SimulationSystem::reportArenaStyle() const {
+void SimulationSystem::reportArenaStyle(std::ostream& os) const {
     const RunResults r = results();
     const SimTime T = r.measuredTime;
-    std::cout << std::fixed;
-    std::cout << "\n============================================================\n";
-    std::cout << "Replication ended at time : " << std::setprecision(4) << r.simulatedTime << "\n";
+    os << std::fixed;
+    os << "\n============================================================\n";
+    os << "Replication ended at time : " << std::setprecision(4) << r.simulatedTime << "\n";
     if (m_model.overloadAllowed()) {
-        std::cout << "*** OVERLOADED MODEL: at least one queue grows without bound.\n"
+        os << "*** OVERLOADED MODEL: at least one queue grows without bound.\n"
                      "*** These are TERMINATING-run results for this horizon only.\n"
                      "*** They are not steady-state values and will change if the\n"
                      "*** run length changes.\n";
     }
 
-    std::cout << "\nTALLY VARIABLES\n";
-    std::cout << std::setw(34) << std::left << "Identifier" << std::right
+    os << "\nTALLY VARIABLES\n";
+    os << std::setw(34) << std::left << "Identifier" << std::right
               << std::setw(12) << "Average" << std::setw(12) << "Minimum"
               << std::setw(12) << "Maximum" << std::setw(14) << "Observations" << "\n";
-    std::cout << std::string(84, '-') << "\n";
+    os << std::string(84, '-') << "\n";
 
     auto tally = [&](const std::string& id, double avg, double mn, double mx, long long obs) {
-        std::cout << std::setw(34) << std::left << id << std::right
+        os << std::setw(34) << std::left << id << std::right
                   << std::setw(12) << std::setprecision(5) << avg
                   << std::setw(12) << mn << std::setw(12) << mx
                   << std::setw(14) << obs << "\n";
@@ -642,12 +642,12 @@ void SimulationSystem::reportArenaStyle() const {
                   0.0, b->queueStats().maxWaitingTime(), b->queueStats().numberServed());
     }
 
-    std::cout << "\nDISCRETE-CHANGE VARIABLES\n";
-    std::cout << std::setw(34) << std::left << "Identifier" << std::right
+    os << "\nDISCRETE-CHANGE VARIABLES\n";
+    os << std::setw(34) << std::left << "Identifier" << std::right
               << std::setw(12) << "Average" << std::setw(14) << "Final Value" << "\n";
-    std::cout << std::string(60, '-') << "\n";
+    os << std::string(60, '-') << "\n";
     auto dcv = [&](const std::string& id, double avg, double final) {
-        std::cout << std::setw(34) << std::left << id << std::right
+        os << std::setw(34) << std::left << id << std::right
                   << std::setw(12) << std::setprecision(5) << avg
                   << std::setw(14) << final << "\n";
     };
@@ -665,10 +665,10 @@ void SimulationSystem::reportArenaStyle() const {
             static_cast<double>(s.queue().length()));
     }
 
-    std::cout << "\nOUTPUTS\n";
-    std::cout << std::string(60, '-') << "\n";
+    os << "\nOUTPUTS\n";
+    os << std::string(60, '-') << "\n";
     auto out = [&](const std::string& id, double v) {
-        std::cout << std::setw(40) << std::left << id << std::right
+        os << std::setw(40) << std::left << id << std::right
                   << std::setw(14) << std::setprecision(3) << v << "\n";
     };
     for (const auto& kv : m_byType) {
@@ -694,38 +694,40 @@ void SimulationSystem::reportArenaStyle() const {
         }
     }
     out("System.NumberOut", static_cast<double>(r.exited));
-    std::cout << "============================================================\n";
+    os << "============================================================\n";
 }
 
-void SimulationSystem::report() const {
+void SimulationSystem::reportArenaStyle() const { reportArenaStyle(std::cout); }
+
+void SimulationSystem::report(std::ostream& os) const {
     // v5: report() prints results(). It does not recompute anything -- one place
     // knows how a number is derived, and printing is just a view of it.
     const RunResults r = results();
-    std::cout << std::fixed << std::setprecision(4);
+    os << std::fixed << std::setprecision(4);
     // Before the numbers, not after: a reader who stops at the first table
     // should still have been told the check could not be applied.
-    reportStability(std::cout);
-    std::cout << "=== simulation report =====================================\n";
-    std::cout << "seed                     : " << m_rng.seed() << "\n";
-    std::cout << "termination              : "
+    reportStability(os);
+    os << "=== simulation report =====================================\n";
+    os << "seed                     : " << m_rng.seed() << "\n";
+    os << "termination              : "
               << (m_termination ? m_termination->describe() : "<none>") << "\n";
-    std::cout << "total simulated time     : " << r.simulatedTime << "\n";
-    std::cout << "warm-up discarded        : " << r.warmUpDiscarded << "\n";
-    std::cout << "measured period          : " << r.measuredTime << "\n";
-    std::cout << "entities arrived         : " << r.arrived << "\n";
-    std::cout << "entities exited          : " << r.exited << "\n";
-    std::cout << "average total wait       : " << r.averageWait << "\n";
-    std::cout << "average time in system   : " << r.averageTimeInSystem << "\n";
-    std::cout << "max total wait           : " << r.maxWait << "\n";
-    std::cout << "time-avg in queue (Lq)   : " << r.averageNumberInQueue << "\n";
-    std::cout << "time-avg in system (L)   : " << r.averageNumberInSystem << "\n";
-    std::cout << "still waiting at stop    : " << r.stillWaitingAtStop << "\n";
-    std::cout << "live entity objects      : " << m_entities.size() << "\n";
-    std::cout << "\n";
-    std::cout << "  station        cap   served    avg wait   time-avg Q    util   maxQ\n";
-    std::cout << "  -----------------------------------------------------------------\n";
+    os << "total simulated time     : " << r.simulatedTime << "\n";
+    os << "warm-up discarded        : " << r.warmUpDiscarded << "\n";
+    os << "measured period          : " << r.measuredTime << "\n";
+    os << "entities arrived         : " << r.arrived << "\n";
+    os << "entities exited          : " << r.exited << "\n";
+    os << "average total wait       : " << r.averageWait << "\n";
+    os << "average time in system   : " << r.averageTimeInSystem << "\n";
+    os << "max total wait           : " << r.maxWait << "\n";
+    os << "time-avg in queue (Lq)   : " << r.averageNumberInQueue << "\n";
+    os << "time-avg in system (L)   : " << r.averageNumberInSystem << "\n";
+    os << "still waiting at stop    : " << r.stillWaitingAtStop << "\n";
+    os << "live entity objects      : " << m_entities.size() << "\n";
+    os << "\n";
+    os << "  station        cap   served    avg wait   time-avg Q    util   maxQ\n";
+    os << "  -----------------------------------------------------------------\n";
     for (const StationResults& s : r.stations) {
-        std::cout << "  " << std::setw(12) << std::left << s.name << std::right
+        os << "  " << std::setw(12) << std::left << s.name << std::right
                   << std::setw(5)  << s.capacity
                   << std::setw(9)  << s.served
                   << std::setw(12) << s.averageWait
@@ -734,7 +736,9 @@ void SimulationSystem::report() const {
                   << std::setw(7)  << s.maxQueueLength
                   << "\n";
     }
-    std::cout << "===========================================================\n";
+    os << "===========================================================\n";
 }
+
+void SimulationSystem::report() const { report(std::cout); }
 
 }  // namespace des
