@@ -1,0 +1,62 @@
+############ 1. Antithetic variates ############
+
+M/M/1, rho = 0.8. Theory says Wq = 3.2000.
+
+  40 independent replications          3.0589  +/-  0.1492   [  2.9097,   3.2081]   40 runs
+  20 antithetic pairs                  3.1812  +/-  0.1647   [  3.0165,   3.3458]   40 runs
+
+The pairs give a narrower interval for identical compute. A run whose
+arrival stream was unluckily busy is paired with one where the same
+uniforms, mirrored, make it unluckily quiet -- so the pair average is
+closer to the truth than either half. The two halves are NEGATIVELY
+correlated, and that is exactly what shrinks the variance of their mean.
+
+Note the pair is ONE observation, not two. Counting the halves as
+independent would understate the interval, which is the one direction you
+must never err in.
+
+############ 2. Common random numbers ############
+
+Design A: one server at mean 0.8.   Design B: two at mean 1.6.
+Same total capacity, so rho = 0.8 in both. Which queues less?
+
+  design A, on its own                 3.2233  +/-  0.2603   [  2.9630,   3.4836]   20 runs
+  design B, on its own                 2.8514  +/-  0.2554   [  2.5959,   3.1068]   20 runs
+
+  intervals overlap: true   -> compared this way, you CANNOT say which is better
+
+  paired difference (A - B)            0.3719  +/-  0.0109   [  0.3611,   0.3828]
+  difference is significant: true
+  an UNPAIRED comparison would give  +/- 0.3647  (33.5787x wider)
+
+--- what to notice ------------------------------------------------------
+THE TWO SEPARATE INTERVALS OVERLAP, so on that evidence the designs are
+indistinguishable and 20 replications was not enough to answer the
+question.
+
+THE PAIRED DIFFERENCE IS TINY AND CLEARLY NON-ZERO. Same runs, same
+compute, same numbers -- looked at as differences rather than as two
+independent means.
+
+Why it works: both designs saw the SAME arrival stream in each
+replication. Whatever bad luck was in that stream inflated both designs'
+waits together, so it cancels in A-B. What is left is the difference the
+design actually makes.
+
+*** TWO DESIGNS WHOSE INTERVALS OVERLAP HAVE NOT BEEN SHOWN TO DIFFER --
+BUT THEY MAY STILL DIFFER. *** Overlapping intervals are weak evidence,
+not evidence of no difference, and a paired comparison is often the only
+one your compute budget can afford. Whenever you are comparing rather than
+measuring, pair.
+
+WHAT BREAKS IT: without separateStreams() every distribution shares one
+stream, so changing the service time shifts every subsequent draw and
+replication i of A has nothing in common with replication i of B. The
+pairing silently becomes worthless -- the numbers still print. Try
+deleting .separateStreams() above and watch the paired half-width grow to
+about the unpaired one.
+
+AND THE HONEST LIMIT: this engine gives streams to arrivals, arrival
+attributes and each Process's service time. Delay durations and Decide
+draws still share the common stream, so a model whose variants differ in
+THOSE will pair less well. Stated rather than hidden.

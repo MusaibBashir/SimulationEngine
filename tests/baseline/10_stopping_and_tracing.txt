@@ -1,0 +1,43 @@
+--- termination rules ---------------------------------------
+  TimeLimit(500)                    stopped at t=    500.55 after    227 served
+  EntityLimit(100)                  stopped at t=    207.73 after    100 served
+  AnyOf[Drained | TimeLimit(10000)] stopped at t=      0.05 after      1 served
+  AnyOf[TimeLimit(500) | Entity(50)]stopped at t=     97.02 after     50 served
+
+--- tracing --------------------------------------------------
+  trace_10.md written -- one row per event.
+  TraceLevel::Off costs nothing: no file is opened and every
+  trace call returns immediately, so leave the calls in place.
+  Traces DIFF. Trace a run before a change and after it; an
+  empty diff proves the behaviour is identical, which is far
+  stronger than 'the averages still look about right'.
+
+--- priority ------------------------------------------------
+  mean wait 7.92, MAX wait 227.99
+  Priority barely changes the MEAN -- reordering a queue does
+  not change how much work is in it. What it changes is who
+  waits. Compare the max against FIFO: low-priority customers
+  pay for the high-priority ones, and in a busy system they can
+  be starved indefinitely. Always report the max, not just the
+  mean, when you use a priority rule.
+
+--- model errors ---------------------------------------------
+  caught: process 'Desk' is unstable: offered load rho = 1.4 (>= 1). Work arrives faster than 1 server(s) can do it, so the queue grows without bound and every average is meaningless. Add capacity, speed up service, or slow arrivals -- or, if this is a TERMINATING run (a fixed shift, not a steady-state study), say allowOverload() and the numbers will be reported with that caveat attached.
+
+  caught: route: no block named 'Cashier'
+
+--- seeds ----------------------------------------------------
+  seed 999  : Wq = 4.92
+  seed 999  : Wq = 4.92   <- identical, by design
+  seed 1000 : Wq = 5.97   <- a different sample of the same system
+
+  Same seed reproducing exactly is what makes a bug findable: you can add a
+  trace, re-run, and see the identical sequence of events.
+
+  It is also the trap. Different seeds give different answers, so ONE seed
+  is one sample -- see example 08. Never pick a seed because it gave you a
+  number you liked; that is choosing your data.
+
+  You can also re-run the same object: initialise() resets the clock,
+  statistics, queues, servers and event list, so calling initialise() and
+  run() again gives the identical result rather than continuing.

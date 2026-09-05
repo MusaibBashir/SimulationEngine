@@ -17,31 +17,16 @@
 #include <vector>
 #include <string>
 #include "des.hpp"
+#include "harness.hpp"
 
 using namespace des;
+using des_test::check;
+using des_test::checkClose;
+using des_test::section;
+
+void runExpressionTests();   // tests/expression_tests.cpp
 
 namespace {
-
-int g_checks = 0;
-int g_failures = 0;
-
-void check(bool condition, const std::string& what) {
-    ++g_checks;
-    if (!condition) {
-        ++g_failures;
-        std::cout << "  FAIL: " << what << "\n";
-    }
-}
-
-void checkClose(double got, double want, double tol, const std::string& what) {
-    ++g_checks;
-    if (std::fabs(got - want) > tol) {
-        ++g_failures;
-        std::cout << "  FAIL: " << what << "  (got " << got << ", want " << want << ")\n";
-    }
-}
-
-void section(const char* name) { std::cout << "[" << name << "]\n"; }
 
 // ---------------------------------------------------------------------------
 
@@ -1644,7 +1629,10 @@ int main() {
     testWarmUpSuggestion();
     testTheoryInsideInterval();
 
-    std::cout << "\n" << (g_checks - g_failures) << " / " << g_checks << " checks passed\n";
-    if (g_failures > 0) std::cout << g_failures << " FAILURES\n";
-    return g_failures == 0 ? 0 : 1;
+    runExpressionTests();
+
+    std::cout << "\n" << (des_test::g_checks - des_test::g_failures)
+              << " / " << des_test::g_checks << " checks passed\n";
+    if (des_test::g_failures > 0) std::cout << des_test::g_failures << " FAILURES\n";
+    return des_test::g_failures == 0 ? 0 : 1;
 }

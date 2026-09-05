@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 #include "Common.hpp"
+#include "Expression.hpp"
 #include "Node.hpp"
 #include "Distribution.hpp"
 #include "Statistics.hpp"
@@ -26,11 +27,14 @@ namespace des {
 // also report a meaningless utilisation.
 // ---------------------------------------------------------------------------
 class DelayNode : public INode {
-    std::unique_ptr<IDistribution> m_duration;
+    ExpressionPtr m_duration;
     Statistics m_stats;
     int m_inTransit{0};
 public:
     DelayNode(std::string name, std::unique_ptr<IDistribution> duration);
+    DelayNode(std::string name, ExpressionPtr duration);
+    const IExpression& durationExpression() const { return *m_duration; }
+    IExpression& durationExpression() { return *m_duration; }
     void enter(NodeContext& ctx, Entity* e) override;
     void onScheduledEvent(NodeContext& ctx, Entity* e) override;
     void reset() override;
@@ -44,15 +48,27 @@ public:
 // ASSIGN -- set attributes on the entity passing through. Instant.
 // Two forms: a fixed value, or a draw from a distribution.
 // ---------------------------------------------------------------------------
+// v10: Arena's Assign writes an attribute, a VARIABLE, or the entity's TYPE.
+// Through v9 it could only write attributes, which is why "how many have we
+// served" could not be said at all -- that fact belongs to the system, not to
+// any one entity.
+enum class AssignTarget { Attribute, Variable, EntityType };
+
 class AssignNode : public INode {
 public:
-    struct Rule { std::string name; std::unique_ptr<IDistribution> value; };
+    struct Rule {
+        AssignTarget  target{AssignTarget::Attribute};
+        std::string   name;      // empty for EntityType
+        ExpressionPtr value;
+    };
 private:
     std::vector<Rule> m_rules;
     long long m_count{0};
 public:
     explicit AssignNode(std::string name);
     AssignNode& set(const std::string& attribute, std::unique_ptr<IDistribution> value);
+    AssignNode& set(AssignTarget target, const std::string& name, ExpressionPtr value);
+    const std::vector<Rule>& rules() const { return m_rules; }
     void enter(NodeContext& ctx, Entity* e) override;
     void reset() override;
     void resetStatistics(SimTime now) override;
@@ -78,9 +94,12 @@ public:
 
     // v7: a Decide is now N-way. Each branch is either a probability or a
     // predicate; whatever matches no branch falls through to next().
+    // v10: the condition is an EXPRESSION. A std::function still works -- it
+    // arrives wrapped in a LambdaExpression -- so there is one evaluation path
+    // rather than two kept alive in parallel. Branch is move-only as a result.
     struct Branch {
         double probability{-1.0};   // < 0 means this is a condition branch
-        Condition condition;
+        ExpressionPtr condition;
         INode* target{nullptr};
         long long taken{0};
     };
@@ -94,6 +113,7 @@ public:
     // Two-way shorthands, unchanged from v6.
     DecideNode(std::string name, double probability);
     DecideNode(std::string name, Condition condition);
+    DecideNode(std::string name, ExpressionPtr condition);
     // N-way: start empty and add branches.
     explicit DecideNode(std::string name, bool byChance);
 
@@ -103,6 +123,7 @@ public:
     // not tell which rule applied to which branch. Refused rather than guessed.
     DecideNode& addBranch(double probability, INode* target);
     DecideNode& addBranch(Condition condition, INode* target);
+    DecideNode& addBranch(ExpressionPtr condition, INode* target);
 
     // The two-way spelling: branch 0 is "true".
     void setTrueBranch(INode* n);

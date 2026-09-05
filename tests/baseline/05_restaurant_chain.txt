@@ -1,0 +1,38 @@
+=== simulation report =====================================
+seed                     : 7
+termination              : TimeLimit(6000)
+total simulated time     : 6004.4675
+warm-up discarded        : 600.0000
+measured period          : 5404.4675
+entities arrived         : 329
+entities exited          : 326
+average total wait       : 16.1977
+average time in system   : 58.5153
+max total wait           : 116.2021
+time-avg in queue (Lq)   : 0.9721
+time-avg in system (L)   : 3.5298
+still waiting at stop    : 3
+live entity objects      : 7
+
+  station        cap   served    avg wait   time-avg Q    util   maxQ
+  -----------------------------------------------------------------
+  Host            1      328      0.2877       0.0175  0.1227      3
+  Waiters         3      326     15.7585       0.9449  0.7617     10
+  Cashier         1      326      0.1620       0.0098  0.1499      1
+===========================================================
+
+--- reading the per-station table ---------------------------------------
+Look at the `util` column. Host and Cashier sit around 13-16%; Waiters sit
+around 82%. The waiters are the BOTTLENECK, and everything else is idle
+capacity.
+
+That tells you where to spend money. Hiring a second cashier would improve
+nothing at all -- the cashier is already idle 84% of the time. Hiring a
+fourth waiter is the only change that would move the customer's experience.
+
+Now look at `avg wait` per station. Almost the entire customer wait is
+accumulated at one station. A single system-wide "average wait" number
+would be perfectly accurate and completely useless for deciding anything.
+
+Open trace_05.md to watch a single party move Host -> Waiters -> Cashier.
+--------------------------------------------------------------------------

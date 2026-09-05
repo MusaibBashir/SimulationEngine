@@ -24,6 +24,11 @@ A translation table, for when the coursework is written in Arena's vocabulary.
 | **Resource** | `resource(name, capacity)` | |
 | **Queue** with a discipline | 4th argument of `station` | `FIFO`, `LIFO`, `PRIORITY`, `SPT`, `EDD`, `RANDOM` |
 | **Entity type / Picture** | 2nd argument of `source` | Pictures are a GUI thing; the type name is what matters. |
+| **Variable** (data module) | `variable(name, initialValue)` | Global, numeric, time-persistent. |
+| **Assign** to a Variable | `assignVariable(block, name, "expr")` | `"Rejected + 1"` — a global on both sides. |
+| **Assign** to Entity Type | `assignEntityType(block, "\"Widget\"")` | Per-type reporting keys on it. |
+| **Expression** in any Delay/Service field | `station(name, cap, rule, "text")`, `delay(name, "text")` | There is no separate distribution field, exactly as in Arena. |
+| **Decide** by a typed condition | `decideWhen(name, "NQ(X) > 3")` / `branchWhen(...)` | Can read live model state; a lambda cannot. |
 | **Replication length** | `stopAt(t)` | Also `stopAfter(n)`, `whenDrained()`, `anyOf(...)`. |
 | **Warm-up period** | `warmUpFor(t)` | |
 | **Number of replications** | `Experiment::replications(n)` | |
@@ -43,7 +48,27 @@ A translation table, for when the coursework is written in Arena's vocabulary.
 
 `sim.reportArenaStyle()` prints all of it in Arena's layout.
 
+## Arena's expression functions
+
+| Arena | Here | Note |
+|---|---|---|
+| `EXPO(m)` `UNIF(a,b)` `TRIA(a,m,b)` `NORM(m,s)` | same | |
+| `LOGN(m,s)` | same | Mean and sd of the **variable**, not of its logarithm. |
+| `WEIB` `ERLA` `POIS` `CONS` | same | |
+| `DISC(c1,v1,c2,v2,...)` | same | **Cumulative** probabilities, as Arena writes them. The engine's own `discrete()` takes individual ones. |
+| `NQ(block)` `NR(res)` `MR(res)` `TNOW` | same | `WIP()` for number in system. |
+| `MIN` `MAX` `ABS` `ROUND` `TRUNC` `SQRT` `LN` `EXP` `MOD` | same | `EXPO` is the distribution; `EXP` is e^x — Arena's collision, kept. |
+| `Entity.Type` | same | Compares against a quoted string. |
+
+`Empirical` and `Deterministic` have **no Arena spelling** and stay
+programmatic-only. Variable arrays (1-D and 2-D) are not implemented.
+
 ## Three differences worth knowing
+
+**A variable that does not exist.** Arena creates a Variable the moment you
+assign to one. Here `assignVariable` to an undeclared name throws, because
+otherwise a typo becomes a second variable nobody notices. Declare it with
+`variable()` first.
 
 **Scheduled utilization.** Arena divides busy resource-time by
 (capacity × *scheduled* time). This engine has no resource schedules yet, so

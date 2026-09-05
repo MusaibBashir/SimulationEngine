@@ -1,0 +1,105 @@
+############ 1. Are the uniforms random? ############
+
+--- mt19937 (the default) ---------------------------
+  chi-square uniformity           10.786  vs     16.919   pass   10 bins, 600000 values
+  Kolmogorov-Smirnov               0.691  vs      1.358   pass   largest gap between empirical and true CDF
+  runs up and down                 0.097  vs      1.960   pass   399968 runs, expected about 399999
+  autocorrelation at lag 1         0.413  vs      1.960   pass   rho = 0.000533
+  autocorrelation at lag 5         0.339  vs      1.960   pass   rho = 0.000438
+  serial test in 3D             4027.535  vs   4244.989   pass   0 of 4096 cells never visited
+
+--- LCG, decent constants ---------------------------
+  chi-square uniformity           12.856  vs     16.919   pass   10 bins, 600000 values
+  Kolmogorov-Smirnov               1.206  vs      1.358   pass   largest gap between empirical and true CDF
+  runs up and down                 0.480  vs      1.960   pass   399843 runs, expected about 399999
+  autocorrelation at lag 1         0.142  vs      1.960   pass   rho = 0.000184
+  autocorrelation at lag 5         0.616  vs      1.960   pass   rho = -0.000795
+  serial test in 3D             4133.294  vs   4244.989   pass   0 of 4096 cells never visited
+
+--- RANDU (IBM, 1960s) ------------------------------
+  chi-square uniformity            2.528  vs     16.919   pass   10 bins, 600000 values
+  Kolmogorov-Smirnov               0.555  vs      1.358   pass   largest gap between empirical and true CDF
+  runs up and down                 0.604  vs      1.960   pass   400197 runs, expected about 399999
+  autocorrelation at lag 1         1.402  vs      1.960   pass   rho = -0.001810
+  autocorrelation at lag 5         1.147  vs      1.960   pass   rho = -0.001481
+  serial test in 3D            79994.573  vs   4244.989   FAIL   257 of 4096 cells never visited
+
+--- what to notice ------------------------------------------------------
+RANDU PASSES EVERY ONE-DIMENSIONAL TEST. Its values are beautifully
+uniform, they do not trend, and consecutive pairs are uncorrelated. If you
+only checked uniformity -- which is what "test your random numbers"
+usually means to people -- you would ship it.
+
+IT FAILS THE 3D SERIAL TEST BY A FACTOR APPROACHING TWENTY, with 257 of
+the 4096 cells never visited once. RANDU satisfies
+
+    x[n+2] = 6*x[n+1] - 9*x[n]   (mod 2^31)
+
+exactly, so every consecutive TRIPLE lies on one of just 15 planes in the
+unit cube. In one dimension that is invisible. In three it is a lattice.
+
+Simulations use several numbers at once constantly -- an interarrival, a
+service time, a branch draw, all in one event -- so three dimensions is not
+an exotic stress test, it is Tuesday.
+
+A PASS IS NOT PROOF. It means this test found nothing. A FAIL is much
+stronger evidence, because a good generator fails a 95% test only 1 time
+in 20 -- which also means that in the six tests above, an occasional
+isolated failure from mt19937 is expected and not alarming.
+
+############ 2. From uniforms to variates ############
+
+Every one of these is one u01() pushed through an inverse CDF.
+200,000 draws each.
+
+  exponential(4)                  mean     4.012 (says    4.000)   sd    4.014   range [  0.000,   50.640]
+  uniform(2,6)                    mean     3.998 (says    4.000)   sd    1.154   range [  2.000,    6.000]
+  triangular(1,3,8)               mean     3.998 (says    4.000)   sd    1.471   range [  1.006,    7.987]
+  normal(10,2)                    mean    10.001 (says   10.000)   sd    1.997   range [  1.102,   18.713]
+  lognormalFrom(10,4)             mean    10.015 (says   10.000)   sd    4.026   range [  1.663,   47.522]
+  weibull(scale 5,shape 2)        mean     4.427 (says    4.431)   sd    2.315   range [  0.019,   17.554]
+  erlang(mean 10, k=4)            mean    10.013 (says   10.000)   sd    5.009   range [  0.187,   44.776]
+  discrete(1,5,10)                mean     3.997 (says    4.000)   sd    3.466   range [  1.000,   10.000]
+  empirical(8 obs)                mean     4.796 (says    4.786)   sd    2.770   range [  2.000,   12.000]
+  poisson(3)                      mean     2.998 (says    3.000)   sd    1.734   range [  0.000,   14.000]
+
+--- choosing one --------------------------------------------------------
+EXPONENTIAL for interarrival times of independent customers. Memoryless:
+how long you have already waited tells you nothing about the wait left.
+That is a strong claim, and it is right for arrivals and usually wrong for
+service.
+
+ERLANG for service that is several sequential steps. k=1 is exponential,
+k -> infinity is constant, and real service usually sits between.
+
+LOGNORMAL for service times you measured and found right-skewed. Use
+lognormalFrom(mean, sd) -- its parameters are the mean and sd of the LOG,
+which is a famous way to be wrong by a factor of several.
+
+WEIBULL for time-to-failure. shape < 1 is infant mortality, 1 is constant
+hazard, > 1 is wear-out.
+
+NORMAL for a duration only with care -- it has a left tail, and a negative
+service time is nonsense rather than a subtlety. This engine truncates at
+zero by default and can be told to throw instead; either way you should
+know it is happening.
+
+EMPIRICAL when you have data and no idea which textbook curve it came
+from. Sampling your own observations beats guessing, and it interpolates
+between them so the model is not limited to values you happened to see.
+
+DISCRETE for part types, batch sizes, "70% small 20% medium 10% large".
+
+############ 3. Mirrored draws ############
+
+  u:                0.375    0.797    0.951    0.183    0.732
+  1-u:              0.625    0.203    0.049    0.817    0.268
+
+  exponential(1) from each stream:
+        0.469    1.592    3.010    0.203    1.317
+        0.982    0.227    0.051    1.696    0.312
+
+A small u gives a short interarrival; 1-u gives a long one. One run is
+busy exactly where its mirror is quiet, so averaging the pair cancels much
+of the luck. That only works because every variate here is ONE uniform
+pushed through a MONOTONE transform -- see example 14 for what it buys.

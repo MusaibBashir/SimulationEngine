@@ -5,6 +5,82 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [10.0.0] — 2026-08-28 — "The model stops needing a compiler"
+
+Every duration, condition and assignment value can now be written as **text**.
+Narrative in `V10_READLOG.md`.
+
+### Added
+
+- **An expression layer** — lexer, recursive-descent parser with a precedence
+  climb, an `IExpression` AST, and an evaluator. One grammar covers conditions,
+  assignment values and every duration field.
+- **`Model::variable()` and `VariableStore`** — Arena's Variable data module.
+  Global, numeric, time-persistent statistics, reset between replications.
+  `"Rejected + 1"` is an expression with a global on both sides, which an
+  attribute structurally cannot be.
+- **Text spellings of every field**: `arrivals("EXPO(1.0)")`,
+  `station(name, cap, FIFO, "size * 0.5")`, `delay(name, "0.25")`,
+  `decideWhen(name, "NQ(Machine) > 3")`, `assignVariable(...)`,
+  `assignTo(...)`, `assignEntityType(...)`, `branchWhen(...)`.
+- **Arena's function names** — `EXPO` `UNIF` `TRIA` `NORM` `LOGN` `WEIB` `ERLA`
+  `POIS` `DISC` `CONS`, the state functions `NQ` `NR` `MR` `WIP`, the constant
+  `TNOW`, and `MIN` `MAX` `ABS` `ROUND` `TRUNC` `SQRT` `LN` `EXP` `MOD`.
+- **`IModelState`** — the four questions an expression may ask of a running
+  system, declared by the expression layer and implemented by
+  `SimulationSystem`. Same dependency inversion as v6's `NodeContext`.
+- **`Diagnostic` and `SourceSpan`** — user errors are data, not exceptions. The
+  parser recovers and reports every problem in one call, with positions.
+- **`Model::checkExpressions()`** — every expression validated before the run,
+  with the right `FieldContext`. An attribute referenced in an interarrival
+  field, which has no entity, is an error at `initialise()`.
+- **`Model::stability()`** — reports which blocks the offered-load check could
+  not verify, instead of treating an unknowable mean as zero load.
+- **`AssignTarget`** — Assign writes an attribute, a variable, or the entity's
+  type.
+- **`tools/verify.sh` and `tools/baseline.sh`** — the verification gate and the
+  byte-identical gate, in one command each.
+- **`examples/16_expressions.cpp`**.
+
+### Changed
+
+- `Station`, `DelayNode` and `CreateNode` hold **expressions**, not
+  distributions. There is no distribution field left in the engine: `EXPO(0.8)`
+  is a function in the grammar that owns an `IDistribution`.
+- Every sampling site gets its own stream: `useStream()` recurses through the
+  expression tree, and `assignStreams()` now names Delay, Decide and Assign
+  expressions as well as Create interarrivals and Process services. This closes
+  item 5 on the v9 list. (An earlier draft of this entry claimed it fell out
+  "with no feature written for it" — the capability did, the wiring did not.)
+- `DecideNode::Branch` owns its condition and is therefore move-only.
+- The trace header reads the arrival expression from the **source** rather than
+  from the copy kept for the stability check, which a text-built model never
+  fills in.
+
+### Fixed
+
+- A pre-existing MSVC `C4244` in `reportArenaStyle`, hidden by incremental
+  builds since v9.
+- `assignEntityType` corrupted per-type and system-wide WIP and could stop
+  `whenDrained()` from ever firing.
+- The stability check treated an unknowable *arrival* mean as zero load, passing
+  models it had never examined.
+- `parseExpression()` threw on user text like `WEIB(0, 1)` instead of returning
+  a diagnostic; `Constant` now throws rather than asserting, so `NDEBUG` cannot
+  let a negative duration through.
+- The variable/attribute one-namespace rule was enforced in only one direction.
+- A negative literal argument (`UNIF(-1, 3)`) defeated constant-argument
+  detection and silently lost its knowable mean.
+- `DecideNode::reset()` did not reset its branch conditions.
+
+### Compatibility
+
+Nothing existing breaks. The `std::function` and `IDistribution` APIs survive as
+adapters over the one representation, all 293 v9 checks pass **unchanged**, and
+every example traces byte-identically.
+
+---
+
 ## [9.0.0] — 2026-08-22 — "Solve the coursework"
 
 Three Arena lab problems built end to end, and the features they demanded.

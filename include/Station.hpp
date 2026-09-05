@@ -25,6 +25,7 @@
 #include "EntityQueue.hpp"
 #include "Statistics.hpp"
 #include "Distribution.hpp"
+#include "Expression.hpp"
 #include "Delay.hpp"
 
 namespace des {
@@ -35,7 +36,7 @@ private:
                                      // Process blocks may point at the same one
     int m_unitsNeeded{1};
     EntityQueue m_queue;
-    std::unique_ptr<IDistribution> m_service;
+    ExpressionPtr m_service;
     std::string m_serviceAttribute;
     Statistics m_stats;
 
@@ -67,6 +68,9 @@ public:
     Station(std::string name, Resource* resource, int unitsNeeded,
             std::unique_ptr<IQueueRule> rule,
             std::unique_ptr<IDistribution> service);
+    Station(std::string name, Resource* resource, int unitsNeeded,
+            std::unique_ptr<IQueueRule> rule,
+            ExpressionPtr service);
 
     // --- INode ---
     void enter(NodeContext& ctx, Entity* e) override;
@@ -98,15 +102,18 @@ public:
     const EntityQueue& queue() const { return m_queue; }
     Statistics&  stats()          { return m_stats; }
     const Statistics& stats() const { return m_stats; }
-    IDistribution& serviceDistribution() { return *m_service; }
-    const IDistribution& serviceDistribution() const { return *m_service; }
+    IExpression& serviceExpression() { return *m_service; }
+    const IExpression& serviceExpression() const { return *m_service; }
+    // False when the service time is an arbitrary expression whose mean
+    // cannot be computed in advance. Not the same as "no load".
+    bool loadIsKnown() const override;
     std::size_t stillWaiting() const { return m_waitingSince.size(); }
     long long balked() const { return m_balked; }
     long long reneged() const { return m_reneged; }
     int unitsHeld() const { return m_unitsHeld; }
     int unitsNeeded() const { return m_unitsNeeded; }
 
-    SimTime drawService(const Entity& e, RandomStream& rng);
+    SimTime drawService(NodeContext& ctx, const Entity& e);
 
 private:
     void beginService(NodeContext& ctx, Entity* e, SimTime waited);

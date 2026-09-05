@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "Nodes.hpp"
+#include "VariableStore.hpp"
 #include "Entity.hpp"
 #include "RandomStream.hpp"
 #include "Trace.hpp"
@@ -18,6 +19,14 @@ namespace des {
 // ------------------------------------------------------------------- Delay --
 
 DelayNode::DelayNode(std::string name, std::unique_ptr<IDistribution> duration)
+    : INode(std::move(name)),
+      m_duration(duration ? ExpressionPtr(std::make_unique<DistributionExpression>(
+                                std::move(duration)))
+                          : ExpressionPtr()) {
+    if (!m_duration) throw ModelError("delay '" + m_name + "': null duration");
+}
+
+DelayNode::DelayNode(std::string name, ExpressionPtr duration)
     : INode(std::move(name)), m_duration(std::move(duration)) {
     if (!m_duration) throw ModelError("delay '" + m_name + "': null duration");
 }
@@ -25,7 +34,8 @@ DelayNode::DelayNode(std::string name, std::unique_ptr<IDistribution> duration)
 void DelayNode::enter(NodeContext& ctx, Entity* e) {
     m_stats.recordArrival(ctx.now());
     ++m_inTransit;
-    const SimTime d = m_duration->draw(ctx.rng());
+    EvalContext dctx = ctx.evaluationContext(e);
+    const SimTime d = static_cast<SimTime>(asNumber(m_duration->evaluate(dctx)));
     e->setAttribute("delayStart", ctx.now());
     ctx.scheduleReturn(ctx.now() + d, e, this);
     if (ctx.trace().isOn()) {
@@ -65,21 +75,56 @@ AssignNode::AssignNode(std::string name) : INode(std::move(name)) {}
 
 AssignNode& AssignNode::set(const std::string& attribute, std::unique_ptr<IDistribution> value) {
     if (!value) throw ModelError("assign '" + m_name + "': null value for '" + attribute + "'");
-    if (attribute == "waitTime" || attribute == "waitHere" || attribute == "stationEntry")
-        throw ModelError("assign '" + m_name + "': '" + attribute + "' is reserved by the engine");
-    m_rules.push_back(Rule{attribute, std::move(value)});
+    return set(AssignTarget::Attribute, attribute,
+               std::make_unique<DistributionExpression>(std::move(value)));
+}
+
+AssignNode& AssignNode::set(AssignTarget target, const std::string& name, ExpressionPtr value) {
+    if (!value) throw ModelError("assign '" + m_name + "': null value for '" + name + "'");
+    if (target == AssignTarget::Attribute &&
+        (name == "waitTime" || name == "waitHere" || name == "stationEntry"))
+        throw ModelError("assign '" + m_name + "': '" + name + "' is reserved by the engine");
+    m_rules.push_back(Rule{target, name, std::move(value)});
     return *this;
 }
 
 void AssignNode::enter(NodeContext& ctx, Entity* e) {
-    for (const auto& r : m_rules) e->setAttribute(r.name, r.value->draw(ctx.rng()));
+    EvalContext ectx = ctx.evaluationContext(e);
+    for (const auto& r : m_rules) {
+        const Value v = r.value->evaluate(ectx);
+        switch (r.target) {
+            case AssignTarget::Attribute:
+                e->setAttribute(r.name, asNumber(v));
+                break;
+            case AssignTarget::Variable:
+                // asNumber throws on text rather than storing something that
+                // later reads as zero -- variables are numeric.
+                ctx.variables().set(r.name, asNumber(v), ctx.now());
+                break;
+            case AssignTarget::EntityType:
+                // Through the engine, not e->setType(): the per-type counters
+                // are keyed by type and a live entity has to move between them.
+                ctx.setEntityType(e, isText(v) ? asText(v) : formatValue(v));
+                break;
+        }
+    }
     ++m_count;
     if (ctx.trace().isOn() && !m_rules.empty()) {
         std::ostringstream os;
         os << std::fixed << std::setprecision(4);
         for (std::size_t i = 0; i < m_rules.size(); ++i) {
             if (i) os << ", ";
-            os << m_rules[i].name << "=" << e->attribute(m_rules[i].name);
+            switch (m_rules[i].target) {
+                case AssignTarget::Attribute:
+                    os << m_rules[i].name << "=" << e->attribute(m_rules[i].name);
+                    break;
+                case AssignTarget::Variable:
+                    os << m_rules[i].name << ":=" << ctx.variables().get(m_rules[i].name);
+                    break;
+                case AssignTarget::EntityType:
+                    os << "type=" << e->type();
+                    break;
+            }
         }
         ctx.trace().event(ctx.now(), "Assign", e->id(), m_name, os.str(), 0, 0);
     }
@@ -97,12 +142,24 @@ void AssignNode::reset() {
     for (auto& r : m_rules) r.value->reset();
 }
 
+namespace {
+const char* assignTargetWord(AssignTarget t) {
+    switch (t) {
+        case AssignTarget::Attribute:  return "";
+        case AssignTarget::Variable:   return "var ";
+        case AssignTarget::EntityType: return "type";
+    }
+    return "";
+}
+}  // namespace
+
 std::string AssignNode::describe() const {
     std::ostringstream os;
     os << "Assign " << m_name << " [";
     for (std::size_t i = 0; i < m_rules.size(); ++i) {
         if (i) os << ", ";
-        os << m_rules[i].name << " ~ " << m_rules[i].value->describe();
+        os << assignTargetWord(m_rules[i].target) << m_rules[i].name
+           << " ~ " << m_rules[i].value->describe();
     }
     os << ", next=" << (m_next ? m_next->name() : std::string("exit")) << "]";
     return os.str();
@@ -118,6 +175,15 @@ DecideNode::DecideNode(std::string name, double probability)
 }
 
 DecideNode::DecideNode(std::string name, Condition condition)
+    : INode(std::move(name)), m_byChance(false) {
+    if (!condition) throw ModelError("decide '" + m_name + "': null condition");
+    // The old API becomes a CONSTRUCTOR for the new representation, not a
+    // second code path beside it.
+    m_branches.push_back(
+        Branch{-1.0, std::make_unique<LambdaExpression>(std::move(condition)), nullptr, 0});
+}
+
+DecideNode::DecideNode(std::string name, ExpressionPtr condition)
     : INode(std::move(name)), m_byChance(false) {
     if (!condition) throw ModelError("decide '" + m_name + "': null condition");
     m_branches.push_back(Branch{-1.0, std::move(condition), nullptr, 0});
@@ -141,6 +207,12 @@ DecideNode& DecideNode::addBranch(double probability, INode* target) {
 }
 
 DecideNode& DecideNode::addBranch(Condition condition, INode* target) {
+    if (!condition) throw ModelError("decide '" + m_name + "': null condition");
+    return addBranch(ExpressionPtr(std::make_unique<LambdaExpression>(std::move(condition))),
+                     target);
+}
+
+DecideNode& DecideNode::addBranch(ExpressionPtr condition, INode* target) {
     if (m_byChance)
         throw ModelError("decide '" + m_name + "': this block branches by chance; "
                          "a Decide is all-chance or all-condition, never mixed");
@@ -177,8 +249,9 @@ void DecideNode::enter(NodeContext& ctx, Entity* e) {
     } else {
         // First matching condition wins, so ORDER IS MEANINGFUL. Put the most
         // specific condition first.
+        EvalContext ectx = ctx.evaluationContext(e);
         for (auto& b : m_branches) {
-            if (b.condition(*e)) { chosen = &b; break; }
+            if (truthy(b.condition->evaluate(ectx))) { chosen = &b; break; }
         }
     }
 
@@ -201,7 +274,12 @@ void DecideNode::resetStatistics(SimTime now) {
 }
 
 void DecideNode::reset() {
-    for (auto& b : m_branches) b.taken = 0;
+    for (auto& b : m_branches) {
+        b.taken = 0;
+        // The condition may own a distribution with a cursor. Every other node
+        // that owns an expression resets it; this one was the gap.
+        if (b.condition) b.condition->reset();
+    }
     m_fellThrough = 0;
 }
 

@@ -1,0 +1,30 @@
+Arrivals Exponential(1.0). Service MEAN is 0.8 in every row.
+Only the shape of the service distribution changes.
+
+  service distribution         mean Wq    +/-        rho
+  ---------------------------------------------------------
+  Constant(0.8)                 1.566  +/-  0.099     0.802
+  Uniform(0.4, 1.2)             1.715  +/-  0.110     0.801
+  Triangular(0.2,0.6,1.6)       1.860  +/-  0.109     0.804
+  Exponential(0.8)              3.240  +/-  0.187     0.803
+
+--- what to notice ------------------------------------------------------
+Utilisation is 0.8 in every row -- identical, because it depends only on
+the mean. The server is busy exactly as much in all four systems.
+
+The WAIT is not identical. It roughly doubles from Constant to Exponential
+even though the workload never changed. Variability alone creates queues.
+
+This is the Pollaczek-Khinchine result: for an M/G/1 queue,
+    Wq = (rho / (1 - rho)) * (mean service / 2) * (1 + CV^2)
+where CV is the coefficient of variation of the service time. Constant has
+CV = 0, exponential has CV = 1 -- exactly a factor of two between them, and
+that is what the table shows.
+
+The practical version: if you want shorter queues and cannot add capacity,
+MAKE SERVICE MORE CONSISTENT. Reducing variability is free capacity, and it
+is invisible to anyone who only looks at averages.
+
+Deterministic is not in the table because it is not a shape -- it is a
+fixed list, for when you want to check a run by hand. See example 02.
+--------------------------------------------------------------------------

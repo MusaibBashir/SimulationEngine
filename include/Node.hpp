@@ -43,6 +43,7 @@
 
 #include <string>
 #include "Common.hpp"
+#include "EvalContext.hpp"
 
 namespace des {
 
@@ -81,6 +82,15 @@ public:
     // no entity would trip the departure handler's assertion -- which is exactly
     // what happened the first time this was wired up.
     void scheduleNextArrival(SimTime at, INode* source);
+
+    // v10: the only way a node evaluates an expression. Pass nullptr where
+    // there is no entity -- a Create block's interarrival field.
+    // v10: retyping an entity is not a plain setType(). Per-type NumberIn /
+    // NumberOut / WIP are keyed by the type an entity HAD when it arrived, so
+    // the engine has to move the live count across.
+    void           setEntityType(Entity* e, const std::string& type);
+    EvalContext    evaluationContext(const Entity* e);
+    VariableStore& variables();
 
     Entity* createEntity();
 
@@ -143,6 +153,11 @@ public:
     // per entity passing through, divided by capacity; 0 if it holds no
     // resource. Returning 0 means "not checkable", not "definitely fine".
     virtual double loadPerVisit() const { return 0.0; }
+
+    // v10: false when the mean cannot be computed in advance, which is
+    // NOT the same as "no load". A block that returns false is reported
+    // as unverified rather than passing the stability check silently.
+    virtual bool loadIsKnown() const { return true; }
 };
 
 }  // namespace des

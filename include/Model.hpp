@@ -22,6 +22,7 @@
 #include "Station.hpp"
 #include "Distribution.hpp"
 #include "ModelError.hpp"
+#include "VariableStore.hpp"
 
 namespace des {
 
@@ -61,10 +62,12 @@ private:
     std::vector<CreateNode*> m_sources;               // non-owning, for reports
     bool m_allowOverload{false};
     std::vector<ArrivalAttribute> m_arrivalAttributes;
+    VariableStore m_variables;
     std::unique_ptr<IDistribution> m_interarrival;
     INode* m_entry{nullptr};
 
     INode* add(std::unique_ptr<INode> node);
+    AssignNode& assignBlock(const std::string& name);
     void requireUnique(const std::string& name) const;
 
 public:
@@ -82,6 +85,12 @@ public:
 
     // Shorthand for the single-source case: creates a source called "Arrivals".
     Model& arrivals(std::unique_ptr<IDistribution> d);
+    // v10: the same fields written as text. EXPO(0.8), 5, or size * 0.5 --
+    // Arena makes no distinction and neither does this.
+    Model& arrivals(const std::string& interarrivalText);
+    Model& source(const std::string& name, const std::string& entityType,
+                  const std::string& interarrivalText, long long maxArrivals = -1,
+                  SimTime firstAt = 0.0, int entitiesPerArrival = 1);
 
     // *** v9: run a model whose queues grow without bound. ***
     // The stability check has refused rho >= 1 since v5, and for a STEADY-STATE
@@ -98,10 +107,16 @@ public:
     Model& allowOverload(bool on = true);
     bool overloadAllowed() const { return m_allowOverload; }
     void setInterarrival(std::unique_ptr<IDistribution> d) { arrivals(std::move(d)); }
+    // v10: Arena's Variable data module. Global, numeric, shared by every
+    // block -- the thing an attribute cannot say, because an attribute travels
+    // with one entity and this belongs to the system.
+    Model& variable(const std::string& name, double initialValue = 0.0);
+    VariableStore&       variables()       { return m_variables; }
+    const VariableStore& variables() const { return m_variables; }
+
     Model& attribute(const std::string& name, std::unique_ptr<IDistribution> d);
     void assignOnArrival(const std::string& n, std::unique_ptr<IDistribution> d) { attribute(n, std::move(d)); }
     const std::vector<ArrivalAttribute>& arrivalAttributes() const { return m_arrivalAttributes; }
-    IDistribution& interarrival() { return *m_interarrival; }
 
     // --- blocks ---------------------------------------------------------
     // Each returns *this so a whole flowchart reads as one statement. Where you
@@ -116,10 +131,17 @@ public:
     // through v6 behaviour, and still the right thing for a plain queue.
     Model& station(const std::string& name, int capacity,
                    QueueDiscipline discipline, std::unique_ptr<IDistribution> service);
+    Model& station(const std::string& name, int capacity,
+                   QueueDiscipline discipline, const std::string& serviceText);
+    Model& station(const std::string& name, int capacity,
+                   QueueDiscipline discipline, ExpressionPtr service);
 
     // A Process that seizes `units` of an already-declared SHARED resource.
     Model& stationUsing(const std::string& name, const std::string& resourceName,
                         QueueDiscipline discipline, std::unique_ptr<IDistribution> service,
+                        int units = 1);
+    Model& stationUsing(const std::string& name, const std::string& resourceName,
+                        QueueDiscipline discipline, const std::string& serviceText,
                         int units = 1);
 
     // v7: balking and reneging, configured on an existing Process block.
@@ -138,15 +160,33 @@ public:
     Model& branch(const std::string& decideName, double probability, const std::string& to);
     Model& branch(const std::string& decideName, DecideNode::Condition condition,
                   const std::string& to);
+    // v10: the same branch written as text. The parse happens here, so a
+    // malformed condition is a ModelError at build time -- on the C++ API it IS
+    // a programmer error. v11's compile() uses parseExpression() instead and
+    // collects diagnostics against the cell.
+    Model& branch(const std::string& decideName, ExpressionPtr condition,
+                  const std::string& to);
+    Model& branchWhen(const std::string& decideName, const std::string& conditionText,
+                      const std::string& to);
     Model& process(const std::string& name, int capacity,
                    QueueDiscipline discipline, std::unique_ptr<IDistribution> service) {
         return station(name, capacity, discipline, std::move(service));
     }
     Model& delay(const std::string& name, std::unique_ptr<IDistribution> duration);
+    Model& delay(const std::string& name, const std::string& durationText);
     Model& assign(const std::string& name, const std::string& attributeName,
                   std::unique_ptr<IDistribution> value);
+    // v10. assignTo writes an attribute from text; assignVariable writes a
+    // global; assignEntityType restamps the entity's type.
+    Model& assignTo(const std::string& block, const std::string& attributeName,
+                    const std::string& valueText);
+    Model& assignVariable(const std::string& block, const std::string& variableName,
+                          const std::string& valueText);
+    Model& assignEntityType(const std::string& block, const std::string& typeText);
     Model& decideByChance(const std::string& name, double probabilityTrue);
     Model& decideByCondition(const std::string& name, DecideNode::Condition condition);
+    Model& decideByCondition(const std::string& name, ExpressionPtr condition);
+    Model& decideWhen(const std::string& name, const std::string& conditionText);
     Model& batch(const std::string& name, std::size_t size, bool permanent = false);
     // Group entities that AGREE on an attribute (same lot, same order).
     Model& batchBySameAttribute(const std::string& name, std::size_t size,
@@ -200,6 +240,25 @@ public:
     std::size_t nodeCount() const { return m_nodes.size(); }
     INode& nodeAt(std::size_t i) { return *m_nodes[i]; }
     const INode& nodeAt(std::size_t i) const { return *m_nodes[i]; }
+
+    // v10: an expression's mean may be unknowable, so the offered-load check
+    // cannot always be applied. Reporting that is not the same as passing.
+    struct StabilityReport {
+        bool                     checked{true};
+        std::vector<std::string> unverifiable;   // block names
+        double                   maxUtilisation{0.0};
+    };
+    StabilityReport stability() const;
+
+    // False when ANY source's interarrival mean cannot be computed in
+    // advance. Then lambda is unknown, so no station's offered load is
+    // knowable either -- however simple its own service time looks.
+    bool arrivalRateIsKnown() const;
+
+    // Every expression in the model, checked against declared names before the
+    // run. v11 calls the same walk and turns each Diagnostic into a cell
+    // reference instead of throwing.
+    std::vector<Diagnostic> checkExpressions() const;
 
     // --- analysis ---
     VisitRatios visitRatios() const;

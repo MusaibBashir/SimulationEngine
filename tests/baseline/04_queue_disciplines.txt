@@ -1,0 +1,35 @@
+One machine, jobs every ~10 min, each needing 2-14 min.
+10 replications each, 95% intervals.
+
+  rule           mean wait   +/-        Lq
+  ------------------------------------------
+  FIFO         17.501 +/-  1.432     1.729
+  LIFO         17.484 +/-  1.489     1.725
+  SPT          12.816 +/-  0.895     1.265
+  EDD          17.671 +/-  1.407     1.746
+  Random       19.892 +/-  1.849     2.000
+
+--- what to notice ------------------------------------------------------
+SPT wins on MEAN wait, and it is not close. Serving the shortest job first
+gets the most jobs out of the way soonest, so the average comes down. This
+is a theorem, not an accident.
+
+But look only at the mean and you will make a bad decision: SPT achieves
+it by making long jobs wait a very long time, and in a busy shop a long
+job can be starved indefinitely. Check `max waiting time` in the full
+report, not just the average, before recommending SPT to anyone.
+
+FIFO, LIFO and Random all give the SAME mean wait (within the intervals).
+That surprises people. Little's Law says mean wait depends on the total
+work in the system, and reordering a queue does not change how much work
+is in it. What reordering changes is the VARIANCE -- LIFO's average equals
+FIFO's while its worst case is far worse.
+
+EDD does not minimise waiting and is not trying to: it minimises maximum
+LATENESS. Judge a rule by the objective it was designed for.
+
+Priority is left out of the table above because this model has no
+"priority" attribute -- see the note at the top of the file. Add
+  m.assignOnArrival("priority", uniform(1.0, 5.0));
+and QueueDiscipline::Priority will serve the highest value first.
+-------------------------------------------------------------------------

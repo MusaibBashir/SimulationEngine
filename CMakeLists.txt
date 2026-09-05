@@ -18,6 +18,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ----------------------------------------------------------------------------
 add_library(des_engine STATIC
     src/Entity.cpp
+    src/Value.cpp
+    src/Lexer.cpp
+    src/EvalContext.cpp
+    src/VariableStore.cpp
+    src/Expression.cpp
+    src/Functions.cpp
+    src/Parser.cpp
     src/RandomStream.cpp
     src/StreamTests.cpp
     src/Distribution.cpp
@@ -49,7 +56,13 @@ add_library(des_engine STATIC
 target_include_directories(des_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 if(MSVC)
-    set(DES_WARNINGS /W4)
+    # /EHsc is NOT optional. Without it MSVC compiles with unwind semantics
+    # disabled, so a throw that has to unwind -- v10 catches a distribution
+    # constructor's ModelError to turn it into a Diagnostic -- calls abort()
+    # instead, and on Windows abort() opens a MODAL DIALOG that an automated
+    # run has nobody to click. The engine has thrown since v5; the setting was
+    # simply never stated, and the compiler had been warning C4530 about it.
+    set(DES_WARNINGS /W4 /EHsc)
 else()
     set(DES_WARNINGS -Wall -Wextra -Wpedantic)
 endif()
@@ -62,7 +75,7 @@ add_executable(des main.cpp)
 target_link_libraries(des PRIVATE des_engine)
 target_compile_options(des PRIVATE ${DES_WARNINGS})
 
-add_executable(des_tests tests/tests.cpp)
+add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp)
 target_link_libraries(des_tests PRIVATE des_engine)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
 

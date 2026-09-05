@@ -28,6 +28,7 @@
 #include "RandomStream.hpp"
 #include "TerminationRule.hpp"
 #include "Trace.hpp"
+#include "EvalContext.hpp"
 #include "Model.hpp"
 #include "Entity.hpp"
 #include "Delay.hpp"
@@ -76,7 +77,7 @@ struct RunResults {
     const StationResults& station(const std::string& name) const;
 };
 
-class SimulationSystem {
+class SimulationSystem : public IModelState {
 private:
     Clock m_clock;
     FutureEventList m_fel;
@@ -144,6 +145,7 @@ private:
     };
     std::map<std::string, TypeStats> m_byType;
     void noteArrival(Entity* e);
+    void retypeEntity(Entity* e, const std::string& type);
     void noteExit(Entity* e);
     void updateAllIntegrals(SimTime upTo);
 
@@ -159,6 +161,19 @@ public:
     SimulationSystem& operator=(const SimulationSystem&) = delete;
 
     // --- setup ---
+    // v10: the narrow interface the expression layer asked for. Note what is
+    // NOT here -- the FEL, the entity table, the statistics objects.
+    double  queueLength(const std::string& blockName) const override;
+    double  resourceBusy(const std::string& name) const override;
+    double  resourceCapacity(const std::string& name) const override;
+    double  numberInSystem() const override;
+    SimTime now() const override;
+
+    double variableAverage(const std::string& name) const;
+
+    // Prints nothing when every block was verified -- silence means checked.
+    void reportStability(std::ostream& os) const;
+
     Model& model() { return m_model; }
     const Model& model() const { return m_model; }
     void setTermination(std::unique_ptr<ITerminationRule> rule);

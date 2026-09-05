@@ -3,7 +3,7 @@
 Written from the simulation theory table up, as a way of learning OOP and system
 design rather than as a way of getting a simulator.
 
-**Current state: v9.** A flowchart simulator in the spirit of Arena's Basic
+**Current state: v10.** A flowchart simulator in the spirit of Arena's Basic
 Process template — Process, Delay, Assign, Decide, Batch, Separate, Record,
 Dispose — with **shared resources**, balking and reneging, warm-up removal,
 replications and confidence intervals. Refuses to run an unstable model, working
@@ -13,6 +13,12 @@ primitive, with pluggable engines, generator-quality tests, twelve distributions
 and both major variance-reduction techniques. Builds clean under
 `-Wall -Wextra -Wpedantic` and ASan/UBSan; 160/160 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
+
+**v10: a model can be written as text.** Every duration, condition and
+assignment value is an expression, so `station("Cut", 1, FIFO, "size * 0.5")`
+and `decideWhen("Busy?", "NQ(Machine) > 3")` are models, not code. Arena's
+Variable data module arrived with it. This is what a spreadsheet and a
+front end need, and neither is possible while a field holds a lambda.
 
 ```cpp
 #include "des.hpp"
@@ -39,6 +45,19 @@ Without CMake:
 ```
 g++ -std=c++17 -Wall -Wextra -Wpedantic -Iinclude main.cpp src/*.cpp -o des
 ```
+
+**The verification gate, in one command each:**
+
+```
+bash tools/verify.sh      # both compilers warning-clean, plus MSVC AddressSanitizer
+bash tools/baseline.sh check   # every example still byte-identical
+```
+
+`tools/verify.sh` finds a C++17-capable compiler itself and refuses one that is
+too old. **UBSan does not exist on the Windows side** — MinGW ships no
+`libubsan` and MSVC has none — so the script runs ASan and UBSan through **WSL's
+Linux GCC** instead, and skips that leg loudly if WSL is absent rather than
+passing silently.
 
 Before and after any refactor — entities are destroyed at departure, so a
 routing mistake becomes a use-after-free, and this is what proves it hasn't:
@@ -67,6 +86,58 @@ sim.initialise();
 sim.run();
 sim.report();
 ```
+
+## Writing a model as text
+
+Every field that held a distribution or a lambda now takes a string. The two
+spellings build the same thing, and a test asserts they trace identically.
+
+```cpp
+sim.model()
+   .variable("Rejected", 0.0)             // a global, Arena's Variable module
+   .attribute("size", uniform(1.0, 4.0))
+   .arrivals("EXPO(2.0)")
+   .station("Machine", 1, FIFO, "size * 0.5")     // reads the entity
+   .decideWhen("Busy?", "NQ(Machine) > 3")        // reads the queue
+   .assignVariable("Fail", "Rejected", "Rejected + 1")
+   .entryAt("Busy?");
+```
+
+**The grammar.** C-style operators, `^` right-associative, unary minus binding
+looser than `^`, `&&` and `||` short-circuiting.
+
+```
+|| && == != < <= > >= + - * / % ^ ! ( ) ,
+```
+
+| Kind | Names |
+|---|---|
+| Distributions | `EXPO` `CONS` `UNIF` `TRIA` `NORM` `LOGN` `WEIB` `ERLA` `POIS` `DISC` |
+| Model state | `NQ(block)` `NR(name)` `MR(name)` `WIP()`, and the constant `TNOW` |
+| Maths | `MIN` `MAX` `ABS` `ROUND` `TRUNC` `SQRT` `LN` `EXP` `MOD` |
+
+Names resolve to entity attributes, declared variables, or `Entity.Type`.
+
+**Gotchas, each of which is a real trap:**
+
+- **`EXPO` is the exponential distribution; `EXP` is e^x.** Arena's collision,
+  kept deliberately.
+- **`DISC` takes cumulative probabilities**, as Arena does —
+  `DISC(0.3, 1, 0.8, 2, 1.0, 3)` means P = 0.3, 0.5, 0.2. The engine's own
+  `discrete()` takes individual ones.
+- **`LOGN` takes the mean and sd of the variable**, not of its logarithm.
+- **`NQ()` takes a block name, not a value.** `NQ(Teller)` is the block called
+  Teller; `NQ(x + 1)` is an error.
+- **A variable may not share a name with an attribute.** Refused at declaration,
+  because a resolution order means one of the two reads silently wrong.
+- **An interarrival field has no entity.** `arrivals("size * 2")` is refused at
+  `initialise()`, not mid-run.
+- **There is no distribution field.** `5`, `EXPO(0.8)` and `size * 0.5` are the
+  same kind of field, exactly as in Arena.
+
+A bad expression on the C++ API throws `ModelError` listing every problem with
+its column. `parseExpression()` returns those diagnostics instead of throwing,
+which is what v11's spreadsheet will use.
 
 ## Getting an answer you can defend
 
@@ -147,6 +218,7 @@ need to read the engine's source to build a model with it.
 | `V6_READLOG.md` | Flowchart blocks, INode, and why NodeContext beat a wider public interface |
 | `V7_READLOG.md` | Shared resources, balking, reneging, N-way Decide |
 | `V8_READLOG.md` | Random number generation, RANDU, variance reduction |
+| `V10_READLOG.md` | The expression layer: one grammar, saying you do not know, and the bugs |
 | `V9_READLOG.md` | Multiple sources, entity types, matched batching, terminating runs |
 | `ARENA_MAP.md` | Arena module → this engine, and where the two differ |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
@@ -172,6 +244,8 @@ includes its own header first — a free self-test that the header stands alone.
 | System | `SimulationSystem` (engine) + `Model` (what is simulated) |
 | Entity | `Entity` |
 | Attribute | `Entity::m_attributes` |
+| Variable ★ | `VariableStore` — global, time-persistent |
+| Expression ★ | `IExpression`, built by `Parser` |
 | Resource | `Resource`, owned by a `Station` |
 | State ★ | `SystemState`, a snapshot summed across stations |
 | Event ★ | `EventType` + `EventNotice` |
@@ -269,8 +343,6 @@ two and every time-average goes quietly wrong with no error.
 3. **Batch means** — one long run split into batches, as an alternative to
    independent replications when the warm-up is expensive to repeat.
 4. **Config file input.** Nothing has blocked it since v5.
-5. **Streams for every block**, finishing what v8 started — Delay durations and
-   Decide draws still share the common stream.
 6. **Distribution fitting** — hand it data, have it suggest a distribution and
    report a goodness-of-fit statistic. `StreamTests` already has the chi-square
    and Kolmogorov–Smirnov machinery; this is mostly wiring plus parameter

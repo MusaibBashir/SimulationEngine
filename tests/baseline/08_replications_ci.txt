@@ -1,0 +1,73 @@
+ONE RUN, no warm-up: Wq = 3.0511
+  Four decimal places from a single sample. Every digit after
+  the first is decoration.
+
+=== experiment: M/M/1, properly ===
+replications             : 20  (seeds 9000..9019)
+warm-up discarded        : 500.0000
+measured period per rep  : 19500.2830
+
+  quantity                    mean      95% half-width      interval
+  ---------------------------------------------------------------------
+  average wait (Wq)         3.2015  +/-   0.1389   [   3.0626,    3.3404]
+  time in system (W)        4.0016  +/-   0.1405   [   3.8611,    4.1421]
+  number in queue (Lq)      3.2060  +/-   0.1462   [   3.0598,    3.3522]
+  number in system (L)      4.0070  +/-   0.1496   [   3.8574,    4.1566]
+  utilisation (rho)         0.8009  +/-   0.0046   [   0.7963,    0.8055]
+=====================================================================
+
+--- the per-replication values --------------------------
+  seed 9000  Wq = 3.2890
+  seed 9001  Wq = 3.0228
+  seed 9002  Wq = 2.9493
+  seed 9003  Wq = 3.2479
+  seed 9004  Wq = 3.0671
+  seed 9005  Wq = 3.3442
+  seed 9006  Wq = 3.5856
+  seed 9007  Wq = 3.1296
+  seed 9008  Wq = 2.9744
+  seed 9009  Wq = 2.9467
+  seed 9010  Wq = 3.8734
+  seed 9011  Wq = 3.7139
+  seed 9012  Wq = 3.2295
+  seed 9013  Wq = 2.6987
+  seed 9014  Wq = 3.2062
+  seed 9015  Wq = 3.2365
+  seed 9016  Wq = 2.9723
+  seed 9017  Wq = 3.2137
+  seed 9018  Wq = 2.8208
+  seed 9019  Wq = 3.5086
+
+  spread across runs (sample sd): 0.2968
+  95% interval for the mean     : [3.0626, 3.3404]
+  M/M/1 theory                  : 3.2000  -> inside: true
+
+  Try changing replications(20) to replications(5) and re-run.
+  The interval gets much wider, and whether it covers 3.2000
+  starts to depend on the seed. That is not the simulator being
+  unreliable -- it is five samples being too few to say much.
+
+--- what to notice ------------------------------------------------------
+Look at the per-replication list. Those are runs of the SAME model that
+differ only in the random seed, and they scatter by several tenths. Any
+one of them, quoted alone, would have looked authoritative.
+
+The interval contains the theoretical answer. That is what "the simulation
+agrees with theory" actually looks like -- not two numbers matching to
+four decimals, which would be luck.
+
+HOW TO USE THIS IN COURSEWORK:
+  * Never report a bare number from one run. Report mean +/- half-width,
+    and say how many replications.
+  * If the interval is too wide to answer your question, you need MORE
+    REPLICATIONS or LONGER RUNS -- not a different seed until you get a
+    number you like. Halving the interval takes four times the runs.
+  * Two designs whose intervals OVERLAP have not been shown to differ.
+    Saying "A is better than B" on overlapping intervals is unsupported.
+
+Two details the arithmetic gets right, which matter at small N:
+  * the sample standard deviation divides by (n-1), not n
+  * the interval uses Student's t (2.093 at n=20, 2.262 at n=10), not
+    1.96 -- the normal would make your interval too narrow and your
+    claims correspondingly too strong
+--------------------------------------------------------------------------

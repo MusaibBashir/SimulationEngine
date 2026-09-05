@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "Model.hpp"
+#include "Parser.hpp"
 #include "QueueRule.hpp"
 #include <cassert>
 #include <set>
@@ -38,6 +39,24 @@ Model& Model::source(const std::string& name, const std::string& entityType,
     return *this;
 }
 
+Model& Model::source(const std::string& name, const std::string& entityType,
+                     const std::string& interarrivalText, long long maxArrivals,
+                     SimTime firstAt, int entitiesPerArrival) {
+    requireUnique(name);
+    auto c = std::make_unique<CreateNode>(name, entityType, expr(interarrivalText),
+                                          maxArrivals, firstAt, entitiesPerArrival);
+    CreateNode* raw = c.get();
+    m_nodes.push_back(std::move(c));
+    m_sources.push_back(raw);
+    return *this;
+}
+
+Model& Model::arrivals(const std::string& interarrivalText) {
+    if (node("Arrivals") != nullptr)
+        throw ModelError("arrivals() has already been called; use source() for more streams");
+    return source("Arrivals", "Entity", interarrivalText);
+}
+
 Model& Model::arrivals(std::unique_ptr<IDistribution> d) {
     if (!d) throw ModelError("arrivals: null distribution");
     if (node("Arrivals") != nullptr)
@@ -71,7 +90,24 @@ Model& Model::attribute(const std::string& name, std::unique_ptr<IDistribution> 
     if (!d) throw ModelError("attribute '" + name + "': null distribution");
     if (name == "waitTime" || name == "stationEntry" || name == "waitHere")
         throw ModelError("attribute: '" + name + "' is reserved by the engine");
+    // The other direction of the one-namespace rule. Declared the other way
+    // round, the variable would shadow this attribute at every read while
+    // Assign kept writing it -- one of the two silently wrong.
+    if (m_variables.has(name))
+        throw ModelError("'" + name + "' is already a variable; an attribute may not share "
+                         "its name, because then one of the two would read wrong with no error");
     m_arrivalAttributes.push_back(ArrivalAttribute{name, std::move(d)});
+    return *this;
+}
+
+Model& Model::variable(const std::string& name, double initialValue) {
+    // Feed the store the attribute names first, so a collision is caught HERE
+    // rather than becoming a silent shadow at evaluation time.
+    std::vector<std::string> attributeNames;
+    attributeNames.reserve(m_arrivalAttributes.size());
+    for (const ArrivalAttribute& a : m_arrivalAttributes) attributeNames.push_back(a.name);
+    m_variables.noteAttributeNames(std::move(attributeNames));
+    m_variables.declare(name, initialValue);
     return *this;
 }
 
@@ -101,6 +137,40 @@ Model& Model::station(const std::string& name, int capacity,
     const std::string resName = name;
     if (resourceNamed(resName) == nullptr) resource(resName, capacity);
     return stationUsing(name, resName, discipline, std::move(service), 1);
+}
+
+Model& Model::station(const std::string& name, int capacity,
+                      QueueDiscipline discipline, const std::string& serviceText) {
+    return station(name, capacity, discipline, expr(serviceText));
+}
+
+Model& Model::station(const std::string& name, int capacity,
+                      QueueDiscipline discipline, ExpressionPtr service) {
+    requireUnique(name);
+    if (capacity < 1) throw ModelError("process '" + name + "' needs capacity >= 1");
+    if (resourceNamed(name) == nullptr) resource(name, capacity);
+    Resource* r = resourceNamed(name);
+    auto s = std::make_unique<Station>(name, r, 1, makeQueueRule(discipline), std::move(service));
+    Station* raw = s.get();
+    add(std::move(s));
+    m_processes.push_back(raw);
+    return *this;
+}
+
+Model& Model::stationUsing(const std::string& name, const std::string& resourceName,
+                           QueueDiscipline discipline, const std::string& serviceText,
+                           int units) {
+    requireUnique(name);
+    Resource* r = resourceNamed(resourceName);
+    if (r == nullptr)
+        throw ModelError("process '" + name + "': no resource named '" + resourceName +
+                         "' -- declare it with resource() first");
+    auto s = std::make_unique<Station>(name, r, units, makeQueueRule(discipline),
+                                       expr(serviceText));
+    Station* raw = s.get();
+    add(std::move(s));
+    m_processes.push_back(raw);
+    return *this;
 }
 
 Model& Model::stationUsing(const std::string& name, const std::string& resourceName,
@@ -169,9 +239,60 @@ Model& Model::branch(const std::string& decideName, DecideNode::Condition condit
     return *this;
 }
 
+Model& Model::branch(const std::string& decideName, ExpressionPtr condition,
+                     const std::string& to) {
+    INode* target = node(to);
+    if (!target) throw ModelError("branch: no block named '" + to + "'");
+    nodeAs<DecideNode>(decideName).addBranch(std::move(condition), target);
+    return *this;
+}
+
+Model& Model::branchWhen(const std::string& decideName, const std::string& conditionText,
+                         const std::string& to) {
+    return branch(decideName, expr(conditionText), to);
+}
+
+Model& Model::delay(const std::string& name, const std::string& durationText) {
+    requireUnique(name);
+    add(std::make_unique<DelayNode>(name, expr(durationText)));
+    return *this;
+}
+
 Model& Model::delay(const std::string& name, std::unique_ptr<IDistribution> duration) {
     requireUnique(name);
     add(std::make_unique<DelayNode>(name, std::move(duration)));
+    return *this;
+}
+
+// Find-or-create the Assign block. Calling assign twice with one block name
+// adds a second field to the SAME block, which is how an Assign with several
+// fields is written.
+AssignNode& Model::assignBlock(const std::string& name) {
+    if (INode* existing = node(name)) {
+        auto* a = dynamic_cast<AssignNode*>(existing);
+        if (!a) throw ModelError("block '" + name + "' exists and is not an Assign");
+        return *a;
+    }
+    auto owned = std::make_unique<AssignNode>(name);
+    AssignNode* raw = owned.get();
+    add(std::move(owned));
+    return *raw;
+}
+
+Model& Model::assignTo(const std::string& block, const std::string& attributeName,
+                       const std::string& valueText) {
+    assignBlock(block).set(AssignTarget::Attribute, attributeName, expr(valueText));
+    return *this;
+}
+
+Model& Model::assignVariable(const std::string& block, const std::string& variableName,
+                             const std::string& valueText) {
+    assignBlock(block).set(AssignTarget::Variable, variableName, expr(valueText));
+    return *this;
+}
+
+Model& Model::assignEntityType(const std::string& block, const std::string& typeText) {
+    assignBlock(block).set(AssignTarget::EntityType, "", expr(typeText));
     return *this;
 }
 
@@ -202,6 +323,16 @@ Model& Model::decideByCondition(const std::string& name, DecideNode::Condition c
     requireUnique(name);
     add(std::make_unique<DecideNode>(name, std::move(c)));
     return *this;
+}
+
+Model& Model::decideByCondition(const std::string& name, ExpressionPtr condition) {
+    requireUnique(name);
+    add(std::make_unique<DecideNode>(name, std::move(condition)));
+    return *this;
+}
+
+Model& Model::decideWhen(const std::string& name, const std::string& conditionText) {
+    return decideByCondition(name, expr(conditionText));
 }
 
 Model& Model::batch(const std::string& name, std::size_t size, bool permanent) {
@@ -306,6 +437,7 @@ void Model::reset() {
     // m_sources are among m_nodes, so they are reset with everything else.
     if (m_interarrival) m_interarrival->reset();
     for (auto& a : m_arrivalAttributes) a.distribution->reset();
+    m_variables.reset();
 }
 
 // ------------------------------------------------------------ analysis --
@@ -389,8 +521,8 @@ double Model::offeredLoad(const Station& s) const {
     // a model that cannot run.
     double lambda = 0.0;
     for (const CreateNode* c : m_sources) {
-        const SimTime gap = c->interarrival().mean();
-        if (gap > 0.0) lambda += c->entitiesPerArrival() / gap;
+        const auto gap = c->interarrival().meanIfKnown();
+        if (gap && *gap > 0.0) lambda += c->entitiesPerArrival() / *gap;
     }
     if (lambda <= 0.0) return 0.0;
 
@@ -402,7 +534,8 @@ double Model::offeredLoad(const Station& s) const {
         for (const auto& a : m_arrivalAttributes)
             if (a.name == s.serviceAttributeName()) meanService = a.distribution->mean();
     } else {
-        meanService = s.serviceDistribution().mean();
+        const auto mean = s.serviceExpression().meanIfKnown();
+        meanService = mean ? *mean : 0.0;
     }
     if (meanService <= 0.0) return 0.0;
 
@@ -420,8 +553,88 @@ void Model::wireSources() {
         if (c->next() == nullptr && m_entry != nullptr) c->setNext(m_entry);
 }
 
+std::vector<Diagnostic> Model::checkExpressions() const {
+    ValidationContext vc;
+    vc.variables = &m_variables;
+    for (const ArrivalAttribute& a : m_arrivalAttributes) vc.attributeNames.push_back(a.name);
+    // An attribute written by an Assign counts as declared too, otherwise a
+    // model that stamps its own attributes could never reference them.
+    for (const std::unique_ptr<INode>& n : m_nodes)
+        if (const auto* a = dynamic_cast<const AssignNode*>(n.get()))
+            for (const AssignNode::Rule& r : a->rules())
+                if (r.target == AssignTarget::Attribute) vc.attributeNames.push_back(r.name);
+    // The engine stamps these on every entity.
+    vc.attributeNames.push_back("waitTime");
+    vc.attributeNames.push_back("waitHere");
+    vc.attributeNames.push_back("stationEntry");
+
+    std::vector<Diagnostic> problems;
+
+    // An Assign may invent an attribute name, so the collision cannot be caught
+    // at declaration the way an arrival attribute's can. It is caught here.
+    for (const std::unique_ptr<INode>& n : m_nodes)
+        if (const auto* a = dynamic_cast<const AssignNode*>(n.get()))
+            for (const AssignNode::Rule& r : a->rules())
+                if (r.target == AssignTarget::Attribute && m_variables.has(r.name))
+                    problems.push_back(Diagnostic{Severity::Error, r.value->span(),
+                        "'" + r.name + "' is a declared variable; an Assign may not write an "
+                        "attribute of the same name, because every read would see the variable"});
+
+    // A Create's interarrival field is evaluated with NO entity -- there isn't
+    // one yet. Catching an attribute reference here is the whole reason
+    // FieldContext exists.
+    ValidationContext noEntity = vc;
+    noEntity.field = FieldContext::NoEntity;
+    for (const CreateNode* c : m_sources) c->interarrival().validate(noEntity, problems);
+
+    for (const std::unique_ptr<INode>& n : m_nodes) {
+        if (const auto* st = dynamic_cast<const Station*>(n.get()))
+            st->serviceExpression().validate(vc, problems);
+        else if (const auto* d = dynamic_cast<const DelayNode*>(n.get()))
+            d->durationExpression().validate(vc, problems);
+        else if (const auto* a = dynamic_cast<const AssignNode*>(n.get()))
+            for (const AssignNode::Rule& r : a->rules()) r.value->validate(vc, problems);
+        else if (const auto* dec = dynamic_cast<const DecideNode*>(n.get()))
+            for (const DecideNode::Branch& b : dec->branches())
+                if (b.condition) b.condition->validate(vc, problems);
+    }
+    return problems;
+}
+
+bool Model::arrivalRateIsKnown() const {
+    for (const CreateNode* c : m_sources)
+        if (!c->interarrival().meanIfKnown()) return false;
+    return true;
+}
+
+Model::StabilityReport Model::stability() const {
+    StabilityReport r;
+    // An unknowable lambda makes EVERY station unverifiable. Letting it read as
+    // zero would report a clean bill of health on a model the check never
+    // examined -- which is worse than having no check.
+    const bool lambdaKnown = arrivalRateIsKnown();
+    const VisitRatios vr = visitRatios();
+    for (const Station* st : m_processes) {
+        if (vr.visits.find(st) == vr.visits.end()) continue;
+        if (!lambdaKnown || !st->loadIsKnown()) {
+            r.checked = false;
+            r.unverifiable.push_back(st->name());
+            continue;
+        }
+        const double rho = offeredLoad(*st);
+        if (rho > r.maxUtilisation) r.maxUtilisation = rho;
+    }
+    return r;
+}
+
 void Model::validate() const {
     if (m_nodes.empty())      throw ModelError("model has no blocks");
+    {
+        const std::vector<Diagnostic> problems = checkExpressions();
+        if (hasErrors(problems))
+            throw ModelError("this model has expression errors:\n" +
+                             formatDiagnostics(problems));
+    }
     if (m_sources.empty())    throw ModelError("model has no arrival source -- call arrivals() or source()");
     if (m_entry == nullptr)   throw ModelError("model has no entry block -- call entryAt()");
     for (const CreateNode* c : m_sources)
@@ -471,12 +684,18 @@ void Model::validate() const {
     // and impossible if they share one operator -- checking them separately
     // would pass a model that cannot run.
     const VisitRatios vr = visitRatios();
+    // An unknowable arrival rate makes every station's load unknowable, so the
+    // checks below must skip them rather than judge them against a lambda of 0.
+    const bool lambdaKnown = arrivalRateIsKnown();
     for (const auto& res : m_resources) {
         double total = 0.0;
         int users = 0;
         for (const Station* st : m_processes) {
             if (&st->resource() != res.get()) continue;
             if (vr.visits.find(st) == vr.visits.end()) continue;
+            // Same reason as below: a station whose load is unknowable must not
+            // contribute 0.0 to a total that is then compared against 1.
+            if (!lambdaKnown || !st->loadIsKnown()) continue;
             total += offeredLoad(*st);
             ++users;
         }
@@ -492,6 +711,7 @@ void Model::validate() const {
 
     for (const Station* st : m_processes) {
         if (vr.visits.find(st) == vr.visits.end()) continue;   // unreachable block
+        if (!lambdaKnown || !st->loadIsKnown()) continue;   // stability() reports these
         const double rho = offeredLoad(*st);
         if (rho >= 1.0 && !m_allowOverload) {
             std::ostringstream os;
@@ -513,7 +733,14 @@ void Model::validate() const {
 
 std::string Model::describe() const {
     std::ostringstream os;
-    os << "arrivals ~ " << (m_interarrival ? m_interarrival->describe() : "<none>") << "\n";
+    // Ask the SOURCE, not the copy kept for the stability check. A model built
+    // with arrivals("EXPO(1.0)") never fills that copy in, and reporting
+    // "<none>" for a model that plainly has arrivals is the kind of quietly
+    // wrong line this project keeps hunting. For a distribution-built model
+    // both routes print the same string.
+    os << "arrivals ~ "
+       << (m_sources.empty() ? std::string("<none>") : m_sources.front()->interarrival().describe())
+       << "\n";
     for (const auto& a : m_arrivalAttributes)
         os << "  attribute " << a.name << " ~ " << a.distribution->describe() << "\n";
     for (const auto& n : m_nodes) os << "  " << n->describe() << "\n";

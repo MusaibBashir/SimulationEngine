@@ -81,6 +81,7 @@ directory. Run them from a directory you don't mind cluttering.
 | 13 | `13_random_numbers.cpp` | Where the random numbers come from, all twelve distributions, and testing a generator. |
 | 14 | `14_variance_reduction.cpp` | Antithetic variates and common random numbers — a narrower answer for the same compute. |
 | 15 | `15_lab_problems.cpp` | **Three Arena coursework problems solved end to end**: batching, duplication with two exits, matched "one of each" batching. |
+| 16 | `16_expressions.cpp` | **A model written as text**: a service time reading the entity, a condition reading a queue, and a variable the model writes. |
 
 If you are short of time: **01, 02, 08**. Those three are the difference between
 using the tool correctly and producing confident nonsense. Then **11** if your
@@ -398,3 +399,32 @@ same range.
 9. Report the **maximum** as well as the mean whenever you use a priority or
    shortest-job rule — those rules buy a good average by treating somebody
    badly, and the average hides it.
+
+## Expressions (v10)
+
+Every duration, condition and assignment value can be a string.
+
+```cpp
+.arrivals("EXPO(2.0)")
+.station("Machine", 1, FIFO, "size * 0.5")     // reads the entity
+.decideWhen("Busy?", "NQ(Machine) > 3")        // reads the queue
+.assignVariable("Fail", "Rejected", "Rejected + 1")
+```
+
+| Kind | Names |
+|---|---|
+| Distributions | `EXPO` `CONS` `UNIF` `TRIA` `NORM` `LOGN` `WEIB` `ERLA` `POIS` `DISC` |
+| Model state | `NQ(block)` `NR(name)` `MR(name)` `WIP()`, constant `TNOW` |
+| Maths | `MIN` `MAX` `ABS` `ROUND` `TRUNC` `SQRT` `LN` `EXP` `MOD` |
+
+**The traps:**
+
+- `EXPO` is the exponential distribution; `EXP` is e^x.
+- `DISC` takes **cumulative** probabilities, as Arena does; `discrete()` takes
+  individual ones.
+- `LOGN` takes the mean and sd of the variable, not of its logarithm.
+- `NQ()` takes a block **name**, not a value.
+- A variable may not share a name with an attribute — refused at declaration.
+- Declare a variable before assigning to it; there is no auto-create.
+- An interarrival field has **no entity**, so it cannot read an attribute. This
+  is caught at `initialise()`, not mid-run.

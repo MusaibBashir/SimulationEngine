@@ -1,0 +1,40 @@
+=== simulation report =====================================
+seed                     : 1
+termination              : EntityLimit(5)
+total simulated time     : 13.0000
+warm-up discarded        : 0.0000
+measured period          : 13.0000
+entities arrived         : 5
+entities exited          : 5
+average total wait       : 1.0000
+average time in system   : 3.4000
+max total wait           : 3.0000
+time-avg in queue (Lq)   : 0.3846
+time-avg in system (L)   : 1.3077
+still waiting at stop    : 0
+live entity objects      : 0
+
+  station        cap   served    avg wait   time-avg Q    util   maxQ
+  -----------------------------------------------------------------
+  Server          1        5      1.0000       0.3846  0.9231      1
+===========================================================
+
+--- the same run, worked by hand ---------------------------------------
+  t=0   C1 arrives, server free   -> service 3, leaves at t=3
+  t=2   C2 arrives, server busy   -> joins the queue
+  t=3   C1 leaves (waited 0)      -> C2 starts, waited 1, service 2
+  t=5   C2 leaves (waited 1)
+  t=6   C3 arrives, server free   -> service 4, leaves at t=10
+  t=7   C4 arrives, server busy   -> joins the queue
+  t=10  C3 leaves (waited 0)      -> C4 starts, waited 3, service 1
+        C5 also ARRIVES at t=10. Two events at the same instant: the
+        departure was scheduled first, so it happens first. That tie-break
+        is why two runs with the same seed give identical answers.
+  t=11  C4 leaves (waited 3)      -> C5 starts, waited 1, service 2
+  t=13  C5 leaves (waited 1)
+
+  5 served. Waits 0, 1, 0, 3, 1 -> average 1.0000, maximum 3.0000.
+  Last exit at t = 13.0000.
+------------------------------------------------------------------------
+Compare those to the report above, then open trace_02.md and compare it
+line by line. If they match, you can trust the model you build next.
