@@ -16,6 +16,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include "Common.hpp"
@@ -30,6 +31,21 @@ public:
     virtual ~ITerminationRule() = default;
     virtual bool isMet(const SimulationSystem& sim) const = 0;
     virtual std::string describe() const = 0;
+
+    // v12: how far through this rule the run is, as a fraction, or NOTHING.
+    //
+    // Nothing means CANNOT TELL. It does not mean zero, and the difference is
+    // the whole reason this returns an optional: a whenDrained() run has no
+    // knowable fraction, and a progress bar that reads 0% for its whole
+    // duration and then jumps to 100% is not an approximation, it is a lie the
+    // caller has no way to detect. This is the fourth time this project has
+    // had to write that rule down, after VisitRatios::exact, v9's silently
+    // zero WIP, and v10's unknowable arrival mean.
+    //
+    // Defaulted, so a rule that cannot answer says so by saying nothing.
+    virtual std::optional<double> progress(const SimulationSystem&) const {
+        return std::nullopt;
+    }
 };
 
 class TimeLimit : public ITerminationRule {
@@ -38,6 +54,7 @@ public:
     explicit TimeLimit(SimTime maxTime);
     bool isMet(const SimulationSystem& sim) const override;
     std::string describe() const override;
+    std::optional<double> progress(const SimulationSystem& sim) const override;
     SimTime maxTime() const { return m_maxTime; }
 };
 
@@ -47,6 +64,7 @@ public:
     explicit EntityLimit(int maxEntities);
     bool isMet(const SimulationSystem& sim) const override;
     std::string describe() const override;
+    std::optional<double> progress(const SimulationSystem& sim) const override;
 };
 
 // Stop once the system has drained: nothing in service, nothing waiting.
@@ -56,6 +74,10 @@ class DrainedRule : public ITerminationRule {
 public:
     bool isMet(const SimulationSystem& sim) const override;
     std::string describe() const override;
+    // NO progress() override, deliberately. Whether a system will next be
+    // empty is not knowable in advance, so the honest answer is the base
+    // class's nothing. Adding one here that returned 0 until the moment it
+    // returned 1 is the exact lie the base comment describes.
 };
 
 // Composite: met when ANY child is met. The v1 hardcoded OR, now a first-class
@@ -67,6 +89,7 @@ public:
     AnyOf& add(std::unique_ptr<ITerminationRule> rule);
     bool isMet(const SimulationSystem& sim) const override;
     std::string describe() const override;
+    std::optional<double> progress(const SimulationSystem& sim) const override;
     bool empty() const { return m_rules.empty(); }
 };
 

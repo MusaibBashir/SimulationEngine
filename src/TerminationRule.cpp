@@ -2,6 +2,7 @@
 // TerminationRule.cpp
 // ============================================================================
 
+#include <algorithm>
 #include "TerminationRule.hpp"
 #include "SimulationSystem.hpp"   // full definition needed: the rules query it
 #include <cassert>
@@ -20,6 +21,11 @@ std::string TimeLimit::describe() const {
     std::ostringstream os; os << "TimeLimit(" << m_maxTime << ")"; return os.str();
 }
 
+std::optional<double> TimeLimit::progress(const SimulationSystem& sim) const {
+    if (!(m_maxTime > 0.0)) return std::nullopt;
+    return std::min(1.0, sim.now() / m_maxTime);
+}
+
 EntityLimit::EntityLimit(int maxEntities) : m_maxEntities(maxEntities) {
     assert(maxEntities > 0);
 }
@@ -32,6 +38,12 @@ std::string EntityLimit::describe() const {
     std::ostringstream os; os << "EntityLimit(" << m_maxEntities << ")"; return os.str();
 }
 
+std::optional<double> EntityLimit::progress(const SimulationSystem& sim) const {
+    if (m_maxEntities <= 0) return std::nullopt;
+    const double done = static_cast<double>(sim.statistics().numberServed());
+    return std::min(1.0, done / static_cast<double>(m_maxEntities));
+}
+
 bool DrainedRule::isMet(const SimulationSystem& sim) const {
     return sim.state().numberInSystem() == 0 && sim.statistics().numberArrived() > 0;
 }
@@ -42,6 +54,19 @@ AnyOf& AnyOf::add(std::unique_ptr<ITerminationRule> rule) {
     assert(rule != nullptr);
     m_rules.push_back(std::move(rule));
     return *this;   // returning *this lets callers chain .add().add()
+}
+
+std::optional<double> AnyOf::progress(const SimulationSystem& sim) const {
+    // The LARGEST fraction any child knows. The run ends when the FIRST rule
+    // is met, so the most advanced child is the honest estimate; averaging
+    // with one that has barely started would report less progress than is
+    // real. Nothing when no child can tell -- not zero.
+    std::optional<double> best;
+    for (const auto& r : m_rules) {
+        const std::optional<double> f = r->progress(sim);
+        if (f && (!best || *f > *best)) best = f;
+    }
+    return best;
 }
 
 bool AnyOf::isMet(const SimulationSystem& sim) const {

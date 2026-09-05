@@ -80,4 +80,39 @@ void runRuntimeTests() {
         check(whole == traceOf("step_1000.md", 1000),
               "a thousand at a time traces identically to run()");
     }
+    section("Progress says when it cannot tell");
+    {
+        SimulationSystem sim(7u);
+        sim.model().arrivals("EXPO(1.0)")
+                   .station("Serve", 1, FIFO, "EXPO(0.5)")
+                   .entryAt("Serve");
+        sim.setTermination(timeLimit(100.0));
+        sim.initialise();
+        for (int i = 0; i < 200 && sim.canStep(); ++i) sim.stepOnce();
+
+        const TimeLimit t(100.0);
+        const std::optional<double> f = t.progress(sim);
+        check(f.has_value(), "a time limit knows how far through it is");
+        if (f) check(*f > 0.0 && *f <= 1.0, "and it is a fraction");
+
+        const DrainedRule drained;
+        check(!drained.progress(sim).has_value(),
+              "whenDrained() CANNOT tell, and says so rather than reporting 0");
+
+        const EntityLimit e(50);
+        check(e.progress(sim).has_value(), "an entity limit knows");
+
+        // AnyOf reports the largest fraction any child knows: the run ends when
+        // the FIRST rule is met, so the most advanced one is the honest answer.
+        auto composite = std::make_unique<AnyOf>();
+        composite->add(whenDrained());
+        composite->add(timeLimit(100.0));
+        check(composite->progress(sim).has_value(),
+              "anyOf knows if ANY child knows");
+
+        auto blind = std::make_unique<AnyOf>();
+        blind->add(whenDrained());
+        check(!blind->progress(sim).has_value(),
+              "and refuses when NONE of them do");
+    }
 }
