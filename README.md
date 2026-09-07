@@ -3,7 +3,7 @@
 Written from the simulation theory table up, as a way of learning OOP and system
 design rather than as a way of getting a simulator.
 
-**Current state: v10.** A flowchart simulator in the spirit of Arena's Basic
+**Current state: v11.** A flowchart simulator in the spirit of Arena's Basic
 Process template — Process, Delay, Assign, Decide, Batch, Separate, Record,
 Dispose — with **shared resources**, balking and reneging, warm-up removal,
 replications and confidence intervals. Refuses to run an unstable model, working
@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 160/160 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 779/779 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -19,6 +19,12 @@ assignment value is an expression, so `station("Cut", 1, FIFO, "size * 0.5")`
 and `decideWhen("Busy?", "NQ(Machine) > 3")` are models, not code. Arena's
 Variable data module arrived with it. This is what a spreadsheet and a
 front end need, and neither is possible while a field holds a lambda.
+
+**v11: a model can be written as a file.** Every module type publishes its
+columns, a `ModelDocument` holds rows of text cells, and a `.des` file
+round-trips through them byte for byte. `compile()` turns one into a runnable
+model, or into diagnostics that point at individual cells. See **A model as a
+file** below.
 
 ```cpp
 #include "des.hpp"
@@ -35,7 +41,8 @@ sim.stopAt(480.0).execute().report();
 
 ```
 cmake -S . -B build && cmake --build build
-./build/des          # five demonstration scenarios
+./build/des_demo     # five demonstration scenarios
+./build/des          # the model-file tool: des check / des run
 ./build/des_tests    # the unit suite
 cd build && ctest
 ```
@@ -137,7 +144,72 @@ Names resolve to entity attributes, declared variables, or `Entity.Type`.
 
 A bad expression on the C++ API throws `ModelError` listing every problem with
 its column. `parseExpression()` returns those diagnostics instead of throwing,
-which is what v11's spreadsheet will use.
+which is what the document layer uses.
+
+## A model as a file
+
+A model is a set of **spreadsheets**, one per module type, and a `.des` file is
+those spreadsheets written down. Nothing in it is code.
+
+```
+version = 1
+
+# A single teller. The smallest model the format can express.
+[Create]
+Name         = Arrivals
+Interarrival = EXPO(1.0)
+Next         = Serve
+
+[Process]
+Name       = Serve
+Capacity   = 1
+Discipline = FIFO
+Service    = EXPO(0.8)
+Next       = Out
+
+[Dispose]
+Name = Out
+```
+
+```
+./build/des check examples/models/teller.des     # compile and report
+./build/des run   examples/models/teller.des 480 # compile and run to t = 480
+```
+
+`check` reports **every** bad cell, not the first, and names the module, the row
+and the column — with the character offset inside the cell when the expression
+parser found one:
+
+```
+teller.des: Process row 1, Service (col 9): error: expected ')'
+```
+
+**Traps, each of them real:**
+
+- **Row order is semantic.** A Decide takes the first branch that matches and an
+  Assign runs its fields in order, so moving two `[DecideBranch]` or
+  `[AssignField]` records past each other changes what the model does.
+- **An empty exit means "leaves the system".** A `Next` that is blank is not an
+  error; it is a departure.
+- **Unknown columns and unknown module types are kept, and warned about.** A
+  file written by a later version opens here with its extra columns intact — a
+  front end that silently deleted them would corrupt the file it was asked to
+  edit.
+- **Routing lives in a column.** Arena draws connections on a canvas; a terminal
+  cannot, so `Next`, `Duplicate`, `Balk To` and `Renege To` are cells.
+- **Queue is read-only.** There is no queue object apart from its Process, so
+  the discipline is set on the Process row.
+- **Read then write gives back the same bytes**, comments and spacing included.
+
+In C++ the same file is:
+
+```cpp
+ReadResult read = readDocumentFile("examples/models/teller.des");
+SimulationSystem sim(12345u);
+std::vector<Diagnostic> problems;
+if (compileInto(read.document, sim.model(), problems))
+    sim.stopAt(480.0).execute().report();
+```
 
 ## Getting an answer you can defend
 
@@ -220,6 +292,7 @@ need to read the engine's source to build a model with it.
 | `V8_READLOG.md` | Random number generation, RANDU, variance reduction |
 | `V10_READLOG.md` | The expression layer: one grammar, saying you do not know, and the bugs |
 | `V9_READLOG.md` | Multiple sources, entity types, matched batching, terminating runs |
+| `V11_READLOG.md` | The document layer: schemas, the .des format, and two gates that were not gating |
 | `ARENA_MAP.md` | Arena module → this engine, and where the two differ |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
@@ -228,10 +301,12 @@ need to read the engine's source to build a model with it.
 ```
 sim/
 ├── CMakeLists.txt   README.md   CHANGELOG.md   V2_READLOG.md   V3_READLOG.md
-├── main.cpp         five scenarios
-├── tests/           85 unit checks
-├── include/         19 headers
-└── src/             18 sources
+├── main.cpp         five scenarios (des_demo)
+├── cli/             the des command: check and run a model file
+├── examples/models/ hand-written .des models
+├── tests/           779 unit checks
+├── include/         40 headers
+└── src/             35 sources
 ```
 
 Headers declare, sources define. One-line getters stay inline. Every `.cpp`
@@ -332,7 +407,20 @@ two and every time-average goes quietly wrong with no error.
 
 ---
 
-# v9 — the order to do it in
+# v12 — the order to do it in
+
+1. **A terminal front end** over `ModuleRegistry` and `ModelDocument`: a module
+   list, a spreadsheet per module type, a cell editor. It reads the schema at
+   runtime, so it must never name a module type in its own source — that is the
+   property the flat child tables were chosen to protect.
+2. **Diagnostics rendered in the grid**, using the `CellRef` v11 added. The
+   mechanism exists; nothing displays it yet.
+3. **A run length in the document.** There is no Run module, so `des run` takes
+   the horizon on the command line and says so.
+4. **Undo** — which is why document rows are addressed by position and why the
+   document keeps its source lines.
+
+Still open from v9, untouched by v10 or v11:
 
 1. **Resource schedules** — a nurse who goes off shift at 5pm. Arena has it; it
    needs a capacity that varies with time, which interacts with every ρ
@@ -342,8 +430,9 @@ two and every time-average goes quietly wrong with no error.
    entity has to requeue carrying its remaining service time.
 3. **Batch means** — one long run split into batches, as an alternative to
    independent replications when the warm-up is expensive to repeat.
-4. **Config file input.** Nothing has blocked it since v5.
-6. **Distribution fitting** — hand it data, have it suggest a distribution and
+4. **Distribution fitting** — hand it data, have it suggest a distribution and
    report a goodness-of-fit statistic. `StreamTests` already has the chi-square
    and Kolmogorov–Smirnov machinery; this is mostly wiring plus parameter
    estimation.
+
+Config-file input, item 4 on the v9 list, is what v11 turned out to be.

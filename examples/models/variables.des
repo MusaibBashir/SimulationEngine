@@ -1,0 +1,39 @@
+version = 1
+
+# A counter kept in a Variable, and a service time that reads the entity's own
+# attribute instead of drawing from a distribution of its own.
+[Variable]
+Name          = served
+Initial Value = 0
+
+[Create]
+Name         = Arrivals
+Interarrival = EXPO(1.0)
+Max Arrivals = 150
+Next         = Stamp
+
+[Assign]
+Name = Stamp
+Next = Serve
+
+# Two fields, and the order is not decoration: a later field sees what an
+# earlier one wrote.
+[AssignField]
+Assign = Stamp
+Target = Attribute
+Name   = work
+Value  = UNIF(0.2, 1.2)
+
+[AssignField]
+Assign = Stamp
+Target = Variable
+Name   = served
+Value  = served + 1
+
+[Process]
+Name    = Serve
+Service = work
+Next    = Out
+
+[Dispose]
+Name = Out

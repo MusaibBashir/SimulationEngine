@@ -1,0 +1,44 @@
+version = 1
+
+# Every arrival is stamped with a size, then sorted by it. A Decide's branches
+# are their own table: a branch row names its Decide, and ROW ORDER DECIDES
+# which condition is tried first.
+[Create]
+Name         = Arrivals
+Interarrival = EXPO(1.0)
+Max Arrivals = 200
+Next         = Stamp
+
+[Assign]
+Name = Stamp
+Next = Sort
+
+[AssignField]
+Assign = Stamp
+Target = Attribute
+Name   = size
+Value  = UNIF(0, 10)
+
+# Next is the ELSE branch: an entity matching no row below goes there.
+[Decide]
+Name = Sort
+Type = Condition
+Next = Small
+
+[DecideBranch]
+Decide    = Sort
+Condition = size > 7
+To        = Big
+
+[Process]
+Name    = Big
+Service = EXPO(1.5)
+Next    = Out
+
+[Process]
+Name    = Small
+Service = EXPO(0.4)
+Next    = Out
+
+[Dispose]
+Name = Out

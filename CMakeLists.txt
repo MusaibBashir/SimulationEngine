@@ -25,6 +25,11 @@ add_library(des_engine STATIC
     src/Expression.cpp
     src/Functions.cpp
     src/Parser.cpp
+    src/ModuleSchema.cpp
+    src/ModuleSchemas.cpp
+    src/ModelDocument.cpp
+    src/DocumentFormat.cpp
+    src/Compiler.cpp
     src/RandomStream.cpp
     src/StreamTests.cpp
     src/Distribution.cpp
@@ -71,13 +76,25 @@ target_compile_options(des_engine PRIVATE ${DES_WARNINGS})
 # ----------------------------------------------------------------------------
 # Programs
 # ----------------------------------------------------------------------------
-add_executable(des main.cpp)
+add_executable(des_demo main.cpp)
+target_link_libraries(des_demo PRIVATE des_engine)
+target_compile_options(des_demo PRIVATE ${DES_WARNINGS})
+
+# The CLI takes the name `des`: `des check model.des` is the product and the
+# five-scenario program above is a demo.
+add_executable(des cli/main.cpp)
 target_link_libraries(des PRIVATE des_engine)
 target_compile_options(des PRIVATE ${DES_WARNINGS})
 
-add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp)
+add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp)
 target_link_libraries(des_tests PRIVATE des_engine)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
+
+# The decisive v11 test reads the shipped .des files. The suite is not always
+# run from the repository root -- the sanitiser leg runs it from /tmp -- so the
+# directory is compiled in rather than assumed.
+target_compile_definitions(des_tests PRIVATE
+    DES_MODEL_DIR=""\"${CMAKE_CURRENT_SOURCE_DIR}/examples/models\""")
 
 # One executable per example, all into build/examples/.
 # GLOB is used HERE and nowhere else: examples are standalone demos, so a newly
@@ -97,7 +114,8 @@ add_test(NAME unit_tests COMMAND des_tests)
 
 # ---------------------------------------------------------------------------
 #   cmake -S . -B build && cmake --build build
-#   ./build/des              the demonstration scenarios
+#   ./build/des_demo         the demonstration scenarios
+#   ./build/des check m.des  compile a model file and report
 #   ./build/des_tests        the unit suite  (or: cd build && ctest)
 #   ./build/examples/01_hello_mm1
 #

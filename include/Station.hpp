@@ -51,7 +51,7 @@ private:
 
     // --- v7: reneging ---
     // How long an entity will wait before giving up. null = infinite patience.
-    std::unique_ptr<IDistribution> m_patience;
+    ExpressionPtr m_patience;
     INode* m_renegeTo{nullptr};
     long long m_reneged{0};
 
@@ -93,6 +93,9 @@ public:
     void setRandomStream(RandomStream* rng) { m_queue.setRandomStream(rng); }
     void setBalking(std::size_t queueLength, INode* balkTo);
     void setReneging(std::unique_ptr<IDistribution> patience, INode* renegeTo);
+    // v10 claimed no distribution fields were left in the engine and missed
+    // this one. A patience is a duration like any other.
+    void setReneging(ExpressionPtr patience, INode* renegeTo);
     void setUnitsNeeded(int units);
 
     // --- access ---

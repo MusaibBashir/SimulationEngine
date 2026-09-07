@@ -153,6 +153,9 @@ public:
     Model& renegeAfter(const std::string& processName,
                        std::unique_ptr<IDistribution> patience,
                        const std::string& renegeTo = "");
+    Model& renegeAfter(const std::string& processName,
+                       const std::string& patienceText,
+                       const std::string& renegeTo = "");
 
     // v7: N-way Decide. Start one, then add branches in order.
     Model& decideNWayByChance(const std::string& name);
@@ -178,6 +181,9 @@ public:
                   std::unique_ptr<IDistribution> value);
     // v10. assignTo writes an attribute from text; assignVariable writes a
     // global; assignEntityType restamps the entity's type.
+    // An Assign block with no fields yet. A document declares the block and
+    // its fields in separate tables, so the block has to be creatable alone.
+    Model& assign(const std::string& name);
     Model& assignTo(const std::string& block, const std::string& attributeName,
                     const std::string& valueText);
     Model& assignVariable(const std::string& block, const std::string& variableName,
@@ -259,6 +265,10 @@ public:
     // run. v11 calls the same walk and turns each Diagnostic into a cell
     // reference instead of throwing.
     std::vector<Diagnostic> checkExpressions() const;
+
+    // The structural checks, collected rather than thrown, so a person
+    // editing a model file gets every problem at once.
+    std::vector<Diagnostic> checkStructure() const;
 
     // --- analysis ---
     VisitRatios visitRatios() const;

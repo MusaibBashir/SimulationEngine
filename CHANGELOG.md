@@ -5,6 +5,81 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [11.0.0] — 2026-09-05 — "The model becomes a document"
+
+A model is now **data**: schema-described tables that round-trip through a text
+file and compile into a runnable `Model`, or into diagnostics that point at
+individual cells. Narrative in `V11_READLOG.md`.
+
+### Added
+
+- **`ModuleSchema` and `ModuleRegistry`** — every module type publishes its
+  columns: name, type, required, default, allowed values, reference target.
+  Discovered at runtime, so a module added in a later version renders in an
+  unmodified front end.
+- **Sixteen schemas** — the data modules Variable, Entity, Resource, Expression
+  and Queue; the flowchart modules Create, Process, Delay, Assign, Decide,
+  Batch, Separate, Record and Dispose; and the child tables `DecideBranch` and
+  `AssignField`.
+- **`ModelDocument`** — rows of text cells, addressed by **position**. It may be
+  invalid, half-finished and contradictory, which a `Model` may never be.
+- **The `.des` format**, line-oriented and versioned, with `readDocument`,
+  `readDocumentFile`, `writeDocument` and `writeDocumentFile`. Round-trip is
+  **byte-identical**: comments, blank lines and spacing survive, because the
+  document keeps its source lines and re-emits only the rows that were edited.
+- **`compile()` and `compileInto()`** — four passes (schema, references,
+  expressions, structure) then the build. Every pass runs, so one compile
+  reports every bad cell rather than the first.
+- **`CellRef` on `Diagnostic`** — module type, row and column. It composes with
+  v10's `SourceSpan` rather than replacing it: the character offset the parser
+  measured survives inside the cell the compiler names.
+- **`Model::checkStructure()`** — the structural checks as a list of
+  diagnostics. `validate()` is now a wrapper over it and throws exactly as
+  before.
+- **`Model::assign(name)`** — an Assign block with no fields yet, because a
+  document declares the block and its fields in separate tables.
+- **The `des` command** — `des check model.des` and `des run model.des [until]`.
+- **`examples/models/`** — `teller.des`, `decide.des`, `variables.des` and
+  `shared.des`, hand-written.
+
+### Changed
+
+- **The five-scenario demo is now `des_demo`.** The CLI takes the name `des`:
+  `des check model.des` is the product and the demo is a demo.
+- `Station::m_patience` is an **expression**, not a distribution, and
+  `Model::renegeAfter(process, patienceText, to)` joins the text overloads. v10
+  claimed no distribution fields remained; this was the one it missed.
+- `Diagnostic` has a **constructor** with a defaulted `cell` parameter rather
+  than aggregate initialisation, so the fifteen v10 construction sites stay
+  warning-free under `-Wextra`.
+- **Queue is read-only.** There is no queue object in this engine apart from its
+  Process, so an editable Queue module would hold the same fact twice.
+- `.gitattributes` pins `*.des` and `*.sh` to LF. For model files this is not
+  cosmetic: CRLF checkout would break the byte-identical round-trip.
+
+### Fixed
+
+- **`tools/baseline.sh` was gating stale binaries.** It looked in
+  `build/examples/Debug`, the Visual Studio layout, while the build directory
+  had been reconfigured with MinGW Makefiles — so it ran binaries built three
+  weeks earlier and printed `BASELINE CLEAN` over code it had never executed. It
+  now asks the generator where the binaries are, refuses to run any older than
+  the sources, and **fails when it checked nothing**.
+- **`tools/verify.sh` never compiled `tests/document_tests.cpp`.** The test
+  sources were listed by hand and the new file was not added, so all of v11's
+  test code skipped GCC and Clang. The list is a glob now, and the CLI is a
+  third link unit.
+- Six v11 assertions written as a loop over a diagnostic list ran zero times
+  when the list was empty, and therefore could not fail.
+
+### Compatibility
+
+Nothing existing breaks. `Model::validate()` throws the same exceptions with the
+same messages, all 543 v10 checks pass unchanged, and every gated example traces
+byte-identically.
+
+---
+
 ## [10.0.0] — 2026-08-28 — "The model stops needing a compiler"
 
 Every duration, condition and assignment value can now be written as **text**.
