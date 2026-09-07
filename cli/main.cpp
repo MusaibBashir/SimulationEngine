@@ -1,18 +1,24 @@
 // ============================================================================
 // cli/main.cpp  --  the `des` command
 // ============================================================================
-// Two verbs, deliberately:
+// Three verbs, deliberately:
 //
-//     des check model.des          compile and report; non-zero on error
-//     des run   model.des [until]  compile and run to `until`; print the report
+//     des check   model.des          compile and report; non-zero on error
+//     des run     model.des [until]  compile and run; print the report
 //
-// This is the first program this project ships that is neither a demo nor a
-// test, and command-line tools accrete flags. v12 owns the interactive surface;
-// this exists so a model file can be tried by hand, and so "the format is
-// writable by a person" is checkable rather than merely asserted.
+// This is the only program this project ships that is neither a demo nor a
+// test, and command-line tools accrete flags. The TUI owns the interactive
+// surface; this exists so a model file can be tried by hand, and so "the
+// format is writable by a person" is checkable rather than merely asserted.
+//
+// `run` drives RunController::advance() rather than SimulationSystem::run().
+// v11 gave the document layer a consumer inside this repo for the same reason:
+// an interface with no caller is an interface nobody has checked.
 
 #include <cstdlib>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include "des.hpp"
@@ -20,11 +26,6 @@
 using namespace des;
 
 namespace {
-
-// A document carries no run length: there is no Run module, and inventing one
-// in the CLI would put a number in the schema by the back door. So `run` takes
-// the horizon as an argument and says which one it used.
-constexpr SimTime DEFAULT_HORIZON = 480.0;
 
 void printDiagnostics(const std::vector<Diagnostic>& ds, const std::string& path) {
     for (const Diagnostic& d : ds) {
@@ -50,58 +51,89 @@ void printDiagnostics(const std::vector<Diagnostic>& ds, const std::string& path
 }
 
 int usage() {
-    std::cout << "usage: des check <model.des>\n"
-                 "       des run   <model.des> [until]\n";
+    std::cout << "usage: des check   <model.des>\n"
+                 "       des run     <model.des> [until]\n"
+                 "       des regress [dir] [--capture] [--force]\n";
     return 2;
+}
+
+int regress(int argc, char** argv) {
+    std::string dir = "tests/regression";
+    bool capture = false, force = false;
+    for (int i = 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--capture")    capture = true;
+        else if (arg == "--force") force = true;
+        else                       dir = arg;
+    }
+    const RegressionReport r = runRegression(dir, capture, force);
+    for (const RegressionOutcome& o : r.outcomes)
+        std::cout << (o.matched ? "ok      " : "DIFFERS ")
+                  << o.model << "  " << o.detail << "\n";
+    std::cout << "\n" << r.cases << " models, " << r.failures << " differ, "
+              << r.missing << " without an expectation";
+    if (r.refused > 0) std::cout << ", " << r.refused << " capture(s) refused";
+    std::cout << "\n";
+    if (capture) {
+        std::cout << r.captured << " captured\n";
+        return r.refused > 0 ? 1 : 0;
+    }
+    // A gate that measured nothing has not passed; it has not run.
+    std::cout << (r.ok() ? "REGRESSION CLEAN\n" : "REGRESSION FAILED\n");
+    return r.ok() ? 0 : 1;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 3 || argc > 4) return usage();
+    if (argc < 2) return usage();
     const std::string verb = argv[1];
-    const std::string path = argv[2];
+
+    if (verb == "regress") return regress(argc, argv);
     if (verb != "check" && verb != "run") return usage();
     if (verb == "check" && argc != 3) return usage();
+    if (verb == "run" && (argc < 3 || argc > 4)) return usage();
 
-    SimTime horizon = DEFAULT_HORIZON;
-    bool horizonGiven = false;
+    const std::string path = argv[2];
+
+    std::optional<SimTime> override;
     if (argc == 4) {
         char* end = nullptr;
-        horizon = std::strtod(argv[3], &end);
-        if (end == argv[3] || *end != '\0' || !(horizon > 0.0)) {
+        const double given = std::strtod(argv[3], &end);
+        if (end == argv[3] || *end != '\0' || !(given > 0.0)) {
             std::cout << "des: `" << argv[3] << "' is not a run length\n";
             return usage();
         }
-        horizonGiven = true;
+        override = given;
     }
 
     ReadResult read = readDocumentFile(path);
     printDiagnostics(read.diagnostics, path);
     if (hasErrors(read.diagnostics)) return 1;
 
-    SimulationSystem sim;
     std::vector<Diagnostic> problems;
-    const bool built = compileInto(read.document, sim.model(), problems);
+    std::unique_ptr<RunController> run =
+        RunController::fromDocument(read.document, problems, override);
     printDiagnostics(problems, path);
-    if (!built) return 1;
+    if (run == nullptr) return 1;
 
     if (verb == "check") {
         std::cout << path << ": ok\n";
         return 0;
     }
 
-    // whenDrained() is deliberately NOT used here. It is met the first time the
-    // system happens to be empty, which for any model with random arrivals is
-    // usually just after the first entity leaves -- a one-entity report that
-    // looks like a real one. A stated horizon is honest; that is not.
-    if (!horizonGiven)
-        std::cout << "note: a model file carries no run length; running to t = "
-                  << horizon << " (pass one to change it)\n";
-
-    sim.setTermination(timeLimit(horizon));
-    sim.initialise();
-    sim.run();
-    sim.report();
+    while (run->state() == RunState::Ready || run->state() == RunState::Running) {
+        run->advance(4096);
+        const RunProgress p = run->progress();
+        if (p.replications > 1)
+            std::cout << "\rreplication " << p.replication << " of "
+                      << p.replications << std::flush;
+    }
+    if (run->progress().replications > 1) std::cout << "\n";
+    if (run->state() == RunState::Failed) {
+        std::cout << path << ": error: " << run->failure() << "\n";
+        return 1;
+    }
+    run->report(std::cout);
     return 0;
 }

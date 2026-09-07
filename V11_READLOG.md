@@ -256,12 +256,18 @@ preemption, batch means and distribution fitting are untouched.
 
 ## v12 — the order to do it in
 
-1. **A terminal front end** over `ModuleRegistry` and `ModelDocument`: a module
-   list, a spreadsheet per type, a cell editor. It reads the schema at runtime,
-   so it must never name a module type in its own source.
-2. **Diagnostics rendered in the grid**, using the `CellRef` this version added.
-   The mechanism exists; nothing displays it yet.
-3. **A run length in the document**, so `des run` and the front end stop needing
-   one from outside.
-4. **Undo**, which is why rows are addressed by position and why the document
-   keeps its source lines.
+Runtime control. The TUI is a **separate repository, after v12** — that was
+settled in the three-version design at v10, and an earlier draft of this
+section said otherwise.
+
+1. **A steppable run.** `SimulationSystem::run()` becomes `while (stepOnce())`,
+   so a caller can own the loop and therefore pause, cancel and watch.
+2. **`RunController`** — the replication loop and the state machine, with
+   `Experiment::run()` refactored onto it.
+3. **Progress that admits when it cannot tell.** A `whenDrained()` run has no
+   knowable fraction, and a progress bar that reads 0% and then jumps to 100%
+   is worse than one that says it does not know.
+4. **A `[Run]` module**, so a model file carries its own run length and the
+   open item above closes.
+5. **A regression harness** over model files, byte-identical, that fails when
+   it checked nothing.

@@ -55,6 +55,12 @@ public:
                         const std::string& column) const;
     std::string cell(const std::string& type, std::size_t index,
                      const std::string& column) const;
+    // The cell, or the schema's default when it is empty. v11's build pass
+    // had this privately and v12 needs it too; two copies of 'what does an
+    // empty cell mean' is one too many.
+    std::string cellOrDefault(const std::string& type, std::size_t index,
+                              const std::string& column) const;
+
     std::size_t cellLine(const std::string& type, std::size_t index,
                          const std::string& column) const;
     void        setCell(const std::string& type, std::size_t index,

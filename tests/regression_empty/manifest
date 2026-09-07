@@ -1,0 +1,2 @@
+# Deliberately empty. A harness that measured nothing must not report success,
+# and this is the fixture that proves it does not.

@@ -14,3 +14,10 @@
 # file checked out with CRLF would come back different the moment a front end
 # saved it, and the property this format is built on would be false on Windows.
 *.des text eol=lf
+
+# Regression expectations are compared BYTE FOR BYTE against report text that
+# ends its lines with LF. Checked out with CRLF they would differ from the
+# moment they were cloned, and the harness would fail on a tree nobody had
+# touched. Same reason as *.des above, one layer out.
+*.expected text eol=lf
+tests/regression*/manifest text eol=lf

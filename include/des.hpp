@@ -58,4 +58,7 @@
 #include "Model.hpp"
 #include "SimulationSystem.hpp"
 #include "Experiment.hpp"
+#include "RunSetup.hpp"
+#include "RunController.hpp"
+#include "Regression.hpp"
 #include "Build.hpp"

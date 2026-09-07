@@ -15,6 +15,7 @@
 
 #pragma once
 #include <memory>
+#include <ostream>
 #include <string>
 #include <map>
 #include <string>
@@ -107,6 +108,11 @@ private:
     // entity, so it lives here and not on Entity.
 
     bool m_initialised{false};
+
+    // v12: an EndSimulation event has fired. run() used to `return` out of
+    // its own loop for this, which a caller-owned loop cannot see. Reset by
+    // initialise(), like every other piece of run state.
+    bool m_stopped{false};
 
     // --- v4: warm-up removal and observation series ---
     SimTime m_warmUp{0.0};              // 0 means no warm-up period
@@ -213,6 +219,7 @@ public:
     const SystemState& state() const { return m_state; }
     const FutureEventList& fel() const { return m_fel; }
     const RandomStream& randomStream() const { return m_rng; }
+    const ITerminationRule* termination() const { return m_termination.get(); }
     std::size_t liveEntityCount() const { return m_entities.size(); }
 
     // --- running ---
@@ -221,11 +228,23 @@ public:
                        Entity* e = nullptr, INode* node = nullptr);
     void initialise();
     void run();
+
+    // v12: one event, so a caller can own the loop and therefore pause,
+    // cancel and watch between events. run() is `while (stepOnce()) {}` --
+    // the same loop, with the caller holding the handle.
+    bool canStep() const;
+    bool stepOnce();
+    // v12: the regression harness compares report TEXT, so it needs one as a
+    // string. Redirecting std::cout would also work and is worse -- a global
+    // side effect, inside a harness whose entire value is that its result can
+    // be trusted.
+    void report(std::ostream& os) const;
     void report() const;
 
     // v9: the same numbers laid out the way Arena lays them out -- tally
     // variables, discrete-change variables, outputs -- so a run can be put
     // beside an Arena report and read line for line.
+    void reportArenaStyle(std::ostream& os) const;
     void reportArenaStyle() const;
 
     // v5 conveniences. No new behaviour -- execute() is initialise() then run(),

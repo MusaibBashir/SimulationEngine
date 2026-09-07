@@ -124,6 +124,10 @@ public:
     // fetch it by name.
     // Declare a shared resource. Several Process blocks may then seize it.
     Model& resource(const std::string& name, int capacity);
+    // v12: a snapshot lists every resource, which name lookup cannot do.
+    std::size_t     resourceCount() const { return m_resources.size(); }
+    const Resource& resourceAt(std::size_t i) const { return *m_resources[i]; }
+
     Resource* resourceNamed(const std::string& name);
     const Resource* resourceNamed(const std::string& name) const;
 

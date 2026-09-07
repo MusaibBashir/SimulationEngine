@@ -7,7 +7,7 @@ the call-flow chapters. Prose is passed to reportlab as markup, so use &amp;,
 &lt; and &gt; rather than the bare characters.
 """
 
-VERSION_LINE = "v11 — the document layer · 779 checks · 95 types"
+VERSION_LINE = "v12 — runtime control · 930 checks · 105 types"
 
 FRONT_MATTER = (
     "A discrete-event simulation engine in the spirit of Arena's Basic Process "
@@ -45,6 +45,18 @@ TYPE_DOC = {
     "ReadResult": "What reading a .des file produces: the document, the diagnostics found while reading it, and the format version the file declared. Reading never throws — a malformed line becomes a diagnostic and reading continues.",
     "CellRef": "Which cell a diagnostic came from: module type, row position, column name. It composes with v10's SourceSpan rather than replacing it, so the character offset the parser measured survives inside the cell the compiler names.",
     "CompileResult": "What compiling a document produces: a Model when it succeeded, the diagnostics either way, and whether the structural pass actually ran. That last flag matters because the structure pass cannot run with broken references, and reporting a model as checked when it was not is the failure this project keeps refusing.",
+
+    # -- runtime control (v12)
+    "RunState": "Where a run has got to: Ready, Running, Paused, Finished, Cancelled or Failed. Finished and Cancelled are terminal, and advance() on either returns 0 rather than throwing -- a front end that polls past the end is normal, not wrong.",
+    "RunProgress": "What a watcher reads between calls: which replication, the clock, how many events have been processed, and a fraction that MAY BE ABSENT. Absent means the stopping rule cannot tell how far through it is, which is not the same as zero.",
+    "BlockSnapshot": "One flowchart block at an instant: its queue length, how many it has served, and its utilisation over the measured period.",
+    "ResourceSnapshot": "One resource at an instant: how many units are busy, out of how many it has.",
+    "VariableSnapshot": "One declared variable and its current value.",
+    "RunSnapshot": "The whole running system at an instant -- clock, arrivals, departures, number in system, and one entry per block, resource and variable. Built ON DEMAND from accessors that already existed, so nothing is added to the inner loop and a run is bit-for-bit identical whether or not anyone was watching.",
+    "RunController": "The run, with the loop handed to the caller. advance(budget) does at most that many events and returns; pausing is not calling, cancelling is not calling ever again. It owns the replication loop too, which is why Experiment builds on it rather than keeping a second implementation.",
+    "RunSetup": "How to run a model: length, warm-up, replications, base seed, and the stopping conditions. Read from the [Run] module, so a model file carries its own run length rather than depending on a number stored somewhere else.",
+    "RegressionOutcome": "What happened to one model in a regression run: whether it matched, and if not, the first line where it differed.",
+    "RegressionReport": "The verdict over a whole manifest. ok() is false when nothing was checked, because a gate that measured nothing has not passed -- it has not run.",
 
     # -- queues and resources
     "EntityQueue": "A waiting line: a deque of entities plus a pluggable rule that chooses which one leaves next. Tracks its own maximum observed length.",
@@ -171,6 +183,27 @@ COMMON_DOC = {
 
 # ----------------------------------------------- per-type member prose --
 MEMBER_DOC = {
+    "TimeLimit::progress": "The clock over the limit, clamped to 1. A time limit always knows how far through it is.",
+    "EntityLimit::progress": "Entities served over the limit, clamped to 1.",
+    "AnyOf::progress": "The LARGEST fraction any child knows, because the run ends when the FIRST rule is met and the most advanced child is the honest estimate. Nothing when no child can tell -- not zero.",
+    "SimulationSystem::canStep": "Whether another event can be processed: one is pending, no stopping rule is met, and no EndSimulation event has fired. Deliberately does not test whether initialise() has been called -- that is a precondition the callers assert, and folding it in would turn a forgotten initialise() into a run that silently does nothing.",
+    "SimulationSystem::stepOnce": "Processes the imminent event and reports whether it did. run() is a loop over this and nothing else -- the same loop, with the caller holding the handle.",
+    "SimulationSystem::termination": "The stopping rule currently set, so a caller can ask it how far through the run is.",
+    "Model::resourceCount": "How many shared resources the model declares. Name lookup cannot enumerate, and a snapshot has to.",
+    "Model::resourceAt": "One declared resource, by position.",
+    "ModelDocument::cellOrDefault": "The cell, or the schema default when it is empty. Every build-time read goes through here, so a defaulted column behaves the same whether the file spelled it out or left it off.",
+    "ITerminationRule::progress": "How far through this rule the run is, or NOTHING when it cannot tell. Nothing does not mean zero: a drained-system rule has no knowable fraction, and a progress bar that reads 0% throughout and then jumps to 100% is a lie the caller cannot detect.",
+    "RunController::fromDocument": "Builds a controller from a document: reads [Run], compiles once so every bad cell is reported before an event runs, and keeps a copy of the document because each replication needs a fresh Model and a Model can be neither reused nor copied.",
+    "RunController::advance": "Does at most maxEvents events, rolling on to the next replication when one ends, and returns how many it actually did. Zero when paused, finished, cancelled or failed.",
+    "RunController::pause": "Running becomes Paused, and advance() then does nothing.",
+    "RunController::resume": "Paused becomes Running. It cannot undo a cancel.",
+    "RunController::cancel": "Stops for good. The run so far stays readable.",
+    "RunController::progress": "A RunProgress for the moment it is called.",
+    "RunController::snapshot": "A RunSnapshot of the replication in progress, or an empty one between replications.",
+    "RunController::runToCompletion": "Drives to the end. Loops on STATE rather than on the count advance() returns: a replication that produced no events would return 0 and strand a caller that trusted that count.",
+    "RunController::report": "One replication prints the run own report; several print confidence intervals, because quoting one number out of thirty runs is what Experiment exists to stop.",
+    "RunController::results": "One ReplicationResult per completed replication.",
+    "RunController::failure": "Why the run Failed, when it did.",
     "ModelDocument::rows": "Every row of a module type, in file order. Order is semantic: a Decide takes the first branch that matches, an Assign runs its fields in order.",
     "ModelDocument::removeRow": "Deletes a row by position. Every later row shifts down, which is why nothing holds a row index across an edit.",
     "ModelDocument::moveRow": "Moves a row to another position. It exists because row order is part of the model, not a display preference.",
@@ -410,7 +443,7 @@ CHAPTERS = [
    ("text", "Inside the run loop the integrals for the interval that just ended are closed "
             "<b>before</b> the clock moves, and the clock moves <b>before</b> any state "
             "changes. Swap any two of those and every time-weighted average goes quietly "
-            "wrong, with no error anywhere. Chapter 11 shows the order explicitly."),
+            "wrong, with no error anywhere. Chapter 12 shows the order explicitly."),
   ]),
 
  (2, "Foundations",
@@ -502,7 +535,46 @@ CHAPTERS = [
               "ModelDocument", "ReadResult", "CellRef", "CompileResult"]),
   ]),
 
- (7, "The Flowchart",
+ (7, "Runtime Control",
+  "How a run stopped being something you wait for and became something you drive.",
+  [
+   ("text", "SimulationSystem::run() blocks until the stopping rule is met, which is the "
+            "right shape for a program and the wrong one for a front end: there is no "
+            "moment at which it can redraw, and no way to stop. v12 splits that loop. "
+            "stepOnce() does one event, RunController owns the loop around it and the "
+            "replication loop above that, and run() becomes a loop over stepOnce() and "
+            "nothing else -- the same loop, with the caller holding the handle."),
+   ("h3", "Why stepping and not threads"),
+   ("text", "The engine's entire claim is that one seed gives one run. A thread buys "
+            "responsiveness that a stepped loop already provides, and pays for it with a "
+            "lock between the clock and the statistics and a class of bug that no "
+            "byte-identical gate can reliably reproduce. Pausing is not calling; "
+            "cancelling is not calling ever again."),
+   ("h3", "Watching must not change the run"),
+   ("text", "A snapshot is built when it is asked for, from accessors that already "
+            "existed. Nothing is added to the inner loop, so a run is bit-for-bit "
+            "identical whether or not anyone was watching -- which is asserted rather "
+            "than assumed, and which a watcher that consumed a single random number was "
+            "shown to break."),
+   ("h3", "Progress that admits it cannot tell"),
+   ("text", "ITerminationRule::progress() returns an optional, and nothing means CANNOT "
+            "TELL rather than zero. A time limit divides; the drained-system rule has no "
+            "override at all, because whether a system will next be empty is not knowable "
+            "in advance. A bar that reads 0% for a whole run and then jumps to 100% is a "
+            "lie the caller has no way to detect."),
+   ("h3", "One replication loop"),
+   ("text", "RunController owns the loop over replications, and Experiment is a wrapper "
+            "over it. Two loops would have had to agree about seeding, antithetic "
+            "pairing, warm-up and the observation grid, and the one that drifts is always "
+            "the one nobody runs. Antithetic pairing is where the abstraction leaks: one "
+            "replication is two runs, so a progress fraction restarts at zero halfway "
+            "through."),
+   ("types", ["RunState", "RunProgress", "BlockSnapshot", "ResourceSnapshot",
+              "VariableSnapshot", "RunSnapshot", "RunSetup", "RunController",
+              "RegressionOutcome", "RegressionReport"]),
+  ]),
+
+ (8, "The Flowchart",
   "The blocks entities move through, and the narrow window each one gets on the engine.",
   [
    ("text", "A model is a graph of blocks. Each does one job to an entity and decides where "
@@ -514,7 +586,7 @@ CHAPTERS = [
               "DisposeNode", "Station", "CreateNode"]),
   ]),
 
- (8, "The Model",
+ (9, "The Model",
   "What is simulated, kept separate from the machinery that simulates it.",
   [
    ("text", "The engine takes a Model and runs it, and knows nothing about tellers or "
@@ -530,7 +602,7 @@ CHAPTERS = [
    ("types", ["Model"]),
   ]),
 
- (9, "Running a Simulation",
+ (10, "Running a Simulation",
   "The engine, the stopping rules, and the trace that makes a run checkable by hand.",
   [
    ("text", "SimulationSystem owns the clock, the event list, the entities, the random "
@@ -542,7 +614,7 @@ CHAPTERS = [
               "TraceLevel", "Trace"]),
   ]),
 
- (10, "Experiments",
+ (11, "Experiments",
   "Why one run is one sample, and what to do about it.",
   [
    ("text", "A single run is one observation of a random variable. Quoting it to four "
@@ -555,7 +627,7 @@ CHAPTERS = [
    ("types", ["ReplicationResult", "Summary", "Experiment"]),
   ]),
 
- (11, "Call Flows",
+ (12, "Call Flows",
   "What calls what, in order, when a model is built and run.",
   [
    ("text", "These traces follow examples/16_expressions.cpp, which exercises every part of "
@@ -650,7 +722,7 @@ CHAPTERS = [
     "cell rather than the first."),
   ]),
 
- (12, "Free Functions",
+ (13, "Free Functions",
   "The factories and helpers that are not members of anything.",
   [
    ("h3", "Distribution factories, from Build.hpp"),

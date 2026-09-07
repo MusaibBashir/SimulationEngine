@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "Experiment.hpp"
+#include "RunController.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -73,62 +74,26 @@ Experiment& Experiment::separateStreams(bool on) { m_separateStreams = on; retur
 Experiment& Experiment::antitheticPairs(bool on) { m_antithetic = on; return *this; }
 
 void Experiment::run() {
-    m_results.clear();
-    m_series.clear();
-    m_results.reserve(static_cast<std::size_t>(m_replications));
+    // ONE implementation of the replication loop, two callers -- exactly the
+    // move v11 made with validate() and checkStructure(). The alternative was
+    // two loops that must agree about seeding, antithetic pairing, warm-up and
+    // the observation grid, and the one that drifts is always the one nobody
+    // runs.
+    RunSetup setup;
+    setup.replications    = m_replications;
+    setup.baseSeed        = m_baseSeed;
+    setup.warmUp          = m_warmUp;
+    setup.observeInterval = m_observeInterval;
+    setup.separateStreams = m_separateStreams;
+    setup.antithetic      = m_antithetic;
+    // Deliberately NO stopping rule: an Experiment's caller sets it inside the
+    // builder, and RunController leaves the builder's rule alone when the setup
+    // names none.
 
-    for (int r = 0; r < m_replications; ++r) {
-        // *** A DIFFERENT SEED PER REPLICATION, DERIVED FROM ONE BASE SEED. ***
-        // Different, or every run is the same run and the "sample" has no
-        // variance at all. Derived, so the whole experiment is reproducible from
-        // a single number.
-        const unsigned seed = m_baseSeed + static_cast<unsigned>(r);
-
-        // One run, or -- with antithetic pairing -- the same seed run twice,
-        // the second time with every uniform mirrored, averaged into one result.
-        auto oneRun = [&](bool antithetic) {
-            SimulationSystem sim(seed);
-            m_build(sim);                       // caller builds the model
-            if (m_separateStreams) sim.useSeparateStreams();
-            if (antithetic)        sim.useAntithetic();
-            if (m_warmUp > 0.0)          sim.setWarmUp(m_warmUp);
-            if (m_observeInterval > 0.0) sim.setObservationInterval(m_observeInterval);
-
-            sim.initialise();
-            sim.run();
-
-            const Station& entry = sim.model().stationAt(0);
-            const SimTime measured = sim.measuredTime();
-
-            ReplicationResult res;
-            res.seed                = seed;
-            res.served              = sim.statistics().numberServed();
-            res.averageWait         = sim.statistics().averageWaitingTime();
-            res.averageTimeInSystem = sim.statistics().averageTimeInSystem();
-            res.Lq                  = sim.statistics().timeAverageA(measured);
-            res.L                   = sim.statistics().timeAverageB(measured);
-            res.utilisation         = entry.stats().utilisation(measured, entry.resource().capacity());
-            res.measuredTime        = measured;
-            if (m_observeInterval > 0.0) m_series.push_back(sim.observations());
-            return res;
-        };
-
-        ReplicationResult res = oneRun(false);
-        if (m_antithetic) {
-            // Average the mirrored run INTO this replication rather than adding
-            // it as a second one. The pair is one observation: its two halves
-            // are negatively correlated, so treating them as independent would
-            // understate the interval, which is the one direction that matters.
-            const ReplicationResult mirror = oneRun(true);
-            res.averageWait         = 0.5 * (res.averageWait + mirror.averageWait);
-            res.averageTimeInSystem = 0.5 * (res.averageTimeInSystem + mirror.averageTimeInSystem);
-            res.Lq                  = 0.5 * (res.Lq + mirror.Lq);
-            res.L                   = 0.5 * (res.L  + mirror.L);
-            res.utilisation         = 0.5 * (res.utilisation + mirror.utilisation);
-            res.served              = (res.served + mirror.served) / 2;
-        }
-        m_results.push_back(res);
-    }
+    RunController controller(setup, m_build);
+    controller.runToCompletion();
+    m_results = controller.results();
+    m_series  = controller.series();
 }
 
 std::vector<double> Experiment::column(double ReplicationResult::* field) const {

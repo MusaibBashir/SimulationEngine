@@ -85,3 +85,11 @@ docs/*
 __pycache__/
 /doc_trace.md
 /cpp_trace.md
+/step_whole.md
+/step_1.md
+/step_7.md
+/step_1000.md
+/chunk_whole.md
+/chunk_1.md
+/chunk_13.md
+/chunk_watched.md

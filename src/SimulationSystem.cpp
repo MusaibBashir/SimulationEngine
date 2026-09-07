@@ -379,6 +379,7 @@ void SimulationSystem::initialise() {
     assert(m_termination != nullptr && "no termination rule set");
 
     // Everything holding RUN STATE gets reset. Configuration survives.
+    m_stopped = false;
     m_clock.reset();
     m_stats.reset();
     m_state.reset();
@@ -425,60 +426,89 @@ void SimulationSystem::scheduleEvent(EventType type, SimTime t, Entity* e, INode
     m_fel.schedule(EventNotice(type, t, e, node));
 }
 
+// *** WHAT THE SWITCH BELOW IS, AND IS NOT. ***
+// The clock JUMPS event to event. Nothing is simulated in between because
+// nothing happens in between -- that is why DES is fast, and why the FEL had
+// to be sorted.
+//
+// The switch stays -- it dispatches on the KIND OF EVENT, of which there are
+// six, and that is genuinely all this does now.
+//
+// What v6 changed is the other axis. Five versions running, this project
+// declined to build an IEventHandler hierarchy because handler objects outside
+// this class would have needed its internals made public. v6 builds it anyway,
+// because nodes must live outside the engine and Batch is exactly the "handler
+// that carries state" that was named as the trigger.
+//
+// The resolution was not to widen this class's public interface. It was
+// NodeContext: a narrow, role-specific facade holding the six operations a
+// node may perform. The general lesson -- when an abstraction says it needs
+// your internals, publish an interface for its ROLE, not your whole class.
+
+bool SimulationSystem::canStep() const {
+    // Deliberately does NOT test m_initialised. Being initialised is a
+    // precondition, asserted by both callers; folding it in here would turn
+    // "you forgot to initialise" into a run that silently does nothing.
+    return !m_stopped && !m_fel.isEmpty()
+           && !(m_termination && m_termination->isMet(*this));
+}
+
+bool SimulationSystem::stepOnce() {
+    assert(m_initialised && "call initialise() before stepOnce()");
+    if (!canStep()) return false;
+
+    EventNotice notice = m_fel.popImminent();
+
+    // ORDER IS EVERYTHING, and v12 measured WHICH order. Close the integrals
+    // for the interval that just ended -- using the OLD state -- then move
+    // the clock, then let the handler change state.
+    //
+    // The comment here used to say 'swap any two and every time average is
+    // wrong'. Two of the three pairs were tested by swapping them, and only
+    // one of those claims is true. Moving the integrals AFTER the handler
+    // changes 11 of the 15 gated examples: they would measure the new queue
+    // length over the interval that ended before it changed. But these first
+    // two lines COMMUTE -- updateAllIntegrals takes its target time as a
+    // parameter and every accumulator carries its own lastUpdate, so it never
+    // reads the clock. The line order is kept because reading it in causal
+    // order is worth something; the claim is corrected because a warning that
+    // is wrong in a third of its cases stops being read.
+    updateAllIntegrals(notice.time());
+    m_clock.advanceTo(notice.time());
+
+    switch (notice.type()) {
+        case EventType::Arrival: {
+            // A source's turn to produce. Same shape as any other callback.
+            NodeContext ctx(*this);
+            if (notice.node()) notice.node()->onScheduledEvent(ctx, nullptr);
+            refreshState();
+            break;
+        }
+        case EventType::Departure:     handleDeparture(notice); break;
+        // That event ENDS the run rather than advancing it, so it reports
+        // false. run() used to `return` here, which a caller-owned loop has no
+        // way to observe.
+        case EventType::EndSimulation: m_stopped = true; return false;
+        case EventType::WarmUpEnd:     handleWarmUpEnd();       break;
+        case EventType::Observe:       handleObservation();     break;
+        case EventType::Renege: {
+            // A patience timer. It fires whether or not the entity is still
+            // waiting -- the block checks and ignores it if stale. See
+            // Station::onRenegeTimeout for why nothing is ever cancelled.
+            NodeContext ctx(*this);
+            if (notice.node() && notice.entity())
+                notice.node()->onRenegeTimeout(ctx, notice.entity());
+            refreshState();
+            break;
+        }
+        case EventType::StartService:  break;   // reserved
+    }
+    return true;
+}
+
 void SimulationSystem::run() {
     assert(m_initialised && "call initialise() before run()");
-
-    while (!m_fel.isEmpty() && !m_termination->isMet(*this)) {
-        EventNotice notice = m_fel.popImminent();
-
-        // ORDER IS EVERYTHING: close the integrals for the interval that just
-        // ended -- using the OLD state -- then move the clock, then let the
-        // handler change state. Swap any two and every time average is wrong.
-        updateAllIntegrals(notice.time());
-        m_clock.advanceTo(notice.time());
-
-        switch (notice.type()) {
-            case EventType::Arrival: {
-                // A source's turn to produce. Same shape as any other callback.
-                NodeContext ctx(*this);
-                if (notice.node()) notice.node()->onScheduledEvent(ctx, nullptr);
-                refreshState();
-                break;
-            }
-            case EventType::Departure:     handleDeparture(notice); break;
-            case EventType::EndSimulation: return;
-            case EventType::WarmUpEnd:     handleWarmUpEnd();       break;
-            case EventType::Observe:       handleObservation();     break;
-            case EventType::Renege: {
-                // A patience timer. It fires whether or not the entity is still
-                // waiting -- the block checks and ignores it if stale. See
-                // Station::onRenegeTimeout for why nothing is ever cancelled.
-                NodeContext ctx(*this);
-                if (notice.node() && notice.entity())
-                    notice.node()->onRenegeTimeout(ctx, notice.entity());
-                refreshState();
-                break;
-            }
-            case EventType::StartService:  break;   // reserved
-        }
-    }
-    // The clock JUMPS event to event. Nothing is simulated in between because
-    // nothing happens in between -- that is why DES is fast, and why the FEL
-    // had to be sorted.
-    //
-    // The switch stays -- it dispatches on the KIND OF EVENT, of which there are
-    // six, and that is genuinely all this loop does now.
-    //
-    // What v6 changed is the other axis. Five versions running, this project
-    // declined to build an IEventHandler hierarchy because handler objects
-    // outside this class would have needed its internals made public. v6 builds
-    // it anyway, because nodes must live outside the engine and Batch is exactly
-    // the "handler that carries state" that was named as the trigger.
-    //
-    // The resolution was not to widen this class's public interface. It was
-    // NodeContext: a narrow, role-specific facade holding the six operations a
-    // node may perform. The general lesson -- when an abstraction says it needs
-    // your internals, publish an interface for its ROLE, not your whole class.
+    while (stepOnce()) {}
 }
 
 // ------------------------------------------------------------------ routing --
@@ -600,27 +630,27 @@ RunResults SimulationSystem::results() const {
     return r;
 }
 
-void SimulationSystem::reportArenaStyle() const {
+void SimulationSystem::reportArenaStyle(std::ostream& os) const {
     const RunResults r = results();
     const SimTime T = r.measuredTime;
-    std::cout << std::fixed;
-    std::cout << "\n============================================================\n";
-    std::cout << "Replication ended at time : " << std::setprecision(4) << r.simulatedTime << "\n";
+    os << std::fixed;
+    os << "\n============================================================\n";
+    os << "Replication ended at time : " << std::setprecision(4) << r.simulatedTime << "\n";
     if (m_model.overloadAllowed()) {
-        std::cout << "*** OVERLOADED MODEL: at least one queue grows without bound.\n"
+        os << "*** OVERLOADED MODEL: at least one queue grows without bound.\n"
                      "*** These are TERMINATING-run results for this horizon only.\n"
                      "*** They are not steady-state values and will change if the\n"
                      "*** run length changes.\n";
     }
 
-    std::cout << "\nTALLY VARIABLES\n";
-    std::cout << std::setw(34) << std::left << "Identifier" << std::right
+    os << "\nTALLY VARIABLES\n";
+    os << std::setw(34) << std::left << "Identifier" << std::right
               << std::setw(12) << "Average" << std::setw(12) << "Minimum"
               << std::setw(12) << "Maximum" << std::setw(14) << "Observations" << "\n";
-    std::cout << std::string(84, '-') << "\n";
+    os << std::string(84, '-') << "\n";
 
     auto tally = [&](const std::string& id, double avg, double mn, double mx, long long obs) {
-        std::cout << std::setw(34) << std::left << id << std::right
+        os << std::setw(34) << std::left << id << std::right
                   << std::setw(12) << std::setprecision(5) << avg
                   << std::setw(12) << mn << std::setw(12) << mx
                   << std::setw(14) << obs << "\n";
@@ -642,12 +672,12 @@ void SimulationSystem::reportArenaStyle() const {
                   0.0, b->queueStats().maxWaitingTime(), b->queueStats().numberServed());
     }
 
-    std::cout << "\nDISCRETE-CHANGE VARIABLES\n";
-    std::cout << std::setw(34) << std::left << "Identifier" << std::right
+    os << "\nDISCRETE-CHANGE VARIABLES\n";
+    os << std::setw(34) << std::left << "Identifier" << std::right
               << std::setw(12) << "Average" << std::setw(14) << "Final Value" << "\n";
-    std::cout << std::string(60, '-') << "\n";
+    os << std::string(60, '-') << "\n";
     auto dcv = [&](const std::string& id, double avg, double final) {
-        std::cout << std::setw(34) << std::left << id << std::right
+        os << std::setw(34) << std::left << id << std::right
                   << std::setw(12) << std::setprecision(5) << avg
                   << std::setw(14) << final << "\n";
     };
@@ -665,10 +695,10 @@ void SimulationSystem::reportArenaStyle() const {
             static_cast<double>(s.queue().length()));
     }
 
-    std::cout << "\nOUTPUTS\n";
-    std::cout << std::string(60, '-') << "\n";
+    os << "\nOUTPUTS\n";
+    os << std::string(60, '-') << "\n";
     auto out = [&](const std::string& id, double v) {
-        std::cout << std::setw(40) << std::left << id << std::right
+        os << std::setw(40) << std::left << id << std::right
                   << std::setw(14) << std::setprecision(3) << v << "\n";
     };
     for (const auto& kv : m_byType) {
@@ -694,38 +724,40 @@ void SimulationSystem::reportArenaStyle() const {
         }
     }
     out("System.NumberOut", static_cast<double>(r.exited));
-    std::cout << "============================================================\n";
+    os << "============================================================\n";
 }
 
-void SimulationSystem::report() const {
+void SimulationSystem::reportArenaStyle() const { reportArenaStyle(std::cout); }
+
+void SimulationSystem::report(std::ostream& os) const {
     // v5: report() prints results(). It does not recompute anything -- one place
     // knows how a number is derived, and printing is just a view of it.
     const RunResults r = results();
-    std::cout << std::fixed << std::setprecision(4);
+    os << std::fixed << std::setprecision(4);
     // Before the numbers, not after: a reader who stops at the first table
     // should still have been told the check could not be applied.
-    reportStability(std::cout);
-    std::cout << "=== simulation report =====================================\n";
-    std::cout << "seed                     : " << m_rng.seed() << "\n";
-    std::cout << "termination              : "
+    reportStability(os);
+    os << "=== simulation report =====================================\n";
+    os << "seed                     : " << m_rng.seed() << "\n";
+    os << "termination              : "
               << (m_termination ? m_termination->describe() : "<none>") << "\n";
-    std::cout << "total simulated time     : " << r.simulatedTime << "\n";
-    std::cout << "warm-up discarded        : " << r.warmUpDiscarded << "\n";
-    std::cout << "measured period          : " << r.measuredTime << "\n";
-    std::cout << "entities arrived         : " << r.arrived << "\n";
-    std::cout << "entities exited          : " << r.exited << "\n";
-    std::cout << "average total wait       : " << r.averageWait << "\n";
-    std::cout << "average time in system   : " << r.averageTimeInSystem << "\n";
-    std::cout << "max total wait           : " << r.maxWait << "\n";
-    std::cout << "time-avg in queue (Lq)   : " << r.averageNumberInQueue << "\n";
-    std::cout << "time-avg in system (L)   : " << r.averageNumberInSystem << "\n";
-    std::cout << "still waiting at stop    : " << r.stillWaitingAtStop << "\n";
-    std::cout << "live entity objects      : " << m_entities.size() << "\n";
-    std::cout << "\n";
-    std::cout << "  station        cap   served    avg wait   time-avg Q    util   maxQ\n";
-    std::cout << "  -----------------------------------------------------------------\n";
+    os << "total simulated time     : " << r.simulatedTime << "\n";
+    os << "warm-up discarded        : " << r.warmUpDiscarded << "\n";
+    os << "measured period          : " << r.measuredTime << "\n";
+    os << "entities arrived         : " << r.arrived << "\n";
+    os << "entities exited          : " << r.exited << "\n";
+    os << "average total wait       : " << r.averageWait << "\n";
+    os << "average time in system   : " << r.averageTimeInSystem << "\n";
+    os << "max total wait           : " << r.maxWait << "\n";
+    os << "time-avg in queue (Lq)   : " << r.averageNumberInQueue << "\n";
+    os << "time-avg in system (L)   : " << r.averageNumberInSystem << "\n";
+    os << "still waiting at stop    : " << r.stillWaitingAtStop << "\n";
+    os << "live entity objects      : " << m_entities.size() << "\n";
+    os << "\n";
+    os << "  station        cap   served    avg wait   time-avg Q    util   maxQ\n";
+    os << "  -----------------------------------------------------------------\n";
     for (const StationResults& s : r.stations) {
-        std::cout << "  " << std::setw(12) << std::left << s.name << std::right
+        os << "  " << std::setw(12) << std::left << s.name << std::right
                   << std::setw(5)  << s.capacity
                   << std::setw(9)  << s.served
                   << std::setw(12) << s.averageWait
@@ -734,7 +766,9 @@ void SimulationSystem::report() const {
                   << std::setw(7)  << s.maxQueueLength
                   << "\n";
     }
-    std::cout << "===========================================================\n";
+    os << "===========================================================\n";
 }
+
+void SimulationSystem::report() const { report(std::cout); }
 
 }  // namespace des

@@ -1,5 +1,12 @@
 version = 1
 
+# How to run it. Arena keeps this in Run Setup; here it is a module like any
+# other, so the file says everything needed to reproduce a result.
+[Run]
+Name         = Setup
+Length       = 480
+Replications = 1
+
 # Every arrival is stamped with a size, then sorted by it. A Decide's branches
 # are their own table: a branch row names its Decide, and ROW ORDER DECIDES
 # which condition is tried first.

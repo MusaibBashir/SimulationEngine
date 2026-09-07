@@ -60,4 +60,12 @@ void checkClose(double got, double want, double tol, const std::string& what) {
 
 void section(const char* name) { std::cout << "[" << name << "]\n"; }
 
+#ifndef DES_MODEL_DIR
+#define DES_MODEL_DIR "examples/models"
+#endif
+
+std::string modelPath(const std::string& file) {
+    return std::string(DES_MODEL_DIR) + "/" + file;
+}
+
 }  // namespace des_test

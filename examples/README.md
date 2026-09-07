@@ -349,8 +349,33 @@ hand:
 | `shared.des` | Two Processes seizing one Resource |
 
 ```sh
-./build/des check examples/models/teller.des
-./build/des run   examples/models/teller.des 480
+./build/des check   examples/models/teller.des
+./build/des run     examples/models/teller.des      # the file says how long
+./build/des run     examples/models/teller.des 100  # ...unless you say otherwise
+./build/des regress                                 # every model, diffed
+```
+
+Each carries a `[Run]` module — Arena's Run Setup — so the file says everything
+needed to reproduce a result:
+
+```
+[Run]
+Name         = Setup
+Length       = 480
+Replications = 1
+```
+
+To drive a run from code rather than the command line:
+
+```cpp
+ReadResult read = readDocumentFile("examples/models/teller.des");
+std::vector<Diagnostic> problems;
+auto run = RunController::fromDocument(read.document, problems);
+while (run->state() == RunState::Ready || run->state() == RunState::Running) {
+    run->advance(4096);                    // do some work, then come back
+    const RunProgress p = run->progress(); // p.fraction may be EMPTY: see below
+}
+run->report(std::cout);
 ```
 
 **The format.** One record per module row, headed by its module type in square
@@ -389,8 +414,12 @@ teller.des: Process row 1, Service (col 9): error: expected ')'
 - **Routing is a column.** `Next`, `Duplicate`, `Balk To` and `Renege To` are
   cells, because a terminal cannot draw a connection.
 - **Queue is read-only.** Set the discipline on the Process row.
-- **A model file carries no run length.** `des run` takes it as an argument and
-  prints the default it used.
+- **`progress().fraction` can be empty, and that is information.** A time
+  limit knows how far through it is; `whenDrained()` cannot. A bar that reads
+  0% for a whole run and then jumps to 100% is a lie the caller cannot detect,
+  so the rule returns nothing and a front end shows a spinner.
+- **A `[Run]` with no stopping condition is a warning, not an error.** A Create
+  with `Max Arrivals` is finite and ends on its own.
 
 ## Mistakes to avoid
 

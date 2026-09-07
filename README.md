@@ -3,7 +3,7 @@
 Written from the simulation theory table up, as a way of learning OOP and system
 design rather than as a way of getting a simulator.
 
-**Current state: v11.** A flowchart simulator in the spirit of Arena's Basic
+**Current state: v12.** A flowchart simulator in the spirit of Arena's Basic
 Process template — Process, Delay, Assign, Decide, Batch, Separate, Record,
 Dispose — with **shared resources**, balking and reneging, warm-up removal,
 replications and confidence intervals. Refuses to run an unstable model, working
@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 779/779 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 930/930 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -25,6 +25,11 @@ columns, a `ModelDocument` holds rows of text cells, and a `.des` file
 round-trips through them byte for byte. `compile()` turns one into a runnable
 model, or into diagnostics that point at individual cells. See **A model as a
 file** below.
+
+**v12: a run can be driven.** `run()` is `while (stepOnce())` now, so a caller
+owns the loop: advance a budget of events, redraw, advance again. Pause, cancel
+and live statistics fall out of that, and `des regress` runs a manifest of
+models and diffs their reports. See **Watching a run** below.
 
 ```cpp
 #include "des.hpp"
@@ -42,7 +47,7 @@ sim.stopAt(480.0).execute().report();
 ```
 cmake -S . -B build && cmake --build build
 ./build/des_demo     # five demonstration scenarios
-./build/des          # the model-file tool: des check / des run
+./build/des          # the model-file tool: des check / des run / des regress
 ./build/des_tests    # the unit suite
 cd build && ctest
 ```
@@ -58,7 +63,12 @@ g++ -std=c++17 -Wall -Wextra -Wpedantic -Iinclude main.cpp src/*.cpp -o des
 ```
 bash tools/verify.sh      # both compilers warning-clean, plus MSVC AddressSanitizer
 bash tools/baseline.sh check   # every example still byte-identical
+./build/des regress            # every model file still produces its report
 ```
+
+All three FAIL when they measured nothing. A gate that checked zero cases has
+not passed, it has not run -- `baseline.sh` reported CLEAN over zero examples
+once, and that is why every one of them now says so.
 
 `tools/verify.sh` finds a C++17-capable compiler itself and refuses one that is
 too old. **UBSan does not exist on the Windows side** — MinGW ships no
@@ -171,9 +181,21 @@ Next       = Out
 Name = Out
 ```
 
+A `[Run]` module carries the run length, so the file says everything needed to
+reproduce a result:
+
 ```
-./build/des check examples/models/teller.des     # compile and report
-./build/des run   examples/models/teller.des 480 # compile and run to t = 480
+[Run]
+Name         = Setup
+Length       = 480
+Replications = 1
+```
+
+```
+./build/des check   examples/models/teller.des     # compile and report
+./build/des run     examples/models/teller.des     # run as the file says
+./build/des run     examples/models/teller.des 100 # ...or override the length
+./build/des regress                                # every model, diffed
 ```
 
 `check` reports **every** bad cell, not the first, and names the module, the row
@@ -183,6 +205,19 @@ parser found one:
 ```
 teller.des: Process row 1, Service (col 9): error: expected ')'
 ```
+
+**Regression over model files.** `des regress` runs every model in
+`tests/regression/manifest` and compares its report against a stored
+`.expected`, byte for byte — no tolerances, because a stored mean with a
+tolerance passes a real regression that lands inside the band.
+
+```
+./build/des regress
+./build/des regress --capture     # refuses to overwrite; --force to insist
+```
+
+It fails when it checked nothing. A gate that measured nothing has not passed;
+it has not run.
 
 **Traps, each of them real:**
 
@@ -210,6 +245,47 @@ std::vector<Diagnostic> problems;
 if (compileInto(read.document, sim.model(), problems))
     sim.stopAt(480.0).execute().report();
 ```
+
+## Watching a run
+
+`run()` blocks until the stopping rule is met, which is right for a program and
+wrong for anything that has to redraw. `RunController` inverts it: the caller
+owns the loop.
+
+```cpp
+ReadResult read = readDocumentFile("examples/models/teller.des");
+std::vector<Diagnostic> problems;
+auto run = RunController::fromDocument(read.document, problems);
+
+while (run->state() == RunState::Ready || run->state() == RunState::Running) {
+    run->advance(4096);                 // do some work, then come back
+    const RunProgress p = run->progress();
+    if (p.fraction) draw(*p.fraction);  // or a spinner when it cannot tell
+    const RunSnapshot s = run->snapshot();
+    for (const BlockSnapshot& b : s.blocks) drawQueue(b.name, b.queueLength);
+}
+run->report(std::cout);
+```
+
+**Pausing is not calling.** `pause()` makes `advance()` do nothing; `resume()`
+un-does it; `cancel()` is permanent and the run so far stays readable.
+`advance()` past the end returns 0 rather than throwing, because a front end
+that polls after a run finishes is normal rather than wrong.
+
+**`progress().fraction` may be empty, and that is information.** A `TimeLimit`
+knows how far through it is; `whenDrained()` cannot, because whether a system
+will next be empty is not knowable in advance. A bar that reads 0% for a whole
+run and then jumps to 100% is a lie the caller cannot detect, so the rule
+returns nothing and a front end shows a spinner.
+
+**Watching does not change the run.** A snapshot is built when it is asked for
+and nothing is added to the inner loop — asserted, not assumed: the same model
+stepped one event at a time, thirteen at a time, and with a snapshot taken
+between every chunk traces byte-identically to `run()`.
+
+For several replications the controller rolls over on its own, and
+`progress().replication` says which one. `Experiment` is the same machinery with
+confidence intervals on top.
 
 ## Getting an answer you can defend
 
@@ -293,6 +369,7 @@ need to read the engine's source to build a model with it.
 | `V10_READLOG.md` | The expression layer: one grammar, saying you do not know, and the bugs |
 | `V9_READLOG.md` | Multiple sources, entity types, matched batching, terminating runs |
 | `V11_READLOG.md` | The document layer: schemas, the .des format, and two gates that were not gating |
+| `V12_READLOG.md` | Runtime control: stepping, progress that can say it does not know, and three sabotages that proved nothing |
 | `ARENA_MAP.md` | Arena module → this engine, and where the two differ |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
@@ -304,9 +381,9 @@ sim/
 ├── main.cpp         five scenarios (des_demo)
 ├── cli/             the des command: check and run a model file
 ├── examples/models/ hand-written .des models
-├── tests/           779 unit checks
-├── include/         40 headers
-└── src/             35 sources
+├── tests/           930 unit checks
+├── include/         43 headers
+└── src/             38 sources
 ```
 
 Headers declare, sources define. One-line getters stay inline. Every `.cpp`
@@ -407,20 +484,20 @@ two and every time-average goes quietly wrong with no error.
 
 ---
 
-# v12 — the order to do it in
+# v13 — the order to do it in
 
-1. **A terminal front end** over `ModuleRegistry` and `ModelDocument`: a module
-   list, a spreadsheet per module type, a cell editor. It reads the schema at
-   runtime, so it must never name a module type in its own source — that is the
-   property the flat child tables were chosen to protect.
+1. **The TUI**, in its own repository, over `ModuleRegistry`, `ModelDocument`
+   and `RunController`: a module list, a spreadsheet per module type, a cell
+   editor, and a run it can watch. It reads the schema at runtime, so it must
+   never name a module type in its own source — that is the property the flat
+   child tables were chosen to protect. Everything it needs now exists; nothing
+   renders it.
 2. **Diagnostics rendered in the grid**, using the `CellRef` v11 added. The
    mechanism exists; nothing displays it yet.
-3. **A run length in the document.** There is no Run module, so `des run` takes
-   the horizon on the command line and says so.
-4. **Undo** — which is why document rows are addressed by position and why the
+3. **Undo** — which is why document rows are addressed by position and why the
    document keeps its source lines.
 
-Still open from v9, untouched by v10 or v11:
+Still open from v9, untouched by v10, v11 or v12:
 
 1. **Resource schedules** — a nurse who goes off shift at 5pm. Arena has it; it
    needs a capacity that varies with time, which interacts with every ρ
