@@ -7,7 +7,7 @@ the call-flow chapters. Prose is passed to reportlab as markup, so use &amp;,
 &lt; and &gt; rather than the bare characters.
 """
 
-VERSION_LINE = "v12 — runtime control · 930 checks · 105 types"
+VERSION_LINE = "v13 — the terminal UI · 1069 checks · 113 types"
 
 FRONT_MATTER = (
     "A discrete-event simulation engine in the spirit of Arena's Basic Process "
@@ -57,6 +57,16 @@ TYPE_DOC = {
     "RunSetup": "How to run a model: length, warm-up, replications, base seed, and the stopping conditions. Read from the [Run] module, so a model file carries its own run length rather than depending on a number stored somewhere else.",
     "RegressionOutcome": "What happened to one model in a regression run: whether it matched, and if not, the first line where it differed.",
     "RegressionReport": "The verdict over a whole manifest. ok() is false when nothing was checked, because a gate that measured nothing has not passed -- it has not run.",
+
+    # -- the terminal UI (v13)
+    "Attr": "How a glyph is drawn: normal, bold, dim, reversed, or the red used for a diagnostic. The terminal turns these into escape sequences; nothing above it knows that.",
+    "Screen": "A grid of glyphs, and the decision the whole user interface rests on. A renderer fills one and the terminal blits it, so a test can render a document and assert on the text a person would read -- headless, with no timing and no sleeps. Writes outside its bounds are dropped rather than asserted: a renderer that computes one column too far has a layout bug, and a missing character is a better way to find out than a crash in front of the user.",
+    "KeyKind": "What kind of keypress this is: a printable character, a control chord, or one of the named keys a terminal sends as an escape sequence.",
+    "Key": "A keypress as a value. The platform layer turns a console record or an escape sequence into one of these, and everything above takes them -- which is what lets a test type a whole session without a terminal. Control keys normalise to upper case, so ^s and ^S are one key rather than two that can disagree.",
+    "TerminalSize": "How many columns and rows the terminal has right now. Read every frame, because a person can resize a window mid-edit.",
+    "ITerminal": "The only platform code in the project: report the size, blit a Screen, read a Key. It is an object rather than three functions because its destructor restores the console -- a return from anywhere in the loop must not leave somebody in raw mode with no cursor.",
+    "Mode": "Which part of the interface has the keyboard: the grid, the detail pane, a cell being edited, a run in progress, or the confirm prompt that stands between unsaved work and quitting.",
+    "TuiState": "Everything the user interface knows: the document, where the cursor is, which mode is active, the diagnostics from the last compile, the undo stack and the run in progress. The renderer reads it and the input layer writes it, and neither touches a terminal.",
 
     # -- queues and resources
     "EntityQueue": "A waiting line: a deque of entities plus a pluggable rule that chooses which one leaves next. Tracks its own maximum observed length.",
@@ -183,6 +193,38 @@ COMMON_DOC = {
 
 # ----------------------------------------------- per-type member prose --
 MEMBER_DOC = {
+    "Screen::hline": "A horizontal run of one character.",
+    "TuiState::fromDocument": "A state around a document already in memory, rather than one on disk. The tests use it so the suite does not need a file for every case.",
+    "TuiState::moveRow": "Moves the current row up or down. Undoable like any other edit, because row order is SEMANTIC in this format -- a Decide takes the first branch that matches -- so moving one is a model change rather than a display preference.",
+    "TuiState::typeEdit": "Appends a character to the edit buffer. The document is not touched until the edit commits.",
+    "ModelDocument::rowAt": "One row, mutable, by type and position. It exists for the reader, which fills in a row source block after parsing the record.",
+    "Screen::put": "One glyph. Out of range is dropped, not an error.",
+    "Screen::text": "A run of text, returning the x it stopped at so callers can chain runs.",
+    "Screen::line": "One row as plain text with the trailing blanks trimmed. This is the test interface: an assertion says what a person would read rather than picking through an attribute grid.",
+    "Screen::asText": "Every line, newline separated. What a test compares.",
+    "Screen::box": "A frame drawn in dashes, pipes and plus signs.",
+    "Screen::at": "The glyph at a position, or a blank one when the position is outside the screen.",
+    "Key::character": "A printable key.",
+    "Key::control": "A control chord, normalised to upper case.",
+    "Key::special": "One of the named keys, such as Up or Enter.",
+    "ITerminal::size": "The terminal size right now.",
+    "ITerminal::present": "Write a whole Screen. No diffing: a spreadsheet is a few thousand cells and a person types at human speed, so the optimisation would only be somewhere for a rendering bug to hide.",
+    "ITerminal::nextKey": "Block until a key arrives. Anything unrecognised comes back as Unknown, which the input layer ignores -- an unfamiliar escape sequence must never stop the program.",
+    "TuiState::open": "Reads a file. One that does not PARSE still opens, with its diagnostics shown, because the document layer preserves what it read. One that does not EXIST opens as an empty document, so pointing the editor at a new name starts a new model; the status line says which happened, because empty and unreadable must not look alike.",
+    "TuiState::types": "Every module type the registry publishes, then any the document holds that it does not. Computed, never a list in the source: that is the property the flat child tables were chosen to protect, and showing the unknown ones is how a person learns their editor is older than the file.",
+    "TuiState::columnsHere": "The columns to show for the current type: the schema's, or -- for a type with no schema -- the ones the document rows happen to carry.",
+    "TuiState::schemaHere": "The schema for the current type, or null. Every caller has to cope with null, because unknown module types are kept on purpose.",
+    "TuiState::save": "Writes the document back. Records nobody edited come out exactly as they were read, comments included.",
+    "TuiState::recompile": "Runs the compiler and keeps the diagnostics. Called on load and on each cell commit, never per keystroke: a half-typed expression is not a model change.",
+    "TuiState::undo": "Pops a whole-document snapshot. It leaves the document dirty on purpose -- undoing back to what is on disk is not the same as knowing you are there, and claiming otherwise loses work.",
+    "TuiState::beginEdit": "Opens the current cell, seeding a buffer held OUTSIDE the document until it commits.",
+    "TuiState::commitEdit": "Writes the buffer into the cell and recompiles.",
+    "TuiState::cancelEdit": "Throws the buffer away and leaves the document untouched.",
+    "TuiState::diagnosticFor": "The first diagnostic against a column of the current row, or null. This is what puts an error under the field that caused it.",
+    "TuiState::startRun": "Compiles and enters the run mode, or refuses with a reason. Entering a run mode with nothing running is worse than not entering it.",
+    "TuiState::advanceRun": "Does a budget of events and captures the report when the run ends.",
+    "TuiState::stopRun": "Cancels and returns to the grid.",
+    "TuiState::readOnlyHere": "Whether the current module type refuses edits. Queue is the one that does, because there is no queue object apart from its Process.",
     "TimeLimit::progress": "The clock over the limit, clamped to 1. A time limit always knows how far through it is.",
     "EntityLimit::progress": "Entities served over the limit, clamped to 1.",
     "AnyOf::progress": "The LARGEST fraction any child knows, because the run ends when the FIRST rule is met and the most advanced child is the honest estimate. Nothing when no child can tell -- not zero.",
@@ -443,7 +485,7 @@ CHAPTERS = [
    ("text", "Inside the run loop the integrals for the interval that just ended are closed "
             "<b>before</b> the clock moves, and the clock moves <b>before</b> any state "
             "changes. Swap any two of those and every time-weighted average goes quietly "
-            "wrong, with no error anywhere. Chapter 12 shows the order explicitly."),
+            "wrong, with no error anywhere. Chapter 13 shows the order explicitly."),
   ]),
 
  (2, "Foundations",
@@ -574,7 +616,43 @@ CHAPTERS = [
               "RegressionOutcome", "RegressionReport"]),
   ]),
 
- (8, "The Flowchart",
+ (8, "The Terminal UI",
+  "How the spreadsheets got a screen, and how a terminal interface is tested.",
+  [
+   ("text", "v10 made a model's fields text, v11 made the model itself data, and v12 made "
+            "the run something a caller drives. Each was built for a front end that did "
+            "not exist. This is that front end -- a tab bar of module types, a grid of "
+            "rows, a detail pane where editing happens, and a run view."),
+   ("h3", "The screen is a value"),
+   ("text", "A renderer fills a Screen; the terminal blits it. render() is pure and "
+            "handleKey() touches nothing outside the state, so a test builds a document, "
+            "types a scripted key sequence, and asserts on the screen AS TEXT -- no "
+            "terminal, no timing, no sleeps. That is what makes a terminal interface "
+            "testable at all."),
+   ("h3", "Why the portable half lives in src/"),
+   ("text", "The verification script compiles src/*.cpp, and its sanitiser leg compiles "
+            "tests and src together. Putting the portable half of the interface there runs "
+            "the whole of it through both compilers and both sanitisers with no change to "
+            "any gate script. Only the platform layer sits outside, in tui/, and platform "
+            "code cannot be tested anyway -- which is the reason it is three methods long."),
+   ("h3", "Nothing here names a module type"),
+   ("text", "The tab bar is every type the registry publishes, then any the document holds "
+            "that it does not. The first half is why a module added in a later version "
+            "renders without this code changing. The second is why a file written by a "
+            "later version shows its unknown modules instead of hiding them."),
+   ("h3", "What only looking at it found"),
+   ("text", "Six layout bugs passed every assertion in the suite, because each of them "
+            "passes a search of the screen text: the selected tab drawn off the edge, a "
+            "file name trimmed from the wrong end, a detail pane that did not scroll, an "
+            "enum hint that ran on from the value, text overflowing the frame, and a "
+            "finished run reporting that its rule could not say how far along it was. The "
+            "screen-as-a-value design makes rendering testable; it does not make it "
+            "self-evaluating."),
+   ("types", ["Attr", "Screen", "KeyKind", "Key", "TerminalSize", "ITerminal",
+              "Mode", "TuiState"]),
+  ]),
+
+ (9, "The Flowchart",
   "The blocks entities move through, and the narrow window each one gets on the engine.",
   [
    ("text", "A model is a graph of blocks. Each does one job to an entity and decides where "
@@ -586,7 +664,7 @@ CHAPTERS = [
               "DisposeNode", "Station", "CreateNode"]),
   ]),
 
- (9, "The Model",
+ (10, "The Model",
   "What is simulated, kept separate from the machinery that simulates it.",
   [
    ("text", "The engine takes a Model and runs it, and knows nothing about tellers or "
@@ -602,7 +680,7 @@ CHAPTERS = [
    ("types", ["Model"]),
   ]),
 
- (10, "Running a Simulation",
+ (11, "Running a Simulation",
   "The engine, the stopping rules, and the trace that makes a run checkable by hand.",
   [
    ("text", "SimulationSystem owns the clock, the event list, the entities, the random "
@@ -614,7 +692,7 @@ CHAPTERS = [
               "TraceLevel", "Trace"]),
   ]),
 
- (11, "Experiments",
+ (12, "Experiments",
   "Why one run is one sample, and what to do about it.",
   [
    ("text", "A single run is one observation of a random variable. Quoting it to four "
@@ -627,7 +705,7 @@ CHAPTERS = [
    ("types", ["ReplicationResult", "Summary", "Experiment"]),
   ]),
 
- (12, "Call Flows",
+ (13, "Call Flows",
   "What calls what, in order, when a model is built and run.",
   [
    ("text", "These traces follow examples/16_expressions.cpp, which exercises every part of "
@@ -722,7 +800,7 @@ CHAPTERS = [
     "cell rather than the first."),
   ]),
 
- (13, "Free Functions",
+ (14, "Free Functions",
   "The factories and helpers that are not members of anything.",
   [
    ("h3", "Distribution factories, from Build.hpp"),

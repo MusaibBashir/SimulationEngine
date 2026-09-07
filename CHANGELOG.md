@@ -5,6 +5,63 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [13.0.0] — 2026-09-07 — "The spreadsheets get a screen"
+
+A terminal front end over the three layers built for it: open a `.des` file,
+edit it as spreadsheets, save without disturbing what you did not touch, and
+run it. Narrative in `V13_READLOG.md`.
+
+### Added
+
+- **`des_tui`** — the terminal UI. A tab bar of module types, a grid, a
+  row-detail pane where editing happens, diagnostics against the cell that
+  caused them, undo, and a run view.
+- **`Screen`** — a grid of glyphs, comparable and printable as plain text.
+  The value the whole design rests on: `render()` fills one and a test asserts
+  on what a person would read.
+- **`Key`** — a keypress as a value, so a test can type without a terminal.
+- **`ITerminal` and `openTerminal()`** — three methods and the only platform
+  code in the project, with a Win32 console and a POSIX termios implementation.
+- **`TuiState`, `render()`, `handleKey()`** — the document, cursor, modes,
+  diagnostics and undo stack; a pure renderer; a pure input handler.
+- **`des_ui`** — a second library target linking `des_engine`, and
+  `include/des_ui.hpp`, a second umbrella. The engine's umbrella does not pull
+  in the UI.
+- **`ModelDocument::Row::source` and `Row::edited`** — per-row source text and
+  edit tracking.
+
+### Changed
+
+- **An edit no longer reformats the whole file.** See Fixed.
+- `tools/baseline.sh` compares the newest source against the newest build
+  artefact rather than the newest example binary.
+
+### Fixed
+
+- **A single cell edit destroyed every comment in the file.** `m_edited` was
+  one flag for the whole document, so any edit re-emitted everything
+  canonically — the exact failure `V11_READLOG.md` says a front end must not
+  have, in the same paragraph where it claimed v11 avoided it. Each row now
+  carries its own source block and edited flag, including the comments that
+  preceded its header, so a record keeps its annotation when it moves and takes
+  it away when deleted. That readlog now carries the correction.
+- **`tools/baseline.sh` refused to run after a successful build.** Its
+  staleness guard compared against example binaries, which no longer relink
+  when a UI source changes.
+- Six layout bugs found by rendering the UI and reading it, none of which any
+  assertion on screen text could have caught: the selected tab could be off the
+  edge, the file name was trimmed from the wrong end, the detail pane did not
+  scroll, an enum hint ran on from the value, text overflowed the frame, and a
+  finished run reported that its rule could not say how far along it was.
+
+### Compatibility
+
+Nothing existing breaks. All 930 v12 checks pass unchanged, every gated example
+traces byte-identically, every gated model file still produces its report, and
+an unedited document still round-trips byte for byte.
+
+---
+
 ## [12.0.0] — 2026-09-06 — "The run becomes something you can drive"
 
 A run is now something a caller owns: step it, watch it, pause it, cancel it,

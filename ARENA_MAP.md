@@ -78,6 +78,21 @@ what an earlier one wrote.
 the next. A terminal front end cannot, so `Next`, `Duplicate`, `Balk To` and
 `Renege To` are cells. A blank exit means the entity leaves the system.
 
+## The spreadsheets, on a screen (v13)
+
+`des_tui` renders these tables the way Arena renders its module spreadsheets: a
+list of module types, a grid of rows, and a detail view of the current row where
+editing happens. Arena calls that detail view a dialog; here it is a pane, for
+the same reason — eleven columns do not fit across a screen.
+
+**The one difference that will not go away.** Arena has a canvas: you draw a
+connection from one module to the next and the picture is the model. A terminal
+cannot draw, so this engine's flowchart lives in `Next`, `Duplicate`, `Balk To`
+and `Renege To` columns, and the shape of a model is read rather than seen. That
+is not a limitation of the front end — it is why v11's data model put routing in
+columns in the first place, and a canvas-based editor built later would have to
+render those columns as lines rather than the other way round.
+
 ## Report line → what to call
 
 | Arena report line | Here |

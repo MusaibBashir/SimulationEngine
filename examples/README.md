@@ -421,6 +421,31 @@ teller.des: Process row 1, Service (col 9): error: expected ')'
 - **A `[Run]` with no stopping condition is a warning, not an error.** A Create
   with `Max Arrivals` is finite and ends on its own.
 
+## Editing a model (v13)
+
+```sh
+./build/des_tui examples/models/teller.des
+```
+
+One spreadsheet per module type across the top, the rows below, and the current
+row opened in a detail pane where editing happens. `Tab` switches type, arrows
+move, `Enter` goes in, `Escape` comes out, `^S` saves, `^R` runs, `^Z` undoes,
+`q` quits and asks first if there is unsaved work.
+
+**Saving does not disturb what you did not touch.** Every row remembers the
+lines it was read from, including the comments above it, and only the records
+you actually edited are re-emitted. Open a file and save it unedited and the
+bytes are identical; edit one cell and the diff is that one record.
+
+**A `[Run]` that stops when drained shows no progress bar.** That rule cannot
+say how far through it is, and a bar sitting at zero until it jumps to full
+would be a lie you could not detect, so the UI says so in words.
+
+**A module type the editor does not know still appears**, with its rows and
+whatever columns they carry, marked unknown. That is deliberate: a file written
+by a later version must show you what is in it rather than quietly hiding the
+parts this build is too old to understand.
+
 ## Mistakes to avoid
 
 **Reading one block's utilisation as its resource's.** With a shared pool, each
