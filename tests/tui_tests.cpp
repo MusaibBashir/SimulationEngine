@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 #include "harness.hpp"
 #include "des_ui.hpp"
@@ -653,4 +654,53 @@ void runTuiTests() {
               "and only the selected one does -- prose for every field would "
               "bury the values it is meant to explain");
     }
+    section("A model built from scratch runs");
+    {
+        // The whole point of the editor, and it ABORTED. A document built from
+        // nothing has no [Run] row, so nothing set a stopping rule, and
+        // initialise() asserts one exists -- pressing run on a new model killed
+        // the program. In the terminal UI that is worse than a crash, because
+        // abort() skips destructors and leaves the console in raw mode with no
+        // cursor and an alternate screen buffer.
+        TuiState s = TuiState::fromDocument(ModelDocument{}, "scratch.des");
+
+        // Built the way a person builds it: a row at a time, through the keys.
+        const auto addRowWith = [&](const std::string& type,
+                                    const std::vector<std::pair<std::string,
+                                                                std::string>>& cells) {
+            s.setType(type);
+            handleKey(s, Key::control('n'));
+            for (const auto& kv : cells) s.setCell(kv.first, kv.second);
+        };
+        addRowWith("Create", {{"Name", "Arrivals"},
+                              {"Interarrival", "EXPO(1.0)"},
+                              {"Max Arrivals", "20"},
+                              {"Next", "Serve"}});
+        addRowWith("Process", {{"Name", "Serve"},
+                               {"Service", "EXPO(0.5)"},
+                               {"Next", "Out"}});
+        addRowWith("Dispose", {{"Name", "Out"}});
+
+        check(!hasErrors(s.diagnostics()), "the model compiles");
+        check(s.document().rowCount("Run") == 0, "and it has NO [Run] row");
+
+        s.startRun();
+        check(s.mode() == Mode::Running, "^R starts it anyway");
+        int guard = 0;
+        while (s.running() != nullptr &&
+               (s.running()->state() == RunState::Ready ||
+                s.running()->state() == RunState::Running) &&
+               guard++ < 10000)
+            s.advanceRun();
+        check(guard < 10000, "and it TERMINATES rather than running forever");
+        check(s.running() != nullptr && s.running()->state() == RunState::Finished,
+              "finishing cleanly");
+        check(s.runReport().find("entities exited         : 20") != std::string::npos ||
+              s.runReport().find("entities arrived") != std::string::npos,
+              "with a report");
+        check(s.runReport().find("until the model runs out of events") !=
+                  std::string::npos,
+              "that says WHAT stopped it, rather than printing AnyOf[]");
+    }
+
 }

@@ -102,6 +102,20 @@ bool RunController::startRun() {
         if (m_setup.warmUp > 0.0)          m_sim->setWarmUp(m_setup.warmUp);
         if (m_setup.observeInterval > 0.0) m_sim->setObservationInterval(m_setup.observeInterval);
         if (auto rule = ruleFrom(m_setup)) m_sim->setTermination(std::move(rule));
+        if (m_sim->termination() == nullptr) {
+            // NOBODY set one -- neither the setup nor the builder. That happens
+            // for a document with no [Run] row, which is every model somebody
+            // has just built from scratch, and initialise() asserts a rule
+            // exists: pressing run on a new model ABORTED the program. In the
+            // terminal UI that is worse than a crash, because abort() skips
+            // destructors and the console is left in raw mode with no cursor.
+            //
+            // An empty AnyOf is never met, so the run ends when the event list
+            // empties -- which is exactly what readRunSetup's warning already
+            // promises a model with no stopping condition will do. This makes
+            // that promise true rather than fatal.
+            m_sim->setTermination(std::make_unique<AnyOf>());
+        }
         m_sim->initialise();
     } catch (const ModelError& bad) {
         m_failure = bad.what();
