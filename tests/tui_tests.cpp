@@ -402,4 +402,65 @@ void runTuiTests() {
         check(s.mode() == Mode::Editing, "^S does not escape the editor");
         check(s.status().find("saved") == std::string::npos, "and does not save");
     }
+    section("A scripted session round-trips the file");
+    {
+        // THE CLAIM THIS VERSION RESTS ON. v11's byte-identical round-trip is
+        // the property the document layer was built for, and this is the first
+        // time it is exercised through the surface a person actually uses. If
+        // the UI marks rows edited that nobody edited, nothing else catches it.
+        const std::string src = modelPath("teller.des");
+        std::ifstream in(src, std::ios::binary);
+        const std::string original((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+        check(original.size() > 100, "the source file is substantial");
+
+        // 1. Open, wander around, save. Nothing was edited, so nothing changes.
+        {
+            TuiState s = TuiState::open(src);
+            handleKey(s, Key::special(KeyKind::Tab));
+            handleKey(s, Key::special(KeyKind::Tab));
+            handleKey(s, Key::special(KeyKind::Down));
+            handleKey(s, Key::special(KeyKind::Enter));
+            handleKey(s, Key::special(KeyKind::Down));
+            handleKey(s, Key::special(KeyKind::Escape));
+            check(!s.dirty(), "moving about does not dirty the document");
+            check(s.save("tui_session.des"), "and it saves");
+        }
+        std::ifstream a("tui_session.des", std::ios::binary);
+        const std::string wandered((std::istreambuf_iterator<char>(a)),
+                                   std::istreambuf_iterator<char>());
+        check(wandered == original,
+              "opening, navigating and saving gives back the SAME BYTES");
+
+        // 2. Edit one cell. Every other row must still come back verbatim,
+        //    comments and blank lines included.
+        {
+            TuiState s = TuiState::open(src);
+            s.setType("Process");
+            s.setColumn(0);
+            s.beginEdit();
+            for (int i = 0; i < 40; ++i) s.backspaceEdit();
+            for (char c : std::string("Teller")) s.typeEdit(c);
+            s.commitEdit();
+            check(s.dirty(), "the edit dirties the document");
+            check(s.save("tui_session.des"), "and it saves");
+        }
+        std::ifstream b("tui_session.des", std::ios::binary);
+        const std::string edited((std::istreambuf_iterator<char>(b)),
+                                 std::istreambuf_iterator<char>());
+        check(edited != original, "an edited file differs");
+        check(edited.find("Teller") != std::string::npos, "and carries the new value");
+        check(edited.find("# A single teller.") != std::string::npos,
+              "while the COMMENTS survive, which is what the source lines are for");
+        check(edited.find("[Dispose]") != std::string::npos,
+              "and so does every table nobody touched");
+
+        // 3. The edited file re-reads to a document that says what was typed.
+        ReadResult back = readDocumentFile("tui_session.des");
+        check(!hasErrors(back.diagnostics), "the saved file reads cleanly");
+        bool found = false;
+        for (std::size_t r = 0; r < back.document.rowCount("Process"); ++r)
+            if (back.document.cell("Process", r, "Name") == "Teller") found = true;
+        check(found, "and round-trips the edit back");
+    }
 }

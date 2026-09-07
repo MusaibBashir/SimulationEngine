@@ -26,6 +26,18 @@ public:
     };
     struct Row {
         std::map<std::string, Cell> cells;
+
+        // v13: the lines this row was READ from, and whether anyone has
+        // changed it since. Kept per row rather than per document because
+        // v11's flag was per document -- so a single cell edit re-emitted the
+        // whole file canonically and destroyed every comment in it, which is
+        // the exact failure V11_READLOG says a front end must not have.
+        //
+        // The block includes the blank line and comments that preceded the
+        // header, so a row carries its own annotation when it moves and takes
+        // it with it when it is deleted.
+        std::vector<std::string> source;
+        bool                     edited{false};
     };
 
 private:
@@ -39,6 +51,8 @@ private:
     // spacing survive a read-then-write. Empty for a document built in code.
     std::vector<std::string> m_sourceLines;
     bool                     m_edited{false};
+    std::vector<std::string> m_preamble;
+    std::vector<std::string> m_trailer;
 
     std::vector<Row>& require(const std::string& type, std::size_t index);
 
@@ -68,6 +82,16 @@ public:
                         std::size_t line = 0);
 
     void setSourceLines(std::vector<std::string> lines);
+
+    // v13: the lines before the first record and after the last one. Neither
+    // belongs to a row, and both have to survive an edit.
+    void setPreamble(std::vector<std::string> lines) { m_preamble = std::move(lines); }
+    void setTrailer(std::vector<std::string> lines)  { m_trailer  = std::move(lines); }
+    const std::vector<std::string>& preamble() const { return m_preamble; }
+    const std::vector<std::string>& trailer()  const { return m_trailer; }
+
+    // For the reader, which fills a row's source block after parsing it.
+    Row& rowAt(const std::string& type, std::size_t index);
     const std::vector<std::string>& sourceLines() const { return m_sourceLines; }
     bool                            edited() const { return m_edited; }
     void                            markEdited() { m_edited = true; }

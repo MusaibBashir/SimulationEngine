@@ -95,3 +95,4 @@ __pycache__/
 /chunk_watched.md
 /tui_roundtrip.des
 /tui_confirm.des
+/tui_session.des

@@ -76,14 +76,23 @@ void ModelDocument::setCell(const std::string& type, std::size_t index,
                             std::size_t line) {
     std::vector<Row>& rs = require(type, index);
     rs[index].cells[column] = Cell{std::move(text), line};
+    rs[index].edited = true;
     markEdited();
+}
+
+ModelDocument::Row& ModelDocument::rowAt(const std::string& type, std::size_t index) {
+    return require(type, index)[index];
 }
 
 void ModelDocument::setSourceLines(std::vector<std::string> lines) {
     m_sourceLines = std::move(lines);
     // Reading a file is not an edit. The reader calls this last, so the
-    // document can be written back verbatim until somebody actually changes it.
+    // document can be written back verbatim until somebody actually changes it
+    // -- and every ROW is unedited too, or the first save would re-emit them
+    // all canonically and lose the comments they were read with.
     m_edited = false;
+    for (auto& kv : m_rows)
+        for (Row& r : kv.second) r.edited = false;
 }
 
 std::string ModelDocument::cellOrDefault(const std::string& type, std::size_t index,
