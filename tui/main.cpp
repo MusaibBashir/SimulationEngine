@@ -27,13 +27,18 @@ int main(int argc, char** argv) {
         render(state, screen);
         terminal->present(screen);
 
-        // Advance a running simulation BEFORE blocking on a key. Exactly the
-        // shape v12's advance(budget) was designed for: do some work, redraw,
-        // come back. A run that only advanced when a key was pressed would
-        // look frozen.
-        if (state.mode() == Mode::Running && state.running() != nullptr &&
-            (state.running()->state() == RunState::Ready ||
-             state.running()->state() == RunState::Running)) {
+        // Advance a running simulation instead of blocking on a key. Exactly
+        // the shape v12's advance(budget) was designed for: do some work,
+        // redraw, come back.
+        //
+        // keyPending() is what makes it interruptible. Without it the loop
+        // advanced and continued without ever reading a key, so Escape was
+        // never seen -- and a model with no stopping condition, which is every
+        // model somebody has just built, could not be stopped at all.
+        const bool busy = state.mode() == Mode::Running && state.running() != nullptr &&
+                          (state.running()->state() == RunState::Ready ||
+                           state.running()->state() == RunState::Running);
+        if (busy && !terminal->keyPending()) {
             state.advanceRun();
             continue;
         }

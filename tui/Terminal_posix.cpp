@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <string>
 #include <sys/ioctl.h>
+#include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -63,6 +64,14 @@ public:
         out += "\033[0m";
         std::fwrite(out.data(), 1, out.size(), stdout);
         std::fflush(stdout);
+    }
+
+    bool keyPending() override {
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(STDIN_FILENO, &fds);
+        timeval zero{0, 0};
+        return ::select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &zero) > 0;
     }
 
     Key nextKey() override {

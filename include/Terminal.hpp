@@ -29,6 +29,12 @@ public:
     // error, or a terminal sending an escape sequence nobody anticipated would
     // stop the program.
     virtual Key nextKey() = 0;
+
+    // Is a keypress waiting? The run loop needs this: while a simulation is
+    // advancing it must not block on nextKey(), or the run would only move
+    // when somebody typed -- and a model with no stopping condition could
+    // not be interrupted at all, because Escape would never be read.
+    virtual bool keyPending() = 0;
 };
 
 std::unique_ptr<ITerminal> openTerminal();

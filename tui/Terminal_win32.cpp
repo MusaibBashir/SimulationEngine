@@ -71,6 +71,24 @@ public:
         std::fflush(stdout);
     }
 
+    bool keyPending() override {
+        for (;;) {
+            INPUT_RECORD records[16];
+            DWORD available = 0;
+            if (!PeekConsoleInputW(m_in, records, 16, &available) || available == 0)
+                return false;
+            for (DWORD i = 0; i < available; ++i)
+                if (records[i].EventType == KEY_EVENT &&
+                    records[i].Event.KeyEvent.bKeyDown)
+                    return true;
+            // Only mouse, focus or resize records are waiting. Discard them, or
+            // the handle stays signalled forever and the run never advances.
+            DWORD read = 0;
+            if (!ReadConsoleInputW(m_in, records, available, &read) || read == 0)
+                return false;
+        }
+    }
+
     Key nextKey() override {
         for (;;) {
             INPUT_RECORD record{};
