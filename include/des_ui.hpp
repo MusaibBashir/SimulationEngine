@@ -12,3 +12,4 @@
 #include "des.hpp"
 #include "Key.hpp"
 #include "Screen.hpp"
+#include "TuiState.hpp"

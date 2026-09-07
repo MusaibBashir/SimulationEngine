@@ -59,4 +59,76 @@ void runTuiTests() {
               "a control key normalises to upper case, so ^s and ^S are one key");
         check(Key::special(KeyKind::Up).kind == KeyKind::Up, "a special key is its kind");
     }
+    section("TuiState opens a document");
+    {
+        TuiState s = TuiState::open(modelPath("teller.des"));
+        check(!s.document().types().empty(), "a real file opens with its types");
+        check(s.path() == modelPath("teller.des"), "and remembers where it came from");
+        check(!s.dirty(), "a freshly opened document is not dirty");
+        check(s.mode() == Mode::Grid, "and starts in the grid");
+
+        // The tab bar's source of truth: every type the registry publishes,
+        // then any the document holds that it does not. No module type name is
+        // written in the UI's source.
+        const std::vector<std::string> tabs = s.types();
+        check(tabs.size() >= ModuleRegistry::instance().all().size(),
+              "every published type gets a tab");
+        bool sawProcess = false, sawRun = false;
+        for (const std::string& t : tabs) {
+            if (t == "Process") sawProcess = true;
+            if (t == "Run")     sawRun = true;
+        }
+        check(sawProcess && sawRun, "including ones this document happens to use");
+
+        s.setType("Process");
+        check(s.type() == "Process", "the cursor can move to a type");
+        check(!s.columnsHere().empty(), "which knows its columns");
+        check(s.schemaHere() != nullptr, "and its schema");
+
+        {
+            // A type the registry does NOT know still gets a tab. v11 preserves
+            // unknown modules rather than dropping them, and a UI that showed
+            // only what it understood would hide the rows a person needs in
+            // order to notice their editor is older than the file.
+            ModelDocument d;
+            d.addRow("FromTheFuture");
+            d.setCell("FromTheFuture", 0, "X", "1");
+            TuiState u = TuiState::fromDocument(d, "future.des");
+            bool sawUnknown = false;
+            for (const std::string& t : u.types())
+                if (t == "FromTheFuture") sawUnknown = true;
+            check(sawUnknown, "an unknown module type is still shown");
+            u.setType("FromTheFuture");
+            check(u.schemaHere() == nullptr, "with no schema, which the renderer must handle");
+            check(u.columnsHere().size() == 1,
+                  "its columns come from the rows themselves");
+        }
+
+        {
+            TuiState missing = TuiState::open("no_such_file_here.des");
+            check(missing.document().types().empty(),
+                  "a file that does not exist opens as an EMPTY document");
+            check(missing.status().find("new") != std::string::npos,
+                  "and says so, because empty and unreadable must not look alike");
+        }
+    }
+
+    section("TuiState saves without disturbing what it did not touch");
+    {
+        // The guarantee v11 was built on, exercised through the UI for the
+        // first time. If the UI marks rows edited that nobody edited, this is
+        // what catches it.
+        const std::string src = modelPath("teller.des");
+        std::ifstream in(src, std::ios::binary);
+        const std::string before((std::istreambuf_iterator<char>(in)),
+                                 std::istreambuf_iterator<char>());
+
+        TuiState s = TuiState::open(src);
+        check(s.save("tui_roundtrip.des"), "it saves");
+        std::ifstream out("tui_roundtrip.des", std::ios::binary);
+        const std::string after((std::istreambuf_iterator<char>(out)),
+                                std::istreambuf_iterator<char>());
+        check(before == after,
+              "opening a file and saving it UNEDITED gives byte-identical bytes");
+    }
 }
