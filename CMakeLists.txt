@@ -90,6 +90,7 @@ target_compile_options(des_engine PRIVATE ${DES_WARNINGS})
 add_library(des_ui STATIC
     src/Screen.cpp
     src/TuiState.cpp
+    src/TuiRender.cpp
 )
 target_link_libraries(des_ui PUBLIC des_engine)
 target_compile_options(des_ui PRIVATE ${DES_WARNINGS})

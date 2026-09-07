@@ -188,4 +188,67 @@ void runTuiTests() {
         check(s.status().find("read-only") != std::string::npos, "and it says why");
         check(!s.dirty(), "and nothing became dirty");
     }
+    section("Rendering: the tab bar and the grid");
+    {
+        ModelDocument d;
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Service", "EXPO(0.8)");
+        d.addRow("Process");
+        d.setCell("Process", 1, "Name", "Check");
+        d.setCell("Process", 1, "Service", "EXPO(0.3)");
+        TuiState s = TuiState::fromDocument(d, "teller.des");
+        s.setType("Process");
+
+        Screen screen(100, 30);
+        render(s, screen);
+        const std::string text = screen.asText();
+
+        check(text.find("Process") != std::string::npos, "the tab bar names the type");
+        check(text.find("Resource") != std::string::npos,
+              "and every other type the registry publishes");
+        check(text.find("teller.des") != std::string::npos, "the file is named");
+        check(text.find("Serve") != std::string::npos, "the grid shows row 1");
+        check(text.find("Check") != std::string::npos, "and row 2");
+        check(text.find("Service") != std::string::npos, "with its column headings");
+
+        bool marked = false;
+        for (int y = 0; y < screen.height(); ++y) {
+            const std::string ln = screen.line(y);
+            if (ln.find("Serve") != std::string::npos && ln.find('>') != std::string::npos)
+                marked = true;
+        }
+        check(marked, "the current row is marked");
+
+        s.setRow(1);
+        Screen second(100, 30);
+        render(s, second);
+        check(screen.asText() != second.asText(),
+              "and moving the cursor changes what is drawn");
+
+        {
+            // A dirty document says so, or a person loses work believing it is
+            // saved.
+            TuiState t = TuiState::fromDocument(d, "teller.des");
+            t.setType("Process");
+            t.setCell("Name", "Renamed");
+            Screen third(100, 30);
+            render(t, third);
+            check(third.asText().find("teller.des*") != std::string::npos,
+                  "an edited document is marked with a star");
+        }
+    }
+
+    section("Rendering: a terminal too small says so and draws nothing else");
+    {
+        TuiState s = TuiState::open(modelPath("teller.des"));
+        Screen tiny(40, 10);
+        render(s, tiny);
+        const std::string text = tiny.asText();
+        check(text.find("80") != std::string::npos && text.find("24") != std::string::npos,
+              "it names the size it needs");
+        check(text.find("Process") == std::string::npos,
+              "and draws NO grid -- a layout that does not fit produces garbage "
+              "that looks like a bug in the model");
+    }
 }

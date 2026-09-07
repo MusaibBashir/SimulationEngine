@@ -13,3 +13,4 @@
 #include "Key.hpp"
 #include "Screen.hpp"
 #include "TuiState.hpp"
+#include "TuiRender.hpp"
