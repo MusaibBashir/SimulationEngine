@@ -70,16 +70,25 @@ fi
 
 usage() { printf 'usage: %s [capture|check]\n' "$0"; exit 2; }
 
-# Refuse to gate a build that predates the code. The newest engine or example
-# source against the newest binary: anything older cannot contain the change
-# being gated.
+# Refuse to gate a build that predates the code.
+#
+# The comparison is the newest SOURCE against the newest BUILD ARTEFACT, not
+# against the example binaries. It compared example binaries first, and v13
+# broke that: src/ now holds user-interface sources that no example links, so
+# CMake correctly does not relink the examples when one changes and their
+# binaries are permanently older than the newest source. The gate then refused
+# to run at all -- a false alarm, which is the failure mode most likely to end
+# with somebody deleting the check.
+#
+# What the guard actually wants to know is whether a build has happened since
+# the last edit. Any artefact answers that.
 assert_fresh() {
-    local newest_src newest_exe
+    local newest_src newest_built
     newest_src="$(ls -t include/*.hpp src/*.cpp examples/*.cpp 2>/dev/null | head -1)"
-    newest_exe="$(ls -t "$EXAMPLE_DIR"/*.exe 2>/dev/null | head -1)"
-    [ -n "$newest_src" ] && [ -n "$newest_exe" ] || return 0
-    if [ "$newest_src" -nt "$newest_exe" ]; then
-        printf 'STALE BUILD: %s is newer than %s\n' "$newest_src" "$newest_exe" >&2
+    newest_built="$(ls -t build/*.exe build/*.a "$EXAMPLE_DIR"/*.exe 2>/dev/null | head -1)"
+    [ -n "$newest_src" ] && [ -n "$newest_built" ] || return 0
+    if [ "$newest_src" -nt "$newest_built" ]; then
+        printf 'STALE BUILD: %s is newer than %s\n' "$newest_src" "$newest_built" >&2
         printf 'Rebuild before gating:  cmake --build build\n' >&2
         exit 1
     fi
