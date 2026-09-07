@@ -77,6 +77,23 @@ endif()
 target_compile_options(des_engine PRIVATE ${DES_WARNINGS})
 
 # ----------------------------------------------------------------------------
+# The user interface, as a SECOND library. des_ui links des_engine and never
+# the reverse -- that is the whole of the layering, and it is what a repository
+# boundary would otherwise have been protecting.
+#
+# The portable half lives in src/ deliberately: tools/verify.sh compiles
+# src/*.cpp and its WSL leg compiles tests/*.cpp src/*.cpp, so putting it here
+# runs the entire UI through GCC, Clang, ASan and UBSan with no change to any
+# gate script. Only platform code lives in tui/, and platform code cannot be
+# tested anyway.
+# ----------------------------------------------------------------------------
+add_library(des_ui STATIC
+    src/Screen.cpp
+)
+target_link_libraries(des_ui PUBLIC des_engine)
+target_compile_options(des_ui PRIVATE ${DES_WARNINGS})
+
+# ----------------------------------------------------------------------------
 # Programs
 # ----------------------------------------------------------------------------
 add_executable(des_demo main.cpp)
@@ -89,8 +106,8 @@ add_executable(des cli/main.cpp)
 target_link_libraries(des PRIVATE des_engine)
 target_compile_options(des PRIVATE ${DES_WARNINGS})
 
-add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp)
-target_link_libraries(des_tests PRIVATE des_engine)
+add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp)
+target_link_libraries(des_tests PRIVATE des_ui)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
 
 # The decisive v11 test reads the shipped .des files. The suite is not always
