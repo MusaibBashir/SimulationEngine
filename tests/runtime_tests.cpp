@@ -515,4 +515,55 @@ void runRuntimeTests() {
             checkClose(ps[i].averageWait, pb[i].averageWait, 1e-12,
                        "and a budget boundary between the halves of a pair changes nothing");
     }
+    section("A multi-replication report shows EVERY replication");
+    {
+        // Reported from the terminal UI: a twelve-replication run printed five
+        // numbers with a bare "+/-" beside each and nothing else, so a reader
+        // could not tell whether those were the last replication or an average
+        // over all twelve. They were the average, and the evidence for it was
+        // not on screen. v4 exists to say a single run is one sample from a
+        // random variable; hiding the samples argues against it.
+        auto build = [](SimulationSystem& sim) {
+            sim.model().arrivals("EXPO(1.0)")
+                       .station("Serve", 1, FIFO, "EXPO(0.8)")
+                       .entryAt("Serve");
+            sim.stopAt(120.0);
+        };
+        RunSetup setup;
+        setup.replications = 5;
+        setup.baseSeed     = 900u;
+
+        RunController c(setup, build);
+        c.runToCompletion();
+        std::ostringstream out;
+        c.report(out);
+        const std::string text = out.str();
+
+        check(text.find("5 replications") != std::string::npos, "it says how many");
+        check(text.find("seeds 900..904") != std::string::npos,
+              "and which seeds, so a result can be reproduced");
+        check(text.find("rep   seed   served") != std::string::npos,
+              "there is a per-replication table");
+        for (const ReplicationResult& r : c.results()) {
+            std::ostringstream seed;
+            seed << r.seed;
+            check(text.find(seed.str()) != std::string::npos,
+                  "with a row for every replication");
+        }
+        check(text.find("95% half-width") != std::string::npos,
+              "and the summary SAYS the interval is a 95% half-width, rather "
+              "than leaving a bare +/- to be guessed at");
+        check(text.find("average wait (Wq)") != std::string::npos,
+              "naming each quantity the way Experiment::report does");
+
+        // One replication is a single run, and prints that run's own report.
+        RunSetup one;
+        one.baseSeed = 900u;
+        RunController single(one, build);
+        single.runToCompletion();
+        std::ostringstream solo;
+        single.report(solo);
+        check(solo.str().find("simulation report") != std::string::npos,
+              "a single replication prints the run's own report, not a table of one");
+    }
 }

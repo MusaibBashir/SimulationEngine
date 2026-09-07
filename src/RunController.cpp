@@ -252,21 +252,18 @@ void RunController::report(std::ostream& os) const {
         os << m_lastReport.str();
         return;
     }
-    os << "\n=== " << m_results.size() << " replications ===\n";
-    os << std::fixed << std::setprecision(4);
-    const auto line = [&](const char* label, double ReplicationResult::* field) {
-        std::vector<double> xs;
-        for (const ReplicationResult& r : m_results) xs.push_back(r.*field);
-        os << "  " << std::setw(24) << std::left << label << std::right
-           << std::setw(12) << Summary::mean(xs)
-           << "  +/- " << std::setw(10) << Summary::halfWidth95(xs) << "\n";
-    };
-    line("average wait",   &ReplicationResult::averageWait);
-    line("time in system", &ReplicationResult::averageTimeInSystem);
-    line("Lq",             &ReplicationResult::Lq);
-    line("L",              &ReplicationResult::L);
-    line("utilisation",    &ReplicationResult::utilisation);
-    os << "===========================================================\n";
+    // EVERY replication, then the summary. v12 printed only the summary, and
+    // with an unlabelled "+/-" beside each number a reader could not tell
+    // whether they were looking at the last replication or an average over all
+    // of them -- which is exactly what somebody reading it in the terminal UI
+    // asked. The per-replication rows are the evidence the interval is built
+    // from, and v4 exists to say a single run is one sample from a random
+    // variable; hiding the samples argues against that.
+    os << "\n=== " << m_results.size() << " replications, seeds "
+       << m_results.front().seed << ".." << m_results.back().seed << " ===\n";
+    reportReplicationTable(os, m_results);
+    reportReplicationSummary(os, m_results);
+    os << "=====================================================================\n";
 }
 
 }  // namespace des
