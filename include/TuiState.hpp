@@ -74,6 +74,19 @@ public:
 
     bool readOnlyHere() const;
 
+    // The cell being edited, held OUTSIDE the document until it commits. A
+    // half-typed expression is not a model change, and recompiling on every
+    // keystroke would flag EXPO(0.8 as broken while it is still being typed.
+    const std::string& editBuffer() const { return m_edit; }
+    void beginEdit();
+    void typeEdit(char c);
+    void backspaceEdit();
+    void cancelEdit();
+    void commitEdit();
+
+    // The first diagnostic against a column of the CURRENT row, or null.
+    const Diagnostic* diagnosticFor(const std::string& column) const;
+
 private:
     void rebuildTypes();
     void clampCursor();
@@ -89,6 +102,7 @@ private:
     std::size_t              m_column{0};
     Mode                     m_mode{Mode::Grid};
     bool                     m_dirty{false};
+    std::string              m_edit;
     std::vector<Diagnostic>  m_diagnostics;
 
     // Whole documents, not per-operation inverses. A snapshot cannot be

@@ -65,6 +65,51 @@ void renderGrid(const TuiState& state, Screen& screen, int top, int bottom) {
     }
 }
 
+void renderDetail(const TuiState& state, Screen& screen, int top) {
+    const std::vector<std::string> columns = state.columnsHere();
+    const ModuleSchema* schema = state.schemaHere();
+    screen.box(0, top, screen.width(), screen.height() - top - 2);
+
+    std::string title = " row " + std::to_string(state.row() + 1) + " of " +
+                        std::to_string(state.rowCountHere()) + " ";
+    if (schema == nullptr) title += "(unknown module type) ";
+    screen.text(3, top, title, Attr::Bold);
+
+    int y = top + 1;
+    for (std::size_t c = 0; c < columns.size(); ++c) {
+        if (y >= screen.height() - 3) break;
+        const bool here = (c == state.column());
+        screen.text(2, y, columns[c], here ? Attr::Reverse : Attr::Normal);
+
+        const bool editing = here && state.mode() == Mode::Editing;
+        const std::string value =
+            editing ? "[" + state.editBuffer() + "]"
+                    : state.document().cell(state.type(), state.row(), columns[c]);
+        int x = screen.text(18, y, value, editing ? Attr::Bold : Attr::Normal);
+
+        if (schema != nullptr) {
+            if (const Column* col = schema->column(columns[c])) {
+                if (col->type == ColumnType::Enum) {
+                    for (const std::string& v : col->enumValues)
+                        x = screen.text(x + 1, y, v, Attr::Dim);
+                } else if (col->type == ColumnType::Reference) {
+                    screen.text(x + 2, y, "-> " + col->referencedType, Attr::Dim);
+                }
+            }
+        }
+        ++y;
+        if (const Diagnostic* d = state.diagnosticFor(columns[c])) {
+            if (y < screen.height() - 3) {
+                screen.text(18, y,
+                            (d->severity == Severity::Error ? "error: " : "warning: ") +
+                                d->message,
+                            Attr::Error);
+                ++y;
+            }
+        }
+    }
+}
+
 }  // namespace
 
 void render(const TuiState& state, Screen& screen) {
@@ -80,7 +125,12 @@ void render(const TuiState& state, Screen& screen) {
         return;
     }
     renderTabs(state, screen);
-    renderGrid(state, screen, 1, screen.height() - 4);
+    // The grid gives up half the screen when the detail pane is up: a wide
+    // table is for scanning, and the pane is where it becomes readable.
+    const bool detail = state.mode() == Mode::Detail || state.mode() == Mode::Editing;
+    const int gridBottom = detail ? (screen.height() / 2) : (screen.height() - 4);
+    renderGrid(state, screen, 1, gridBottom);
+    if (detail) renderDetail(state, screen, gridBottom + 1);
     screen.text(0, screen.height() - 2, state.status());
     screen.text(0, screen.height() - 1,
                 "^S save  ^R run  ^N new  ^D delete  ^Z undo  Tab pane  q quit",

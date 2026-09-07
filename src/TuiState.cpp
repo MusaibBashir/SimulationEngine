@@ -180,4 +180,36 @@ void TuiState::undo() {
     setStatus("undone");
 }
 
+void TuiState::beginEdit() {
+    if (refuseIfReadOnly()) return;
+    const std::vector<std::string> columns = columnsHere();
+    if (m_column >= columns.size() || m_row >= rowCountHere()) return;
+    m_edit = m_document.cell(m_type, m_row, columns[m_column]);
+    m_mode = Mode::Editing;
+}
+
+void TuiState::typeEdit(char c) { m_edit.push_back(c); }
+
+void TuiState::backspaceEdit() { if (!m_edit.empty()) m_edit.pop_back(); }
+
+void TuiState::cancelEdit() {
+    m_edit.clear();
+    m_mode = Mode::Detail;
+}
+
+void TuiState::commitEdit() {
+    const std::vector<std::string> columns = columnsHere();
+    if (m_column < columns.size()) setCell(columns[m_column], m_edit);
+    m_edit.clear();
+    m_mode = Mode::Detail;
+}
+
+const Diagnostic* TuiState::diagnosticFor(const std::string& column) const {
+    for (const Diagnostic& d : m_diagnostics)
+        if (d.cell && d.cell->moduleType == m_type && d.cell->row == m_row &&
+            d.cell->column == column)
+            return &d;
+    return nullptr;
+}
+
 }  // namespace des

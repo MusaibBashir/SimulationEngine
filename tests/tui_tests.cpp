@@ -251,4 +251,64 @@ void runTuiTests() {
               "and draws NO grid -- a layout that does not fit produces garbage "
               "that looks like a bug in the model");
     }
+    section("Rendering: the detail pane shows the row and its diagnostics");
+    {
+        ModelDocument d;
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Service", "EXPO(0.8");   // deliberately broken
+        TuiState s = TuiState::fromDocument(d, "x.des");
+        s.setType("Process");
+        s.setMode(Mode::Detail);
+
+        Screen screen(100, 30);
+        render(s, screen);
+        const std::string text = screen.asText();
+
+        check(text.find("Capacity") != std::string::npos,
+              "the detail pane shows every column, including empty ones");
+        check(text.find("Renege After") != std::string::npos,
+              "which is the whole point: an 11-column table is unreadable across");
+        check(text.find("FIFO") != std::string::npos,
+              "an enum column shows the spellings it allows");
+        check(text.find("-> Resource") != std::string::npos,
+              "and a reference column shows what it must name");
+        check(text.find("expected") != std::string::npos,
+              "a broken cell shows its diagnostic IN the pane");
+
+        check(s.diagnosticFor("Service") != nullptr,
+              "and the state can find that diagnostic by column");
+        check(s.diagnosticFor("Name") == nullptr, "with none for a healthy cell");
+    }
+
+    section("The edit buffer");
+    {
+        ModelDocument d;
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Service", "EXPO(0.8)");
+        TuiState s = TuiState::fromDocument(d, "x.des");
+        s.setType("Process");
+        s.setColumn(0);                       // Name
+
+        s.beginEdit();
+        check(s.mode() == Mode::Editing, "beginEdit enters Editing");
+        check(s.editBuffer() == "Serve", "seeded with what is there");
+        s.backspaceEdit();
+        s.typeEdit('r');
+        check(s.editBuffer() == "Servr", "typing edits the buffer, not the document");
+        check(s.document().cell("Process", 0, "Name") == "Serve",
+              "the document is untouched until commit");
+
+        s.cancelEdit();
+        check(s.mode() == Mode::Detail, "Escape leaves Editing");
+        check(s.document().cell("Process", 0, "Name") == "Serve", "and abandons the edit");
+        check(!s.dirty(), "leaving nothing dirty");
+
+        s.beginEdit();
+        s.typeEdit('!');
+        s.commitEdit();
+        check(s.document().cell("Process", 0, "Name") == "Serve!", "commit writes it");
+        check(s.dirty(), "and marks the document dirty");
+    }
 }
