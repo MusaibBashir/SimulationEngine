@@ -311,4 +311,95 @@ void runTuiTests() {
         check(s.document().cell("Process", 0, "Name") == "Serve!", "commit writes it");
         check(s.dirty(), "and marks the document dirty");
     }
+    section("Navigation");
+    {
+        ModelDocument d;
+        for (int i = 0; i < 3; ++i) {
+            d.addRow("Process");
+            d.setCell("Process", static_cast<std::size_t>(i), "Name",
+                      "P" + std::to_string(i));
+            d.setCell("Process", static_cast<std::size_t>(i), "Service", "1");
+        }
+        TuiState s = TuiState::fromDocument(d, "x.des");
+        s.setType("Process");
+
+        check(s.row() == 0, "starts on the first row");
+        handleKey(s, Key::special(KeyKind::Down));
+        check(s.row() == 1, "Down moves down");
+        handleKey(s, Key::special(KeyKind::Up));
+        handleKey(s, Key::special(KeyKind::Up));
+        check(s.row() == 0, "Up CLAMPS at the top rather than wrapping");
+        handleKey(s, Key::special(KeyKind::End));
+        check(s.row() == 2, "End goes to the last row");
+        handleKey(s, Key::special(KeyKind::Down));
+        check(s.row() == 2, "and Down clamps at the bottom");
+
+        const std::string first = s.type();
+        handleKey(s, Key::special(KeyKind::Tab));
+        check(s.type() != first, "Tab moves to the next module type");
+        handleKey(s, Key::special(KeyKind::BackTab));
+        check(s.type() == first, "and BackTab comes back");
+
+        s.setRow(2);
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.mode() == Mode::Detail, "Enter opens the detail pane");
+        handleKey(s, Key::special(KeyKind::Down));
+        check(s.column() == 1, "where Down moves between FIELDS, not rows");
+        check(s.row() == 2, "leaving the row where it was");
+        handleKey(s, Key::special(KeyKind::Escape));
+        check(s.mode() == Mode::Grid, "Escape returns to the grid");
+
+        check(handleKey(s, Key::character('q')) == false,
+              "q on a CLEAN document quits at once");
+    }
+
+    section("Quitting with unsaved work asks first");
+    {
+        ModelDocument d;
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Service", "1");
+        TuiState s = TuiState::fromDocument(d, "tui_confirm.des");
+        s.setType("Process");
+        s.setCell("Name", "Edited");
+        check(s.dirty(), "there is unsaved work");
+
+        check(handleKey(s, Key::character('q')) == true,
+              "q does NOT quit while the document is dirty");
+        check(s.mode() == Mode::Confirm, "it asks instead");
+
+        check(handleKey(s, Key::character('c')) == true, "c cancels");
+        check(s.mode() == Mode::Grid, "and returns to the grid");
+        check(s.dirty(), "with the work still unsaved");
+
+        handleKey(s, Key::character('q'));
+        check(handleKey(s, Key::character('s')) == false, "s saves and quits");
+        check(!s.dirty(), "having actually saved");
+
+        TuiState t = TuiState::fromDocument(d, "tui_confirm.des");
+        t.setType("Process");
+        t.setCell("Name", "Discarded");
+        handleKey(t, Key::character('q'));
+        check(handleKey(t, Key::character('d')) == false, "d discards and quits");
+    }
+
+    section("Editing swallows every key, including the control ones");
+    {
+        ModelDocument d;
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Service", "1");
+        TuiState s = TuiState::fromDocument(d, "x.des");
+        s.setType("Process");
+        s.setMode(Mode::Detail);
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.mode() == Mode::Editing, "editing a cell");
+
+        // ^S typed into a Service field must not save a half-finished
+        // expression. A person editing text expects the text to receive their
+        // keys.
+        handleKey(s, Key::control('s'));
+        check(s.mode() == Mode::Editing, "^S does not escape the editor");
+        check(s.status().find("saved") == std::string::npos, "and does not save");
+    }
 }

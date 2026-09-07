@@ -91,6 +91,7 @@ add_library(des_ui STATIC
     src/Screen.cpp
     src/TuiState.cpp
     src/TuiRender.cpp
+    src/TuiInput.cpp
 )
 target_link_libraries(des_ui PUBLIC des_engine)
 target_compile_options(des_ui PRIVATE ${DES_WARNINGS})

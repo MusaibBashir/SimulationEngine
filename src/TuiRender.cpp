@@ -132,9 +132,13 @@ void render(const TuiState& state, Screen& screen) {
     renderGrid(state, screen, 1, gridBottom);
     if (detail) renderDetail(state, screen, gridBottom + 1);
     screen.text(0, screen.height() - 2, state.status());
-    screen.text(0, screen.height() - 1,
-                "^S save  ^R run  ^N new  ^D delete  ^Z undo  Tab pane  q quit",
-                Attr::Dim);
+    if (state.mode() == Mode::Confirm)
+        screen.text(0, screen.height() - 1,
+                    "(s)ave and quit   (d)iscard and quit   (c)ancel", Attr::Bold);
+    else
+        screen.text(0, screen.height() - 1,
+                    "^S save  ^R run  ^N new  ^D delete  ^Z undo  Tab pane  q quit",
+                    Attr::Dim);
 }
 
 }  // namespace des

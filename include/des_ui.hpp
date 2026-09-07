@@ -14,3 +14,4 @@
 #include "Screen.hpp"
 #include "TuiState.hpp"
 #include "TuiRender.hpp"
+#include "TuiInput.hpp"
