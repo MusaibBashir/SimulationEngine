@@ -131,4 +131,61 @@ void runTuiTests() {
         check(before == after,
               "opening a file and saving it UNEDITED gives byte-identical bytes");
     }
+    section("Edits, and undo across all four of them");
+    {
+        ModelDocument d;
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Service", "EXPO(0.8)");
+        TuiState s = TuiState::fromDocument(d, "x.des");
+        s.setType("Process");
+
+        check(!s.canUndo(), "nothing to undo yet");
+
+        s.setCell("Service", "EXPO(0.5)");
+        check(s.document().cell("Process", 0, "Service") == "EXPO(0.5)", "a cell edits");
+        check(s.dirty(), "and the document is dirty");
+        check(s.canUndo(), "and undoable");
+        s.undo();
+        check(s.document().cell("Process", 0, "Service") == "EXPO(0.8)", "undo restores it");
+
+        s.addRow();
+        check(s.rowCountHere() == 2, "a row is added");
+        s.undo();
+        check(s.rowCountHere() == 1, "and undone");
+
+        s.addRow();
+        s.setRow(1);
+        s.setCell("Name", "Check");
+        s.removeRow();
+        check(s.rowCountHere() == 1, "a row is removed");
+        s.undo();
+        check(s.rowCountHere() == 2, "and undone");
+        check(s.document().cell("Process", 1, "Name") == "Check",
+              "with its contents intact, which is what a snapshot buys");
+
+        // Row order is SEMANTIC in this format -- a Decide takes the first
+        // branch that matches -- so moving a row is a model change, not a
+        // display preference, and has to be undoable like any other.
+        s.setRow(1);
+        s.moveRow(-1);
+        check(s.document().cell("Process", 0, "Name") == "Check", "a row moves");
+        s.undo();
+        check(s.document().cell("Process", 0, "Name") == "Serve", "and unmoves");
+    }
+
+    section("A read-only module refuses an edit and says why");
+    {
+        ModelDocument d;
+        d.addRow("Queue");
+        d.setCell("Queue", 0, "Name", "Serve.Queue");
+        TuiState s = TuiState::fromDocument(d, "x.des");
+        s.setType("Queue");
+        check(s.readOnlyHere(), "Queue is read-only");
+        s.setCell("Name", "Something Else");
+        check(s.document().cell("Queue", 0, "Name") == "Serve.Queue",
+              "so the edit does not land");
+        check(s.status().find("read-only") != std::string::npos, "and it says why");
+        check(!s.dirty(), "and nothing became dirty");
+    }
 }

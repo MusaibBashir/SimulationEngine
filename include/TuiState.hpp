@@ -62,9 +62,23 @@ public:
     bool save(const std::string& toPath);
     void recompile();
 
+    // Every mutation pushes a snapshot first. Each is refused, with a reason
+    // in the status line, when the current module type is read-only.
+    void setCell(const std::string& column, const std::string& text);
+    void addRow();
+    void removeRow();
+    void moveRow(int delta);
+
+    bool canUndo() const { return !m_undo.empty(); }
+    void undo();
+
+    bool readOnlyHere() const;
+
 private:
     void rebuildTypes();
     void clampCursor();
+    bool refuseIfReadOnly();
+    void pushUndo();
 
     ModelDocument            m_document;
     std::string              m_path;
@@ -76,6 +90,13 @@ private:
     Mode                     m_mode{Mode::Grid};
     bool                     m_dirty{false};
     std::vector<Diagnostic>  m_diagnostics;
+
+    // Whole documents, not per-operation inverses. A snapshot cannot be
+    // wrong about its own inverse; a hand-written undo for moveRow can. A
+    // model document is kilobytes, so the crude answer is also the correct
+    // one.
+    static constexpr std::size_t UNDO_DEPTH = 64;
+    std::vector<ModelDocument> m_undo;
 };
 
 }  // namespace des

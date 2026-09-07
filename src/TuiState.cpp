@@ -107,4 +107,77 @@ void TuiState::recompile() {
     m_diagnostics = std::move(r.diagnostics);
 }
 
+bool TuiState::readOnlyHere() const {
+    const ModuleSchema* schema = schemaHere();
+    return schema != nullptr && schema->readOnly;
+}
+
+bool TuiState::refuseIfReadOnly() {
+    if (!readOnlyHere()) return false;
+    setStatus(m_type + " is read-only: there is no queue object apart from its "
+                       "Process, so set the discipline on the Process row");
+    return true;
+}
+
+void TuiState::pushUndo() {
+    m_undo.push_back(m_document);
+    if (m_undo.size() > UNDO_DEPTH) m_undo.erase(m_undo.begin());
+}
+
+void TuiState::setCell(const std::string& column, const std::string& text) {
+    if (refuseIfReadOnly()) return;
+    if (m_row >= rowCountHere()) return;
+    pushUndo();
+    m_document.setCell(m_type, m_row, column, text);
+    m_dirty = true;
+    recompile();
+}
+
+void TuiState::addRow() {
+    if (refuseIfReadOnly()) return;
+    pushUndo();
+    m_document.addRow(m_type);
+    rebuildTypes();
+    m_row = rowCountHere() - 1;
+    m_dirty = true;
+    recompile();
+}
+
+void TuiState::removeRow() {
+    if (refuseIfReadOnly()) return;
+    if (m_row >= rowCountHere()) return;
+    pushUndo();
+    m_document.removeRow(m_type, m_row);
+    clampCursor();
+    m_dirty = true;
+    recompile();
+}
+
+void TuiState::moveRow(int delta) {
+    if (refuseIfReadOnly()) return;
+    const std::size_t rows = rowCountHere();
+    if (rows < 2 || m_row >= rows) return;
+    const long long to = static_cast<long long>(m_row) + delta;
+    if (to < 0 || to >= static_cast<long long>(rows)) return;
+    pushUndo();
+    m_document.moveRow(m_type, m_row, static_cast<std::size_t>(to));
+    m_row = static_cast<std::size_t>(to);
+    m_dirty = true;
+    recompile();
+}
+
+void TuiState::undo() {
+    if (m_undo.empty()) return;
+    m_document = m_undo.back();
+    m_undo.pop_back();
+    rebuildTypes();
+    clampCursor();
+    // DIRTY STAYS TRUE, on purpose. Undoing back to what is on disk is not the
+    // same as knowing you are there -- that needs a saved-at marker in the
+    // stack -- and claiming "not dirty" wrongly is how work gets lost.
+    m_dirty = true;
+    recompile();
+    setStatus("undone");
+}
+
 }  // namespace des
