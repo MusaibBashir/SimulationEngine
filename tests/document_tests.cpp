@@ -105,9 +105,12 @@ void runDocumentTests() {
         ModuleSchema s;
         s.typeName = "Demo";
         s.kind = ModuleKind::Data;
-        s.columns.push_back(Column{"Name", ColumnType::Identifier, true, "", {}, ""});
+        // The trailing "" is Column::help, added in v14. Aggregate
+        // initialisation means every field has to be named here -- the same
+        // -Wextra bite v11 took when Diagnostic grew a member.
+        s.columns.push_back(Column{"Name", ColumnType::Identifier, true, "", {}, "", ""});
         s.columns.push_back(Column{"Rule", ColumnType::Enum, false, "FIFO",
-                                   {"FIFO", "LIFO"}, ""});
+                                   {"FIFO", "LIFO"}, "", ""});
 
         check(s.column("Name") != nullptr, "a declared column is findable by id");
         check(s.column("Name")->required, "and keeps its required flag");
@@ -821,5 +824,48 @@ void runDocumentTests() {
              .route("Review", "Out")
              .entryAt("Intake");
         });
+    }
+    section("Every module and every column explains itself");
+    {
+        // The registry is the one thing a front end reads in order to render,
+        // so the prose belongs there rather than in the terminal UI -- a second
+        // front end would need the same sentences. This walks it, so a column
+        // added in a later version cannot ship unexplained: the same property
+        // v11's flat child tables were chosen to protect, extended from
+        // rendering to comprehension.
+        int columns = 0;
+        for (const ModuleSchema& schema : ModuleRegistry::instance().all()) {
+            check(!schema.help.empty(),
+                  "module " + schema.typeName + " says what it is for");
+            check(schema.help.size() > 30,
+                  "module " + schema.typeName + " says something substantial");
+            for (const Column& c : schema.columns) {
+                ++columns;
+                check(!c.help.empty(),
+                      schema.typeName + "." + c.id + " has help text");
+                // A help line that only restates the column name teaches
+                // nothing. "Name: the name." is worse than silence, because it
+                // looks like the question was answered.
+                check(c.help.size() > c.id.size() + 12,
+                      schema.typeName + "." + c.id + " says more than its own name");
+            }
+        }
+        check(columns > 60, "and it checked every column, not a handful");
+
+        // The two places an Arena user is most likely to be lost: what
+        // connects blocks, and where Run Setup went.
+        const ModuleSchema* process = ModuleRegistry::instance().find("Process");
+        check(process != nullptr, "Process exists");
+        if (process != nullptr) {
+            const Column* next = process->column("Next");
+            check(next != nullptr && next->help.find("CONNECTION") != std::string::npos,
+                  "the Next column says it IS the connection Arena draws");
+        }
+        const ModuleSchema* run = ModuleRegistry::instance().find("Run");
+        check(run != nullptr && run->help.find("Run Setup") != std::string::npos,
+              "the Run module names Arena's Run Setup");
+        const ModuleSchema* queue = ModuleRegistry::instance().find("Queue");
+        check(queue != nullptr && queue->help.find("READ ONLY") != std::string::npos,
+              "and Queue says up front that it cannot be edited");
     }
 }

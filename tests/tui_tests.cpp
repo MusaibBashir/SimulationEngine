@@ -607,4 +607,50 @@ void runTuiTests() {
               text.find("[    ") == std::string::npos,
               "and draws NO progress bar, empty or otherwise");
     }
+    section("The screen explains itself");
+    {
+        // An empty table is where a person who has never seen this is stuck.
+        TuiState s = TuiState::fromDocument(ModelDocument{}, "new.des");
+        s.setType("Create");
+        Screen empty(80, 24);
+        render(s, empty);
+        const std::string text = empty.asText();
+        check(text.find("Where entities enter the model") != std::string::npos,
+              "an empty table says what the module is for");
+        check(text.find("Arena's Create module") != std::string::npos,
+              "and what Arena calls it");
+        check(text.find("^N adds one") != std::string::npos,
+              "and which key adds a row, which is the thing they are stuck on");
+
+        // Wrapped, and inside the frame. A description is two or three lines,
+        // and a line drawn through the border is how a box stops looking like
+        // a box.
+        for (int y = 0; y < empty.height(); ++y) {
+            const std::string ln = empty.line(y);
+            if (!ln.empty() && ln[0] == '|')
+                check(ln.size() < 80 || ln.back() == '|',
+                      "every boxed line still closes its border");
+        }
+
+        // And the help for the field you are ON, not for all of them.
+        TuiState t = TuiState::open(modelPath("teller.des"));
+        t.setType("Process");
+        t.setMode(Mode::Detail);
+        const std::vector<std::string> columns = t.columnsHere();
+        std::size_t balkAt = 0;
+        for (std::size_t i = 0; i < columns.size(); ++i)
+            if (columns[i] == "Balk At") balkAt = i;
+        t.setColumn(balkAt);
+        Screen field(80, 26);
+        render(t, field);
+        check(field.asText().find("Refuse to join a queue") != std::string::npos,
+              "the selected field shows its help");
+
+        t.setColumn(0);
+        Screen other(80, 26);
+        render(t, other);
+        check(other.asText().find("Refuse to join a queue") == std::string::npos,
+              "and only the selected one does -- prose for every field would "
+              "bury the values it is meant to explain");
+    }
 }

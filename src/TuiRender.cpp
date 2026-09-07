@@ -105,6 +105,39 @@ void renderGrid(const TuiState& state, Screen& screen, int top, int bottom) {
 
     const int rowsVisible = bottom - top - 2;
     if (rowsVisible <= 0) return;
+
+    // An empty table is where a person who has never seen this is stuck. Say
+    // what the module is for and which key adds a row, rather than drawing an
+    // empty box and waiting.
+    if (state.rowCountHere() == 0) {
+        const ModuleSchema* schema = state.schemaHere();
+        int y = top + 2;
+        if (schema != nullptr && !schema->help.empty()) {
+            // Wrapped, not clipped: a module description is two or three lines
+            // and fit() alone would cut the rest off. fit() stays as the
+            // backstop, because a single word longer than the box would
+            // otherwise draw straight through the border.
+            const int room = right - 4;
+            std::string lineText, word;
+            const std::string& help = schema->help;
+            for (std::size_t i = 0; i <= help.size() && y < bottom - 2; ++i) {
+                const bool end = (i == help.size());
+                if (!end && help[i] != ' ') { word.push_back(help[i]); continue; }
+                if (static_cast<int>(lineText.size() + word.size() + 1) > room) {
+                    screen.text(3, y++, fit(lineText, room), Attr::Dim);
+                    lineText.clear();
+                }
+                if (!lineText.empty()) lineText += " ";
+                lineText += word;
+                word.clear();
+            }
+            if (!lineText.empty() && y < bottom - 2)
+                screen.text(3, y++, fit(lineText, room), Attr::Dim);
+        }
+        if (y < bottom - 1)
+            screen.text(3, y + 1, "no rows yet -- ^N adds one", Attr::Bold);
+        return;
+    }
     // Scroll so the cursor is always on screen, without moving when it does
     // not have to.
     std::size_t first = 0;
@@ -185,6 +218,17 @@ void renderDetail(const TuiState& state, Screen& screen, int top) {
             }
         }
         ++y;
+        // The help for the SELECTED field only. Showing it for all of them
+        // would fill the pane with prose and bury the values, and the question
+        // "what is this one for" is only ever asked about the one you are on.
+        if (here && schema != nullptr && y < top + height - 1) {
+            if (const Column* col = schema->column(columns[c])) {
+                if (!col->help.empty()) {
+                    screen.text(18, y, fit(col->help, right - 18), Attr::Dim);
+                    ++y;
+                }
+            }
+        }
         if (const Diagnostic* d = state.diagnosticFor(columns[c])) {
             if (y < top + height - 1) {
                 const std::string what =

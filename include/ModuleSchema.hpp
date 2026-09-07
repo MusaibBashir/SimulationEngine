@@ -30,6 +30,14 @@ struct Column {
     std::string              defaultValue;
     std::vector<std::string> enumValues;      // Enum only
     std::string              referencedType;  // Reference only
+
+    // v14: one line saying what this column is for, shown beside the field
+    // being edited. It lives in the SCHEMA rather than in the terminal UI for
+    // the reason the registry exists at all -- it is the one thing a front end
+    // reads in order to render, and a second front end would need the same
+    // sentence. A test walks every column and fails if this is empty, so a
+    // column added later cannot ship unexplained.
+    std::string              help;
 };
 
 struct ModuleSchema {
@@ -42,6 +50,10 @@ struct ModuleSchema {
     // Discipline column.
     bool                readOnly{false};
     std::string         parentColumn;   // Child only
+
+    // What this module is for, and what Arena calls it when the names differ.
+    std::string         help;
+
     std::vector<Column> columns;
 
     const Column* column(const std::string& id) const;
