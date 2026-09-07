@@ -26,6 +26,18 @@ int main(int argc, char** argv) {
         Screen screen(size.width, size.height);
         render(state, screen);
         terminal->present(screen);
+
+        // Advance a running simulation BEFORE blocking on a key. Exactly the
+        // shape v12's advance(budget) was designed for: do some work, redraw,
+        // come back. A run that only advanced when a key was pressed would
+        // look frozen.
+        if (state.mode() == Mode::Running && state.running() != nullptr &&
+            (state.running()->state() == RunState::Ready ||
+             state.running()->state() == RunState::Running)) {
+            state.advanceRun();
+            continue;
+        }
+
         if (!handleKey(state, terminal->nextKey())) break;
     }
     // The terminal restores itself in its destructor, which is the only reason

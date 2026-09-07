@@ -526,4 +526,85 @@ void runTuiTests() {
             }
         }
     }
+    section("Running a model from the UI");
+    {
+        TuiState s = TuiState::open(modelPath("teller.des"));
+        s.startRun();
+        check(s.mode() == Mode::Running, "^R enters Running");
+        check(s.running() != nullptr, "with a controller");
+
+        int guard = 0;
+        while (s.running() != nullptr &&
+               (s.running()->state() == RunState::Ready ||
+                s.running()->state() == RunState::Running) &&
+               guard++ < 10000)
+            s.advanceRun();
+        check(s.running() != nullptr && s.running()->state() == RunState::Finished,
+              "and it runs to the end");
+        check(!s.runReport().empty(), "producing a report");
+
+        Screen screen(100, 30);
+        render(s, screen);
+        check(screen.asText().find("simulation report") != std::string::npos,
+              "which the UI shows");
+        check(screen.asText().find("Finished") != std::string::npos,
+              "and says the run FINISHED");
+        check(screen.asText().find("cannot say") == std::string::npos,
+              "not that the rule could not say -- a TimeLimit always can, and "
+              "one message meaning two things stops being believed");
+
+        s.stopRun();
+        check(s.mode() == Mode::Grid, "Escape returns to the grid");
+        check(s.running() == nullptr, "and lets the run go");
+
+        {
+            // A document that will not compile must say so rather than
+            // entering a run mode with nothing running.
+            ModelDocument d;
+            d.addRow("Process");
+            d.setCell("Process", 0, "Name", "Lonely");
+            d.setCell("Process", 0, "Service", "EXPO(1");
+            TuiState bad = TuiState::fromDocument(d, "bad.des");
+            bad.startRun();
+            check(bad.mode() != Mode::Running, "a broken document does not start a run");
+            check(!bad.status().empty(), "and says why");
+        }
+    }
+
+    section("A run with no knowable end draws no bar");
+    {
+        // v12's fourth-time rule, reaching the surface it was written for. A
+        // bar sitting at zero until it jumps to full is a lie the reader
+        // cannot detect, so when the rule cannot say, the UI does not draw one.
+        ModelDocument d;
+        d.addRow("Run");
+        d.setCell("Run", 0, "Name", "Setup");
+        d.setCell("Run", 0, "Stop When Drained", "true");
+        d.addRow("Create");
+        d.setCell("Create", 0, "Name", "In");
+        d.setCell("Create", 0, "Interarrival", "EXPO(1.0)");
+        d.setCell("Create", 0, "Max Arrivals", "20");
+        d.setCell("Create", 0, "Next", "Serve");
+        d.addRow("Process");
+        d.setCell("Process", 0, "Name", "Serve");
+        d.setCell("Process", 0, "Service", "EXPO(0.5)");
+        d.setCell("Process", 0, "Next", "Out");
+        d.addRow("Dispose");
+        d.setCell("Dispose", 0, "Name", "Out");
+
+        TuiState s = TuiState::fromDocument(d, "drained.des");
+        s.startRun();
+        check(s.mode() == Mode::Running, "it starts");
+        check(s.running() != nullptr && !s.running()->progress().fraction.has_value(),
+              "and whenDrained cannot say how far through it is");
+
+        Screen screen(100, 30);
+        render(s, screen);
+        const std::string text = screen.asText();
+        check(text.find("cannot say") != std::string::npos,
+              "so the UI says so in words");
+        check(text.find("[####") == std::string::npos &&
+              text.find("[    ") == std::string::npos,
+              "and draws NO progress bar, empty or otherwise");
+    }
 }

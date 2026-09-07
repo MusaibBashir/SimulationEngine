@@ -196,6 +196,54 @@ void renderDetail(const TuiState& state, Screen& screen, int top) {
     }
 }
 
+void renderRun(const TuiState& state, Screen& screen) {
+    screen.box(0, 1, screen.width(), screen.height() - 3);
+    screen.text(3, 1, " running ", Attr::Bold);
+    const int right = screen.width() - 2;
+
+    const RunController* run = state.running();
+    if (run != nullptr) {
+        const RunProgress p = run->progress();
+        std::string line = "replication " + std::to_string(p.replication) + " of " +
+                           std::to_string(p.replications) + "   events " +
+                           std::to_string(p.eventsProcessed) + "   ";
+        if (run->state() == RunState::Finished ||
+            run->state() == RunState::Cancelled) {
+            // Distinct from "cannot tell". A finished run has no fraction
+            // because the controller has let its system go, and printing the
+            // honest-uncertainty message here would make that message mean two
+            // different things -- which is how it stops being believed.
+            line += describe(run->state());
+        } else if (p.fraction) {
+            const int filled = static_cast<int>(*p.fraction * 40.0);
+            line += "[";
+            for (int i = 0; i < 40; ++i) line += (i < filled ? '#' : ' ');
+            line += "]";
+        } else {
+            // NO BAR. The stopping rule cannot say how far through it is, and a
+            // bar sitting at zero until it jumps to full is a lie the reader
+            // cannot detect. v12's fourth-time rule, reaching the surface it
+            // was written for.
+            line += "(this rule cannot say how far through it is)";
+        }
+        screen.text(2, 3, fit(line, right - 2));
+    }
+
+    int y = 5;
+    const std::string report = state.runReport();
+    std::string current;
+    for (char c : report) {
+        if (c == '\n') {
+            if (y < screen.height() - 4) screen.text(2, y++, fit(current, right - 2));
+            current.clear();
+        } else {
+            current.push_back(c);
+        }
+    }
+    if (!current.empty() && y < screen.height() - 4)
+        screen.text(2, y, fit(current, right - 2));
+}
+
 }  // namespace
 
 void render(const TuiState& state, Screen& screen) {
@@ -208,6 +256,14 @@ void render(const TuiState& state, Screen& screen) {
         screen.text(0, 0, "des_tui needs 80 x 24.");
         screen.text(0, 1, "This one is smaller.");
         screen.text(0, 2, "Resize and retry.");
+        return;
+    }
+    if (state.mode() == Mode::Running) {
+        renderTabs(state, screen);
+        renderRun(state, screen);
+        screen.text(0, screen.height() - 2, fit(state.status(), screen.width()));
+        screen.text(0, screen.height() - 1, "Esc  stop and return to the grid",
+                    Attr::Dim);
         return;
     }
     renderTabs(state, screen);

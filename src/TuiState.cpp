@@ -212,4 +212,37 @@ const Diagnostic* TuiState::diagnosticFor(const std::string& column) const {
     return nullptr;
 }
 
+void TuiState::startRun() {
+    std::vector<Diagnostic> problems;
+    std::unique_ptr<RunController> run =
+        RunController::fromDocument(m_document, problems);
+    if (run == nullptr) {
+        m_diagnostics = std::move(problems);
+        setStatus("cannot run: the document does not compile");
+        return;
+    }
+    m_run = std::move(run);
+    m_runReport.clear();
+    m_mode = Mode::Running;
+    setStatus("running");
+}
+
+void TuiState::advanceRun() {
+    if (!m_run) return;
+    m_run->advance(4096);
+    if (m_run->state() == RunState::Finished || m_run->state() == RunState::Failed) {
+        std::ostringstream out;
+        m_run->report(out);
+        m_runReport = out.str();
+        setStatus(m_run->state() == RunState::Failed ? m_run->failure() : "run finished");
+    }
+}
+
+void TuiState::stopRun() {
+    if (m_run) m_run->cancel();
+    m_run.reset();
+    m_runReport.clear();
+    m_mode = Mode::Grid;
+}
+
 }  // namespace des

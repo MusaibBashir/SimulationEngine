@@ -116,9 +116,14 @@ bool handleKey(TuiState& state, Key key) {
             case 'S': state.save();      return true;
             case 'N': state.addRow();    return true;
             case 'D': state.removeRow(); return true;
+            case 'R': state.startRun(); return true;
             case 'Z': state.undo();      return true;
             default:  return true;
         }
+    }
+    if (state.mode() == Mode::Running) {
+        if (key.kind == KeyKind::Escape) state.stopRun();
+        return true;
     }
     if (state.mode() == Mode::Confirm) return handleConfirm(state, key);
     if (state.mode() == Mode::Detail)  return handleDetail(state, key);

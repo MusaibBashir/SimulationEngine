@@ -7,11 +7,14 @@
 // it keys.
 
 #pragma once
+#include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 #include "Diagnostic.hpp"
 #include "ModelDocument.hpp"
 #include "ModuleSchema.hpp"
+#include "RunController.hpp"
 
 namespace des {
 
@@ -87,6 +90,14 @@ public:
     // The first diagnostic against a column of the CURRENT row, or null.
     const Diagnostic* diagnosticFor(const std::string& column) const;
 
+    // ^R. Refuses, with a reason, when the document does not compile:
+    // entering a run mode with nothing running is worse than not entering it.
+    void startRun();
+    void advanceRun();
+    void stopRun();
+    const RunController* running()   const { return m_run.get(); }
+    const std::string&   runReport() const { return m_runReport; }
+
 private:
     void rebuildTypes();
     void clampCursor();
@@ -111,6 +122,11 @@ private:
     // one.
     static constexpr std::size_t UNDO_DEPTH = 64;
     std::vector<ModelDocument> m_undo;
+
+    // A unique_ptr makes TuiState move-only, which is what it should be: it
+    // owns a running simulation, and copying one would mean two.
+    std::unique_ptr<RunController> m_run;
+    std::string                    m_runReport;
 };
 
 }  // namespace des
