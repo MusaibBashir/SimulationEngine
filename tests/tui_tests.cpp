@@ -463,4 +463,67 @@ void runTuiTests() {
             if (back.document.cell("Process", r, "Name") == "Teller") found = true;
         check(found, "and round-trips the edit back");
     }
+    section("Rendering: what only looking at it found");
+    {
+        // Four bugs that every assertion above passed over, because a find()
+        // on the screen text cannot tell you the thing you were looking for is
+        // off the edge, unreachable, or unreadable. They are pinned here.
+        TuiState s = TuiState::open(modelPath("teller.des"));
+        s.setType("Process");
+
+        {
+            // 1. Sixteen module types do not fit across eighty columns. The
+            //    tab bar used to stop at the edge, so the tab you were editing
+            //    was the one you could not see.
+            Screen screen(80, 24);
+            render(s, screen);
+            check(screen.line(0).find("[Process]") != std::string::npos,
+                  "the SELECTED tab is drawn even when the bar has to scroll");
+            check(screen.line(0).find("teller.des") != std::string::npos,
+                  "and the file name still fits beside it");
+        }
+        {
+            // 2. A Process has eleven columns and each may add a diagnostic
+            //    line. The detail pane has to scroll or the field being edited
+            //    sits below the fold.
+            s.setMode(Mode::Detail);
+            const std::vector<std::string> columns = s.columnsHere();
+            s.setColumn(columns.size() - 1);          // the last one: Next
+            Screen screen(80, 24);
+            render(s, screen);
+            check(screen.asText().find(columns.back()) != std::string::npos,
+                  "the LAST field is visible when it is the one selected");
+            s.setColumn(0);
+            Screen top(80, 24);
+            render(s, top);
+            check(top.asText().find("Name") != std::string::npos,
+                  "and the first is visible when that one is");
+        }
+        {
+            // 3. Unbracketed, the allowed spellings ran straight on from the
+            //    value: "FIFO FIFO LIFO PRIORITY ...", which reads as though
+            //    the cell held all of them.
+            s.setMode(Mode::Detail);
+            s.setColumn(4);                           // Discipline
+            Screen screen(80, 24);
+            render(s, screen);
+            check(screen.asText().find("(FIFO LIFO") != std::string::npos,
+                  "the allowed spellings are parenthesised, not run on");
+        }
+        {
+            // 4. Text used to overflow the frame, leaving the box open.
+            s.setMode(Mode::Grid);
+            Screen screen(80, 24);
+            render(s, screen);
+            for (int y = 2; y < 8; ++y) {
+                const std::string ln = screen.line(y);
+                if (ln.empty()) continue;
+                check(static_cast<int>(ln.size()) <= 80,
+                      "no line runs past the width of the screen");
+                if (ln[0] == '|')
+                    check(ln.size() < 80 || ln.back() == '|',
+                          "and a boxed line still closes its border");
+            }
+        }
+    }
 }

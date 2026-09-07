@@ -109,6 +109,17 @@ add_executable(des cli/main.cpp)
 target_link_libraries(des PRIVATE des_engine)
 target_compile_options(des PRIVATE ${DES_WARNINGS})
 
+# The platform half. WIN32 and non-WIN32 sources are mutually exclusive: each
+# includes headers the other platform does not have. Terminal.hpp is not in
+# des_ui.hpp -- it is the platform boundary, and only tui/ includes it.
+if(WIN32)
+    add_executable(des_tui tui/main.cpp tui/Terminal_win32.cpp)
+else()
+    add_executable(des_tui tui/main.cpp tui/Terminal_posix.cpp)
+endif()
+target_link_libraries(des_tui PRIVATE des_ui)
+target_compile_options(des_tui PRIVATE ${DES_WARNINGS})
+
 add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp)
 target_link_libraries(des_tests PRIVATE des_ui)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
