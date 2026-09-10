@@ -1148,4 +1148,162 @@ void runTuiTests() {
         }
     }
 
+
+    section("Somebody who has used Arena builds M/M/1 from nothing");
+    {
+        // THE CLAIM v14 RESTS ON, and the only test that makes it. Every key
+        // below is a key: no setCell, no setColumn, no setType. If a field
+        // cannot be reached by pressing what is on screen, this fails.
+        TuiState s = TuiState::fromDocument(ModelDocument{}, "mm1.des");
+
+        const auto toType = [](TuiState& st, const std::string& want) {
+            for (int i = 0; i < 60 && st.type() != want; ++i)
+                handleKey(st, Key::special(KeyKind::Tab));
+        };
+        const auto toField = [](TuiState& st, const std::string& id) {
+            for (int i = 0; i < 40 && st.column() > 0; ++i)
+                handleKey(st, Key::special(KeyKind::Up));
+            const std::vector<std::string> cs = st.columnsHere();
+            for (std::size_t i = 0; i < cs.size(); ++i) {
+                if (cs[st.column()] == id) return;
+                handleKey(st, Key::special(KeyKind::Down));
+            }
+        };
+        const auto typeText = [](TuiState& st, const std::string& text) {
+            for (char c : text) handleKey(st, Key::character(c));
+        };
+
+        // --- the Create block ------------------------------------------------
+        toType(s, "Create");
+        check(s.type() == "Create", "Tab reaches Create");
+        handleKey(s, Key::control('n'));
+        handleKey(s, Key::special(KeyKind::Enter));         // open the row
+        check(s.mode() == Mode::Detail, "Enter opens the row");
+
+        toField(s, "Name");
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.mode() == Mode::Editing, "an Identifier field types");
+        typeText(s, "Arrivals");
+        handleKey(s, Key::special(KeyKind::Enter));
+
+        toField(s, "Interarrival");
+        handleKey(s, Key::special(KeyKind::Enter));
+        typeText(s, "EXPO(1.0)");
+        handleKey(s, Key::special(KeyKind::Enter));
+
+        toField(s, "Max Arrivals");
+        handleKey(s, Key::special(KeyKind::Enter));
+        typeText(s, "200");
+        handleKey(s, Key::special(KeyKind::Enter));
+
+        // Wiring to a block that does not exist yet. This is the step the
+        // pick list must not make harder than typing.
+        toField(s, "Next");
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.mode() == Mode::Picking, "a Reference field offers a list");
+        handleKey(s, Key::special(KeyKind::Escape));
+        check(s.mode() == Mode::Editing, "Escape lets you name what is not on it");
+        typeText(s, "Serve");
+        handleKey(s, Key::special(KeyKind::Enter));
+        handleKey(s, Key::special(KeyKind::Escape));        // back to the grid
+
+        // --- the Process block ------------------------------------------------
+        toType(s, "Process");
+        handleKey(s, Key::control('n'));
+        handleKey(s, Key::special(KeyKind::Enter));
+
+        toField(s, "Name");
+        handleKey(s, Key::special(KeyKind::Enter));
+        typeText(s, "Serve");
+        handleKey(s, Key::special(KeyKind::Enter));
+
+        toField(s, "Capacity");
+        handleKey(s, Key::special(KeyKind::Enter));
+        typeText(s, "1");
+        handleKey(s, Key::special(KeyKind::Enter));
+
+        toField(s, "Service");
+        handleKey(s, Key::special(KeyKind::Enter));
+        typeText(s, "EXPO(0.8)");
+        handleKey(s, Key::special(KeyKind::Enter));
+
+        // The Discipline is an Enum, so it comes off the list rather than
+        // being spelled from memory -- which is the whole point of the list.
+        toField(s, "Discipline");
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.mode() == Mode::Picking, "an Enum field offers a list");
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.document().cell("Process", 0, "Discipline") == "FIFO",
+              "and accepting it writes a spelling the compiler accepts");
+
+        toField(s, "Next");
+        handleKey(s, Key::special(KeyKind::Enter));
+        handleKey(s, Key::special(KeyKind::Escape));
+        typeText(s, "Out");
+        handleKey(s, Key::special(KeyKind::Enter));
+        handleKey(s, Key::special(KeyKind::Escape));
+
+        // --- the exit ---------------------------------------------------------
+        toType(s, "Dispose");
+        handleKey(s, Key::control('n'));
+        handleKey(s, Key::special(KeyKind::Enter));
+        toField(s, "Name");
+        handleKey(s, Key::special(KeyKind::Enter));
+        typeText(s, "Out");
+        handleKey(s, Key::special(KeyKind::Enter));
+        handleKey(s, Key::special(KeyKind::Escape));
+
+        // --- and it is a model ------------------------------------------------
+        check(!hasErrors(s.diagnostics()),
+              "a model typed entirely through the keys COMPILES");
+
+        // Now the exits resolve, so the list offers what was typed blind.
+        toType(s, "Create");
+        handleKey(s, Key::special(KeyKind::Enter));
+        toField(s, "Next");
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(std::find(s.choices().begin(), s.choices().end(), "Out") !=
+                  s.choices().end(),
+              "and the list now offers the blocks that were named before they "
+              "existed");
+        handleKey(s, Key::special(KeyKind::Escape));
+        handleKey(s, Key::special(KeyKind::Escape));
+        handleKey(s, Key::special(KeyKind::Escape));
+
+        // The flow view agrees with what was typed.
+        handleKey(s, Key::control('f'));
+        Screen flow(80, 24);
+        render(s, flow);
+        const std::string shown = flow.asText();
+        check(shown.find("Next -> Serve") != std::string::npos &&
+              shown.find("Next -> Out") != std::string::npos,
+              "^F shows the chain that was wired");
+        check(shown.find("does not exist") == std::string::npos,
+              "with nothing dangling");
+        handleKey(s, Key::special(KeyKind::Escape));
+
+        // And it RUNS. There is no [Run] row: nobody typed one.
+        check(s.document().rowCount("Run") == 0, "and there is no [Run] row");
+        handleKey(s, Key::control('r'));
+        check(s.mode() == Mode::Running, "^R starts it");
+        int guard = 0;
+        while (s.running() != nullptr &&
+               (s.running()->state() == RunState::Ready ||
+                s.running()->state() == RunState::Running) &&
+               guard++ < 200000)
+            s.advanceRun();
+        check(s.running() != nullptr && s.running()->state() == RunState::Finished,
+              "and it finishes");
+        check(s.runReport().find("entities") != std::string::npos,
+              "with a report");
+
+        // What it saves reads back as the same model.
+        handleKey(s, Key::special(KeyKind::Escape));
+        check(s.save("tui_mm1.des"), "it saves");
+        TuiState back = TuiState::open("tui_mm1.des");
+        check(!hasErrors(back.diagnostics()), "and what it wrote opens clean");
+        check(back.document().cell("Process", 0, "Service") == "EXPO(0.8)",
+              "with the cells that were typed");
+    }
+
 }
