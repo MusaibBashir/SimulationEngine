@@ -3,66 +3,129 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#include "TuiRender.hpp"
 
 namespace des {
 namespace {
 
-void stepType(TuiState& state, int delta) {
-    const std::vector<std::string>& types = state.types();
-    if (types.empty()) return;
-    auto it = std::find(types.begin(), types.end(), state.type());
-    long long i = (it == types.end()) ? 0 : (it - types.begin());
-    i += delta;
-    if (i < 0) i = static_cast<long long>(types.size()) - 1;
-    if (i >= static_cast<long long>(types.size())) i = 0;
-    state.setType(types[static_cast<std::size_t>(i)]);
+// The key map is the Help overlay with no title. One overlay slot, because
+// only one of them is ever up, and two would need a rule about which wins.
+//
+// CLEARING THE TITLE IS THE WHOLE THING. Without it, F1 after any ^G showed
+// that field's help again -- the title was still set, so "no title" was never
+// true and the key map could not be reached a second time.
+void openKeyMap(TuiState& state) {
+    state.clearHelp();
+    state.setOverlay(Overlay::Help);
+    state.setStatus("");
 }
 
-// Clamping rather than wrapping, everywhere. A cursor that wraps from the last
-// row to the first looks like the list jumped, and in a document where row
-// order is semantic that is exactly the wrong thing to make ambiguous.
-void stepRow(TuiState& state, long long delta) {
-    const long long rows = static_cast<long long>(state.rowCountHere());
-    if (rows == 0) return;
-    long long r = static_cast<long long>(state.row()) + delta;
-    r = std::max<long long>(0, std::min(r, rows - 1));
-    state.setRow(static_cast<std::size_t>(r));
+bool isKeyMap(const TuiState& state) {
+    return state.overlay() == Overlay::Help && state.helpTitle().empty();
 }
 
-void stepColumn(TuiState& state, long long delta) {
-    const long long cols = static_cast<long long>(state.columnsHere().size());
-    if (cols == 0) return;
-    long long c = static_cast<long long>(state.column()) + delta;
-    c = std::max<long long>(0, std::min(c, cols - 1));
-    state.setColumn(static_cast<std::size_t>(c));
+// --- overlays ---------------------------------------------------------------
+
+bool handleConfirm(TuiState& state, Key key) {
+    if (key.kind != KeyKind::Char) {
+        if (key.kind == KeyKind::Escape) {
+            state.setOverlay(Overlay::None);
+            state.setStatus("");
+        }
+        return true;
+    }
+    switch (key.ch) {
+        case 's': return !state.save();       // stay open if the save failed
+        case 'd': return false;
+        case 'c': state.setOverlay(Overlay::None); state.setStatus(""); return true;
+        default:  return true;
+    }
 }
 
-bool handleGrid(TuiState& state, Key key) {
+bool handlePicker(TuiState& state, Key key) {
     switch (key.kind) {
-        case KeyKind::Up:       stepRow(state, -1); break;
-        case KeyKind::Down:     stepRow(state, 1); break;
-        case KeyKind::PageUp:   stepRow(state, -10); break;
-        case KeyKind::PageDown: stepRow(state, 10); break;
-        case KeyKind::Home:     state.setRow(0); break;
-        case KeyKind::End:
-            if (state.rowCountHere() > 0) state.setRow(state.rowCountHere() - 1);
+        case KeyKind::Up:       state.stepPicker(-1); break;
+        case KeyKind::Down:     state.stepPicker(1); break;
+        case KeyKind::PageUp:   state.stepPicker(-10); break;
+        case KeyKind::PageDown: state.stepPicker(10); break;
+        case KeyKind::Enter:    state.commitPicker(); break;
+        // Escape TYPES, it does not cancel. The one thing that must stay easy
+        // is naming a block before that block exists -- Serve -> Out while Out
+        // is still an idea -- and a list cannot offer that. Closing the list
+        // leaves the cursor on the line, ready to be typed into.
+        case KeyKind::Escape:
+            state.cancelPicker();
+            state.setStatus("type it instead -- the name does not have to exist yet");
             break;
-        case KeyKind::Tab:      stepType(state, 1); break;
-        case KeyKind::BackTab:  stepType(state, -1); break;
-        case KeyKind::Left:     stepType(state, -1); break;
-        case KeyKind::Right:    stepType(state, 1); break;
-        case KeyKind::Enter:    state.setMode(Mode::Detail); break;
+        case KeyKind::Mouse:
+            if (key.button == MouseButton::WheelUp)   state.stepPicker(-1);
+            if (key.button == MouseButton::WheelDown) state.stepPicker(1);
+            break;
+        default: break;
+    }
+    return true;
+}
+
+bool handleRunning(TuiState& state, Key key) {
+    if (key.kind == KeyKind::Escape) state.stopRun();
+    return true;
+}
+
+// --- the editor -------------------------------------------------------------
+
+bool handleEditor(TuiState& state, Key key) {
+    TextBuffer& buffer = state.buffer();
+    const bool extend = key.shift;
+    switch (key.kind) {
+        case KeyKind::Char:      state.typeChar(key.ch); break;
+        case KeyKind::Enter:     state.newline(); break;
+        case KeyKind::Backspace: state.backspace(); break;
+        case KeyKind::Delete:    state.del(); break;
+        case KeyKind::Up:        buffer.moveBy(-1, 0, extend); break;
+        case KeyKind::Down:      buffer.moveBy(1, 0, extend); break;
+        case KeyKind::Left:      buffer.moveBy(0, -1, extend); break;
+        case KeyKind::Right:     buffer.moveBy(0, 1, extend); break;
+        case KeyKind::PageUp:    buffer.moveBy(-15, 0, extend); break;
+        case KeyKind::PageDown:  buffer.moveBy(15, 0, extend); break;
+        case KeyKind::Home:      buffer.moveToLineStart(extend); break;
+        case KeyKind::End:       buffer.moveToLineEnd(extend); break;
+        case KeyKind::Tab:       state.setFocus(Pane::Palette); break;
+        case KeyKind::BackTab:   state.setFocus(Pane::Palette); break;
+        case KeyKind::Escape:
+            if (buffer.hasSelection()) buffer.clearSelection();
+            else state.setStatus("");
+            break;
+        default: break;
+    }
+    return true;
+}
+
+bool handlePalette(TuiState& state, Key key) {
+    switch (key.kind) {
+        case KeyKind::Up:       state.stepPalette(-1); break;
+        case KeyKind::Down:     state.stepPalette(1); break;
+        case KeyKind::PageUp:   state.stepPalette(-10); break;
+        case KeyKind::PageDown: state.stepPalette(10); break;
+        case KeyKind::Home:     state.setPaletteIndex(0); break;
+        case KeyKind::Enter:    state.insertSelectedModule(); break;
+        case KeyKind::Tab:
+        case KeyKind::BackTab:
+        case KeyKind::Escape:   state.setFocus(Pane::Editor); break;
         case KeyKind::Char:
-            // Unsaved work is asked about, never discarded on one keystroke.
-            // The whole point of a UI over a file format is that a person
-            // trusts it with work that exists nowhere else.
-            if (key.ch == 'q') {
-                if (!state.dirty()) return false;
-                state.setMode(Mode::Confirm);
-                state.setStatus("unsaved changes -- (s)ave and quit, "
-                                "(d)iscard and quit, (c)ancel");
-            } else if (key.ch == '?') {
-                state.setMode(Mode::Help);
+            // A letter JUMPS to the next module starting with it. Seventeen
+            // types is a long way to arrow through, and this is what every
+            // list in every file manager has always done.
+            if (key.ch == '?' || key.ch == 'h') { state.showModuleHelp(); break; }
+            for (std::size_t i = 1; i <= state.palette().size(); ++i) {
+                const std::size_t at =
+                    (state.paletteIndex() + i) % state.palette().size();
+                const char first = state.palette()[at].empty()
+                                       ? '\0' : state.palette()[at][0];
+                if (std::tolower(static_cast<unsigned char>(first)) ==
+                    std::tolower(static_cast<unsigned char>(key.ch))) {
+                    state.setPaletteIndex(at);
+                    break;
+                }
             }
             break;
         default: break;
@@ -70,125 +133,198 @@ bool handleGrid(TuiState& state, Key key) {
     return true;
 }
 
-bool handleConfirm(TuiState& state, Key key) {
-    if (key.kind != KeyKind::Char) {
-        if (key.kind == KeyKind::Escape) state.setMode(Mode::Grid);
+bool handleFlow(TuiState& state, Key key) {
+    switch (key.kind) {
+        case KeyKind::Up:       state.stepFlow(-1); break;
+        case KeyKind::Down:     state.stepFlow(1); break;
+        case KeyKind::PageUp:   state.stepFlow(-10); break;
+        case KeyKind::PageDown: state.stepFlow(10); break;
+        // Enter GOES THERE. A picture you cannot navigate from is a second
+        // place to look rather than a way of getting around.
+        case KeyKind::Enter:    state.gotoFlowBlock(); break;
+        case KeyKind::Escape:   state.setView(View::Model); break;
+        default: break;
+    }
+    return true;
+}
+
+bool handleRuns(TuiState& state, Key key) {
+    switch (key.kind) {
+        case KeyKind::Up:     state.stepRun(-1); break;
+        case KeyKind::Down:   state.stepRun(1); break;
+        case KeyKind::Enter:  state.startRun(); break;
+        case KeyKind::Escape: state.setView(View::Model); break;
+        default: break;
+    }
+    return true;
+}
+
+bool handleResults(TuiState& state, Key key) {
+    switch (key.kind) {
+        case KeyKind::Up:       state.scrollResults(-1); break;
+        case KeyKind::Down:     state.scrollResults(1); break;
+        case KeyKind::PageUp:   state.scrollResults(-15); break;
+        case KeyKind::PageDown: state.scrollResults(15); break;
+        case KeyKind::Home:     state.scrollResults(-1000000); break;
+        case KeyKind::Escape:   state.setView(View::Model); break;
+        default: break;
+    }
+    return true;
+}
+
+// --- the mouse --------------------------------------------------------------
+
+// A click is turned back into "the third palette entry" by the SAME arithmetic
+// that drew it there, which is why layoutFor() is shared rather than copied.
+bool handleMouse(TuiState& state, Key key, int width, int height) {
+    const Layout L = layoutFor(state, width, height);
+
+    if (key.button == MouseButton::WheelUp || key.button == MouseButton::WheelDown) {
+        const long long by = key.button == MouseButton::WheelUp ? -3 : 3;
+        switch (state.view()) {
+            case View::Model:
+                if (key.x < L.dividerX) state.stepPalette(by);
+                else                    state.buffer().moveBy(by, 0);
+                break;
+            case View::Flow:    state.stepFlow(by); break;
+            case View::Runs:    state.stepRun(by); break;
+            case View::Results: state.scrollResults(by); break;
+        }
         return true;
     }
-    switch (key.ch) {
-        case 's': return !state.save();     // stay open if the save failed
-        case 'd': return false;
-        case 'c': state.setMode(Mode::Grid); state.setStatus(""); return true;
-        default:  return true;
-    }
-}
 
-bool handleDetail(TuiState& state, Key key) {
-    switch (key.kind) {
-        case KeyKind::Up:     stepColumn(state, -1); break;
-        case KeyKind::Down:   stepColumn(state, 1); break;
-        case KeyKind::Escape: state.setMode(Mode::Grid); break;
-        // ONE key for both. Arena has no separate "open the drop-down": you
-        // click the cell and either a list appears or a caret does, and which
-        // it is depends on the column rather than on which key you knew.
-        case KeyKind::Enter:  if (!state.beginPick()) state.beginEdit(); break;
-        default: break;
+    if (key.y == L.barRow) {
+        const View views[4] = {View::Model, View::Flow, View::Runs, View::Results};
+        for (int i = 0; i < 4; ++i)
+            if (key.x >= L.tabStart[i] && key.x < L.tabEnd[i]) {
+                state.setView(views[i]);
+                return true;
+            }
+        return true;
     }
-    return true;
-}
 
-bool handlePicking(TuiState& state, Key key) {
-    switch (key.kind) {
-        case KeyKind::Up:       state.stepPick(-1); break;
-        case KeyKind::Down:     state.stepPick(1); break;
-        case KeyKind::PageUp:   state.stepPick(-10); break;
-        case KeyKind::PageDown: state.stepPick(10); break;
-        case KeyKind::Enter:    state.commitPick(); break;
-        // Escape TYPES, it does not cancel. The one thing that must stay easy
-        // is naming a block before that block exists -- Serve -> Out while Out
-        // is still an idea -- and a list cannot offer that. The second Escape,
-        // out of the editor, is the one that abandons.
-        case KeyKind::Escape:   state.typeInstead(); break;
-        default: break;
+    if (state.view() != View::Model) {
+        const int row = key.y - (L.bodyTop + 2);
+        if (row < 0) return true;
+        if (state.view() == View::Flow)      state.stepFlow(row - static_cast<long long>(state.flowCursor()));
+        else if (state.view() == View::Runs) state.setRunIndex(static_cast<std::size_t>(row));
+        return true;
     }
-    return true;
-}
 
-bool handleEditing(TuiState& state, Key key) {
-    switch (key.kind) {
-        case KeyKind::Char:      state.typeEdit(key.ch); break;
-        case KeyKind::Backspace: state.backspaceEdit(); break;
-        case KeyKind::Enter:     state.commitEdit(); break;
-        case KeyKind::Escape:    state.cancelEdit(); break;
-        default: break;
+    if (key.y >= L.paletteTop && key.y <= L.bodyBottom && key.x < L.dividerX) {
+        const std::size_t at = L.paletteFirst +
+                               static_cast<std::size_t>(key.y - L.paletteTop);
+        if (at >= state.palette().size()) return true;
+        state.setFocus(Pane::Palette);
+        state.setPaletteIndex(at);
+        // LEFT INSERTS, RIGHT EXPLAINS. Clicking a module and having it appear
+        // is what was asked for; a click that only highlights would need a
+        // second one for every insertion.
+        if (key.button == MouseButton::Left)       state.insertSelectedModule();
+        else if (key.button == MouseButton::Right) state.showModuleHelp();
+        return true;
+    }
+
+    if (key.y >= L.textTop && key.y < L.textTop + L.textRows && key.x >= L.textX) {
+        state.setFocus(Pane::Editor);
+        const std::size_t line = L.firstLine + static_cast<std::size_t>(key.y - L.textTop);
+        const std::size_t col  = L.firstColumn + static_cast<std::size_t>(key.x - L.textX);
+        state.buffer().moveTo(Caret{line, col});
+        if (key.button == MouseButton::Right) state.showFieldHelp();
+        return true;
     }
     return true;
 }
 
 }  // namespace
 
-bool handleKey(TuiState& state, Key key) {
-    // Editing swallows everything, including the control keys. Otherwise ^S
-    // typed into a Service field would save a half-finished expression, and a
-    // person editing text expects the text to receive their keys.
-    if (state.mode() == Mode::Editing) return handleEditing(state, key);
-    // Picking swallows them for a different reason: ^N would add a row and move
-    // the cursor onto it, and the open list would then write its answer into a
-    // cell nobody was looking at.
-    if (state.mode() == Mode::Picking) return handlePicking(state, key);
-
-    if (state.mode() == Mode::Flow) {
-        switch (key.kind) {
-            case KeyKind::Up:     state.stepFlow(-1); return true;
-            case KeyKind::Down:   state.stepFlow(1);  return true;
-            case KeyKind::PageUp: state.stepFlow(-10); return true;
-            case KeyKind::PageDown: state.stepFlow(10); return true;
-            // Enter GOES THERE. A picture you cannot navigate from is a
-            // second place to look rather than a way of getting around.
-            case KeyKind::Enter:  state.gotoFlowBlock(); return true;
-            default: break;
-        }
-        if (key.kind == KeyKind::Char && key.ch == 'q') return false;
-        state.setMode(Mode::Grid);
-        return true;
+bool handleKey(TuiState& state, Key key, int width, int height) {
+    // A MOUSE EVENT FIRST, and before the overlays, because a click on the top
+    // bar means the same thing wherever the keyboard happens to be -- except
+    // while an overlay is up, which owns the screen it is drawn over.
+    if (key.kind == KeyKind::Mouse) {
+        if (state.overlay() == Overlay::Picker) return handlePicker(state, key);
+        if (state.overlay() != Overlay::None)   return true;
+        return handleMouse(state, key, width, height);
     }
 
-    // ANY key closes the key map, control keys included. A screen listing the
-    // keys, that you then have to work out how to leave, has undone its own
-    // job. q still quits, because a person who opened it by accident on their
-    // way out should not be trapped.
-    if (state.mode() == Mode::Help) {
-        if (key.kind == KeyKind::Char && key.ch == 'q') return false;
-        state.setMode(Mode::Grid);
+    // The key map closes on ANY key, control keys included. A screen listing
+    // the keys that you then have to work out how to leave has undone its own
+    // job.
+    if (isKeyMap(state)) {
+        state.setOverlay(Overlay::None);
         return true;
     }
-    // From the grid or the detail pane alike, because "what are the keys" is
-    // not a question that waits until you are back at the top.
-    if (key.kind == KeyKind::Char && key.ch == '?' &&
-        state.mode() != Mode::Confirm && state.mode() != Mode::Running) {
-        state.setMode(Mode::Help);
+    if (state.overlay() == Overlay::Help) {
+        state.setOverlay(Overlay::None);
         return true;
     }
+    if (state.overlay() == Overlay::Confirm) return handleConfirm(state, key);
+    if (state.overlay() == Overlay::Picker)  return handlePicker(state, key);
+    if (state.overlay() == Overlay::Running) return handleRunning(state, key);
+
+    if (key.kind == KeyKind::Function && key.ch == 1) { openKeyMap(state); return true; }
 
     if (key.kind == KeyKind::Ctrl) {
         switch (key.ch) {
-            case 'S': state.save();      return true;
-            case 'N': state.addRow();    return true;
-            case 'D': state.removeRow(); return true;
-            case 'R': state.startRun(); return true;
-            case 'T': state.insertStarter(); return true;
-            case 'F': state.openFlow();      return true;
-            case 'Z': state.undo();      return true;
+            // The views.
+            case 'B': state.setView(View::Model);   return true;
+            case 'F': state.setView(View::Flow);    return true;
+            case 'U': state.setView(View::Runs);    return true;
+            case 'E': state.setView(View::Results); return true;
+
+            case 'S': state.save();          return true;
+            case 'Q': state.requestQuit();   return !state.wantsQuit();
+            case 'K': openKeyMap(state);     return true;
+            case 'J': state.goToFirstError(); return true;
+            case 'R': state.startRun();      return true;
+            case 'W': state.saveResults();   return true;
+            case 'P': state.setView(View::Model); state.setFocus(Pane::Palette); return true;
+            case 'N':
+                if (state.view() == View::Runs) state.addRunBlock();
+                return true;
+            case 'T':
+                if (state.buffer().lineCount() == 1 && state.buffer().lineAt(0).empty()) {
+                    // insertText, NOT setText: setText clears the undo stack,
+                    // which made the one key that writes the most text the
+                    // only one you could not take back.
+                    state.insertText(starterModelText());
+                    state.setStatus("a working single-server model -- ^R runs it");
+                } else {
+                    state.setStatus("^T writes into an EMPTY file, and this one "
+                                    "has text in it");
+                }
+                return true;
+
+            // The editor's own keys. They do nothing anywhere else, rather
+            // than something surprising.
+            case 'G':
+                if (state.view() != View::Model) return true;
+                if (state.focus() == Pane::Palette) state.showModuleHelp();
+                else                                state.showFieldHelp();
+                return true;
+            case 'L':
+                if (state.view() == View::Model && state.focus() == Pane::Editor)
+                    state.openPicker();
+                return true;
+            case 'Z': state.undo(); return true;
+            case 'Y': state.redo(); return true;
+            case 'X': state.cut();  return true;
+            case 'C': state.copy(); return true;
+            case 'V': state.paste(); return true;
+            case 'A': state.buffer().selectAll(); return true;
             default:  return true;
         }
     }
-    if (state.mode() == Mode::Running) {
-        if (key.kind == KeyKind::Escape) state.stopRun();
-        return true;
+
+    switch (state.view()) {
+        case View::Flow:    return handleFlow(state, key);
+        case View::Runs:    return handleRuns(state, key);
+        case View::Results: return handleResults(state, key);
+        case View::Model:   break;
     }
-    if (state.mode() == Mode::Confirm) return handleConfirm(state, key);
-    if (state.mode() == Mode::Detail)  return handleDetail(state, key);
-    return handleGrid(state, key);
+    if (state.focus() == Pane::Palette) return handlePalette(state, key);
+    return handleEditor(state, key);
 }
 
 }  // namespace des

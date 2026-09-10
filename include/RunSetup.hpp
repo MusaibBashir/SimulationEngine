@@ -38,9 +38,21 @@ struct RunSetup {
     SimTime observeInterval{0.0};
 };
 
-// Reads the [Run] row -- Arena's Run Setup: one row, in the document, where
-// the model is. A document with no [Run] is not an error: it means the
-// defaults. Never throws.
-RunSetup readRunSetup(const ModelDocument& doc, std::vector<Diagnostic>& out);
+// Reads a [Run] row -- Arena's Run Setup, in the document where the model is.
+// A document with no [Run] is not an error: it means the defaults. Never
+// throws.
+//
+// v15 allows MANY. Arena keeps one Run Setup per model and makes you edit it
+// to try a longer horizon or more replications; a file can hold several named
+// ones, and choosing between them beats editing the same numbers back and
+// forth and losing what they were. `which` is a position, and out of range
+// reads as the defaults rather than as an error, because a caller holding a
+// stale index is not a broken model.
+RunSetup readRunSetup(const ModelDocument& doc, std::vector<Diagnostic>& out,
+                      std::size_t which = 0);
+
+// The Name of each [Run] row, in document order, with a stand-in for any that
+// has none -- a row without a name is still a row you may want to run.
+std::vector<std::string> runNames(const ModelDocument& doc);
 
 }  // namespace des

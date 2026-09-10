@@ -236,8 +236,9 @@ RunSnapshot RunController::snapshot() const {
 
 std::unique_ptr<RunController>
 RunController::fromDocument(const ModelDocument& doc, std::vector<Diagnostic>& out,
-                            std::optional<SimTime> lengthOverride) {
-    RunSetup setup = readRunSetup(doc, out);
+                            std::optional<SimTime> lengthOverride,
+                            std::size_t whichRun) {
+    RunSetup setup = readRunSetup(doc, out, whichRun);
     if (lengthOverride) setup.length = lengthOverride;
 
     // Compile once, HERE, so a bad cell is reported before a single event runs

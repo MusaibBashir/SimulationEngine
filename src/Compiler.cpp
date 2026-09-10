@@ -373,6 +373,22 @@ std::vector<std::string> referenceCandidates(const ModelDocument& doc,
     return names;
 }
 
+std::size_t lineOf(const ModelDocument& doc, const Diagnostic& diagnostic) {
+    if (diagnostic.cell) {
+        const CellRef& at = *diagnostic.cell;
+        const std::size_t line = doc.cellLine(at.moduleType, at.row, at.column);
+        if (line > 0) return line;
+        // The cell is NOT THERE -- "Create needs a Name" names a column that
+        // was never written. The record's header is the nearest true thing.
+        if (at.row < doc.rowCount(at.moduleType))
+            return doc.rows(at.moduleType)[at.row].headerLine;
+        return 0;
+    }
+    // A reader diagnostic puts the LINE NUMBER in the span's offset, which is
+    // what DocumentFormat's error() has always meant by it.
+    return diagnostic.span.offset;
+}
+
 bool compileInto(const ModelDocument& doc, Model& model,
                  std::vector<Diagnostic>& diagnostics, bool* structureChecked) {
     if (structureChecked != nullptr) *structureChecked = false;

@@ -26,23 +26,30 @@ bool asReal(const std::string& s, double& out) {
 
 }  // namespace
 
-RunSetup readRunSetup(const ModelDocument& doc, std::vector<Diagnostic>& out) {
+std::vector<std::string> runNames(const ModelDocument& doc) {
+    std::vector<std::string> names;
+    for (std::size_t r = 0; r < doc.rowCount("Run"); ++r) {
+        const std::string n = doc.cell("Run", r, "Name");
+        names.push_back(n.empty() ? "(run " + std::to_string(r + 1) + ")" : n);
+    }
+    return names;
+}
+
+RunSetup readRunSetup(const ModelDocument& doc, std::vector<Diagnostic>& out,
+                      std::size_t which) {
     RunSetup setup;
     const std::size_t rows = doc.rowCount("Run");
-    if (rows == 0) return setup;
-
-    for (std::size_t r = 1; r < rows; ++r)
-        complain(out, Severity::Error, r, "Name",
-                 "a model has at most one [Run]; this one is extra");
+    if (rows == 0 || which >= rows) return setup;
+    const std::size_t r0 = which;
 
     const auto text = [&](const char* column) {
-        return doc.cellOrDefault("Run", 0, column);
+        return doc.cellOrDefault("Run", r0, column);
     };
     const auto number = [&](const char* column, double& into) {
         const std::string s = text(column);
         if (s.empty()) return false;
         if (!asReal(s, into)) {
-            complain(out, Severity::Error, 0, column, "'" + s + "' is not a number");
+            complain(out, Severity::Error, r0, column, "'" + s + "' is not a number");
             return false;
         }
         return true;
@@ -51,7 +58,7 @@ RunSetup readRunSetup(const ModelDocument& doc, std::vector<Diagnostic>& out) {
         const std::string s = text(column);
         if (s == "true")  return true;
         if (s == "false" || s.empty()) return false;
-        complain(out, Severity::Error, 0, column, "'" + s + "' must be true or false");
+        complain(out, Severity::Error, r0, column, "'" + s + "' must be true or false");
         return false;
     };
 
@@ -66,14 +73,14 @@ RunSetup readRunSetup(const ModelDocument& doc, std::vector<Diagnostic>& out) {
     setup.antithetic      = flag("Antithetic");
 
     if (setup.replications < 1)
-        complain(out, Severity::Error, 0, "Replications", "must be at least 1");
+        complain(out, Severity::Error, r0, "Replications", "must be at least 1");
 
     // A WARNING, not a refusal. It looks like a model that runs forever, and
     // for a Create with Max Arrivals set it is not: the future event list
     // empties and the run ends on its own. Refusing it would reject a correct
     // model; saying nothing would leave an author waiting.
     if (!setup.length && !setup.maxEntities && !setup.stopWhenDrained)
-        complain(out, Severity::Warning, 0, "Length",
+        complain(out, Severity::Warning, r0, "Length",
                  "no stopping condition; this run ends only when the model "
                  "runs out of events");
 

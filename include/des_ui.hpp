@@ -12,6 +12,7 @@
 #include "des.hpp"
 #include "Key.hpp"
 #include "Screen.hpp"
+#include "TextBuffer.hpp"
 #include "TuiState.hpp"
 #include "TuiRender.hpp"
 #include "TuiInput.hpp"

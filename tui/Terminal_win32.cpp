@@ -33,8 +33,15 @@ public:
         // Without ENABLE_VIRTUAL_TERMINAL_PROCESSING the escape sequences print
         // as literal text. Windows 10 and later support it.
         SetConsoleMode(m_out, m_savedOut | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        // ENABLE_MOUSE_INPUT gives clicks and the wheel. ENABLE_QUICK_EDIT_MODE
+        // has to go with it, and it is on by default on Windows Terminal: with
+        // it set the console eats every drag for its own selection and the
+        // program is never told. ENABLE_EXTENDED_FLAGS must be set in the same
+        // call or the quick-edit bit is ignored rather than cleared.
         SetConsoleMode(m_in, static_cast<DWORD>(
-            m_savedIn & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT)));
+            (m_savedIn & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT |
+                           ENABLE_PROCESSED_INPUT | ENABLE_QUICK_EDIT_MODE)) |
+            ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS));
         std::fputs("\033[?1049h\033[?25l", stdout);
     }
     ~Win32Terminal() override {
@@ -71,6 +78,20 @@ public:
         std::fflush(stdout);
     }
 
+    // Is this a record the layer above would act on? Mouse records count now,
+    // but only the ones that carry a press or a wheel turn: a bare move is
+    // reported constantly and would make the run advance one event per twitch
+    // of the mouse.
+    static bool interesting(const INPUT_RECORD& r) {
+        if (r.EventType == KEY_EVENT) return r.Event.KeyEvent.bKeyDown != 0;
+        if (r.EventType == MOUSE_EVENT) {
+            const MOUSE_EVENT_RECORD& m = r.Event.MouseEvent;
+            if (m.dwEventFlags == MOUSE_WHEELED) return true;
+            return m.dwEventFlags == 0 && m.dwButtonState != 0;
+        }
+        return false;
+    }
+
     bool keyPending() override {
         for (;;) {
             INPUT_RECORD records[16];
@@ -78,11 +99,10 @@ public:
             if (!PeekConsoleInputW(m_in, records, 16, &available) || available == 0)
                 return false;
             for (DWORD i = 0; i < available; ++i)
-                if (records[i].EventType == KEY_EVENT &&
-                    records[i].Event.KeyEvent.bKeyDown)
-                    return true;
-            // Only mouse, focus or resize records are waiting. Discard them, or
-            // the handle stays signalled forever and the run never advances.
+                if (interesting(records[i])) return true;
+            // Only focus, resize or mouse-move records are waiting. Discard
+            // them, or the handle stays signalled forever and the run never
+            // advances at all -- the same bug wearing the opposite face.
             DWORD read = 0;
             if (!ReadConsoleInputW(m_in, records, available, &read) || read == 0)
                 return false;
@@ -95,10 +115,52 @@ public:
             DWORD read = 0;
             if (!ReadConsoleInputW(m_in, &record, 1, &read) || read == 0)
                 return Key::special(KeyKind::Unknown);
+
+            if (record.EventType == MOUSE_EVENT) {
+                const MOUSE_EVENT_RECORD& m = record.Event.MouseEvent;
+                const int x = m.dwMousePosition.X;
+                const int y = m.dwMousePosition.Y;
+                if (m.dwEventFlags == MOUSE_WHEELED) {
+                    // The high word is signed, and positive means away from
+                    // the user -- which is scrolling UP the document.
+                    const short delta = static_cast<short>(HIWORD(m.dwButtonState));
+                    return Key::mouse(delta > 0 ? MouseButton::WheelUp
+                                                : MouseButton::WheelDown, x, y);
+                }
+                if (m.dwEventFlags != 0) continue;      // a move, or a drag
+                if (m.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)
+                    return Key::mouse(MouseButton::Left, x, y);
+                if (m.dwButtonState & RIGHTMOST_BUTTON_PRESSED)
+                    return Key::mouse(MouseButton::Right, x, y);
+                continue;                               // a release
+            }
+
             if (record.EventType != KEY_EVENT || !record.Event.KeyEvent.bKeyDown)
                 continue;
 
             const KEY_EVENT_RECORD& k = record.Event.KeyEvent;
+            const bool shift = (k.dwControlKeyState & SHIFT_PRESSED) != 0;
+            if (k.wVirtualKeyCode >= VK_F1 && k.wVirtualKeyCode <= VK_F12)
+                return Key::function(k.wVirtualKeyCode - VK_F1 + 1);
+            switch (k.wVirtualKeyCode) {
+                case VK_UP:    return shift ? Key::shifted(KeyKind::Up)
+                                            : Key::special(KeyKind::Up);
+                case VK_DOWN:  return shift ? Key::shifted(KeyKind::Down)
+                                            : Key::special(KeyKind::Down);
+                case VK_LEFT:  return shift ? Key::shifted(KeyKind::Left)
+                                            : Key::special(KeyKind::Left);
+                case VK_RIGHT: return shift ? Key::shifted(KeyKind::Right)
+                                            : Key::special(KeyKind::Right);
+                case VK_HOME:  return shift ? Key::shifted(KeyKind::Home)
+                                            : Key::special(KeyKind::Home);
+                case VK_END:   return shift ? Key::shifted(KeyKind::End)
+                                            : Key::special(KeyKind::End);
+                case VK_PRIOR: return shift ? Key::shifted(KeyKind::PageUp)
+                                            : Key::special(KeyKind::PageUp);
+                case VK_NEXT:  return shift ? Key::shifted(KeyKind::PageDown)
+                                            : Key::special(KeyKind::PageDown);
+                default: break;
+            }
             switch (k.wVirtualKeyCode) {
                 case VK_UP:     return Key::special(KeyKind::Up);
                 case VK_DOWN:   return Key::special(KeyKind::Down);

@@ -283,16 +283,46 @@ void runRuntimeTests() {
                   "it just means the defaults");
         }
         {
+            // MANY [Run] ROWS, and choosing between them. v11 through v14
+            // reported the second one as an error, on the reasoning that Arena
+            // has one Run Setup. But a file can hold several where a dialog
+            // cannot, and editing the same numbers back and forth to compare a
+            // long horizon against a short one loses what they were.
             ModelDocument m;
-            m.addRow("Run"); m.setCell("Run", 0, "Name", "A");
+            m.addRow("Run"); m.setCell("Run", 0, "Name", "Short");
             m.setCell("Run", 0, "Length", "10");
-            m.addRow("Run"); m.setCell("Run", 1, "Name", "B");
+            m.addRow("Run"); m.setCell("Run", 1, "Name", "Long");
+            m.setCell("Run", 1, "Length", "5000");
+            m.setCell("Run", 1, "Replications", "20");
+
             std::vector<Diagnostic> out;
-            (void)readRunSetup(m, out);
-            bool second = false;
-            for (const Diagnostic& g : out)
-                if (g.cell && g.cell->moduleType == "Run" && g.cell->row == 1) second = true;
-            check(second, "a SECOND [Run] row is reported at that row");
+            const RunSetup first = readRunSetup(m, out, 0);
+            const RunSetup second = readRunSetup(m, out, 1);
+            check(!hasErrors(out), "a second [Run] is no longer an error");
+            check(first.length && *first.length == 10.0, "the first is read by index");
+            check(second.length && *second.length == 5000.0, "and so is the second");
+            check(second.replications == 20, "with its own replication count");
+
+            const std::vector<std::string> names = runNames(m);
+            check(names.size() == 2 && names[0] == "Short" && names[1] == "Long",
+                  "and they are listed by name, which is how one is chosen");
+
+            // OUT OF RANGE READS AS THE DEFAULTS, not as an error. A caller
+            // holding a stale index after a row was deleted is not a broken
+            // model, and refusing would turn an editing mistake into a failure.
+            std::vector<Diagnostic> stale;
+            const RunSetup gone = readRunSetup(m, stale, 9);
+            check(!gone.length.has_value() && !hasErrors(stale),
+                  "an index past the end reads as the defaults");
+        }
+        {
+            // A row with no Name is still a row you may want to run, so it gets
+            // a stand-in rather than an empty line in the list.
+            ModelDocument m;
+            m.addRow("Run");
+            const std::vector<std::string> names = runNames(m);
+            check(names.size() == 1 && !names[0].empty(),
+                  "an unnamed [Run] still has something to call it");
         }
         {
             // Legitimate: a Create with Max Arrivals is finite and the future

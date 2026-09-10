@@ -38,6 +38,16 @@ CompileResult compile(const ModelDocument& doc);
 std::vector<std::string> referenceCandidates(const ModelDocument& doc,
                                              const std::string& targetType);
 
+// Which line of the FILE a diagnostic is about, 1-based, or 0 when it cannot
+// say. A reader diagnostic already carries a line; a compiler diagnostic
+// carries a cell, and a cell knows where it was read from -- so the join lives
+// here rather than in whatever is drawing.
+//
+// Never guesses. A document built in code has no lines, and a text editor
+// showing an error beside an arbitrary one is worse than showing it beside
+// none: the fourth occurrence of the rule this project keeps rediscovering.
+std::size_t lineOf(const ModelDocument& doc, const Diagnostic& diagnostic);
+
 // Builds INTO an existing Model, which is what a SimulationSystem owns: Model
 // is neither copyable nor movable, so a compiled one cannot be handed over.
 // Returns false when the document did not produce a usable model.

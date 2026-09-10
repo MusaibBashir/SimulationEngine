@@ -103,7 +103,8 @@ public:
     // beats the file, without the file being edited to say so.
     static std::unique_ptr<RunController>
     fromDocument(const ModelDocument& doc, std::vector<Diagnostic>& out,
-                 std::optional<SimTime> lengthOverride = std::nullopt);
+                 std::optional<SimTime> lengthOverride = std::nullopt,
+                 std::size_t whichRun = 0);
 
     RunController(RunSetup setup, ModelBuilder build);
     ~RunController();

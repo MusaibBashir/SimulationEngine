@@ -228,6 +228,7 @@ ReadResult readDocument(const std::string& text) {
             }
             result.document.addRow(currentType);
             currentRow = result.document.rowCount(currentType) - 1;
+            result.document.rowAt(currentType, currentRow).headerLine = lineNo;
             continue;
         }
 
@@ -260,7 +261,17 @@ ReadResult readDocument(const std::string& text) {
         result.document.setCell(currentType, currentRow, key, value, lineNo);
     }
 
-    if (!sawVersion)
+    // A file with NOTHING in it is not a malformed model file, it is an empty
+    // one, and there is nothing to be wrong about. v15's blank page drew a red
+    // error marker beside line 1 of a file the person had not typed into yet,
+    // which is a poor way to say hello. A file of only comments counts as empty
+    // too; it still fails the structure pass for having no blocks.
+    bool anyContent = false;
+    for (const std::string& raw : lines) {
+        const std::string t = trim(raw);
+        if (!t.empty() && t[0] != '#' && t[0] != ';') { anyContent = true; break; }
+    }
+    if (!sawVersion && anyContent)
         error(result.diagnostics, 1,
               "no 'version = 1' line: a model file must say what it is");
 

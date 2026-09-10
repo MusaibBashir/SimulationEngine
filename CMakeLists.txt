@@ -89,6 +89,7 @@ target_compile_options(des_engine PRIVATE ${DES_WARNINGS})
 # ----------------------------------------------------------------------------
 add_library(des_ui STATIC
     src/Screen.cpp
+    src/TextBuffer.cpp
     src/TuiState.cpp
     src/TuiRender.cpp
     src/TuiInput.cpp

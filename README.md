@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1397/1397 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1368/1368 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -42,8 +42,15 @@ in the *schema*, so any front end gets it. `Enter` on an enum or a reference
 opens Arena's drop-down, built from the same function the compiler validates
 against, and `Escape` drops into typing so a block can be named before it
 exists. `^T` fills a blank page with a working model, `^F` shows the wiring,
-and `?` says the one thing an Arena user will not guess: there is no canvas,
-and a connection is a name typed into a `Next` cell.
+and a key map says the one thing an Arena user will not guess: there is no
+canvas, and a connection is a name typed into a `Next` field.
+
+**v15: the model IS the text.** A module palette on the left, the `.des` file
+in an editor on the right, and Flow, Runs and Results as tabs across the top —
+with the mouse working throughout. The buffer is the source of truth and
+everything else is derived from it after every keystroke, so what you save is
+what you typed. `[Run]` records can be named and kept side by side, and the
+Results tab remembers which one produced what.
 
 ```cpp
 #include "des.hpp"
@@ -267,106 +274,125 @@ if (compileInto(read.document, sim.model(), problems))
 ./build/des_tui examples/models/teller.des
 ```
 
-Or with no file at all — `des_tui newmodel.des` opens a blank page.
+`des_tui newmodel.des` on a file that does not exist opens a blank page.
+
+A **module palette** on the left, the **`.des` file itself** on the right, and
+the other three views as tabs across the top:
 
 ```
- < Expression  Run 1  Queue  Create 1 [Process 1]>       examples/models/teller.des
-+----------------------------------------------------------------------------------+
-| Name   Capacity  Resource  Units  Discipline  Service    Balk At  Balk To  Reneg |
-|>Serve  1                          FIFO        EXPO(0.8)                          |
-+----------------------------------------------------------------------------------+
-+-- row 1 of 1 -------------------------------------------------------------more^--+
-| Renege To         -> Block                                                       |
-| Next            Out  -> Block                                                    |
-|                 Where entities go after service. THIS IS THE CONNECTION: Arena   |
-|                 draws a line between two modules, this engine names the next     |
-|                 block here. Blank means they leave the system.                   |
-+----------------------------------------------------------------------------------+
-Enter  choose from a list        ^S save  ^R run  Esc back
+  Model ^B  Flow ^F  Runs ^U  Results ^E                 examples/models/teller.des
++- Modules ------- 25 lines --------------------------------------------------+
+| Variable      |   1   version = 1                                           |
+| Entity        |   2                                                         |
+| Resource      |   3   # How to run it. Arena keeps this in Run Setup; here  |
+| Expression    |   4   # it is a module like any other.                      |
+| Run 1         |   5   [Run]                                                 |
+| Create 1      |   6   Name         = Setup                                  |
+| Process 1     |   7   Length       = 480                                    |
+| Delay         |   8   Replications = 1                                      |
+| Assign        |   9                                                         |
+| Decide        |  10   [Create]                                              |
+| Batch         |  11   Name         = Arrivals                               |
+| Separate      |  12   Interarrival = EXPO(1.0)                              |
+| Record        |  13   Next         = Serve                                  |
+| Dispose 1     |  14                                                         |
+| DecideBranch  |  15   [Process]                                             |
+| AssignField   |  16   Name       = Serve                                    |
++-----------------------------------------------------------------------more v-+
+examples/models/teller.des
+^S save  ^R run  ^L list  ^G help  ^J error  ^T starter  F1 keys
 ```
+
+**The text is the model.** The buffer holds the file and everything else — the
+parsed document, the diagnostics, the flow, the list of runs — is derived from
+it after every keystroke. So what you save is what you typed: comments,
+spacing and ordering survive because nothing rewrites them.
 
 | Key | |
 |---|---|
-| `?` | the key map — and the one thing an Arena user will not guess |
-| `Tab` / `Shift-Tab` | the next or previous module type |
-| `↑` `↓` `PgUp` `PgDn` `Home` `End` | move the row cursor |
-| `Enter` | into the detail pane, then into a **list** or a cell |
-| `Escape` | out of a list into typing, then out of the cell, then out of the pane |
-| `^S` `^N` `^D` `^Z` | save, new row, delete row, undo |
-| `^T` | fill a blank document with a working model |
-| `^F` | the flow: who connects to whom |
-| `^R` | run the model; `Escape` stops it |
-| `q` | quit — and it **asks** if there is unsaved work |
+| `F1` | the key map, and the one thing an Arena user will not guess |
+| `^B` `^F` `^U` `^E` | Model, Flow, Runs, Results |
+| `Tab` | swap between the palette and the text |
+| `Enter` | in the palette: write that module into the text |
+| `^G` | explain whatever the cursor is on |
+| `^L` | list the values a field allows — Arena's drop-down |
+| `^J` | jump to the first error |
+| `^T` | write a working model into an empty file |
+| `^R` | run it; `^N` on the Runs tab adds another `[Run]` |
+| `^W` | save the results |
+| `^S` `^Z` `^Y` `^X` `^C` `^V` `^A` | save, undo, redo, cut, copy, paste, select all |
+| `^Q` | quit — and it **asks** if there is unsaved work |
 
-**There is no canvas, and that is the one thing to know.** A module type is a
-tab, its rows are a table, and a *connection* is the name of the next block
-typed into a `Next` cell. Everything else maps onto Arena directly.
+**The mouse works too**: click a tab, click a module to insert it, right-click
+one to read what it does, click into the text to put the caret there, and the
+wheel scrolls whatever is under it.
 
-**A Process has eleven columns**, which is about 130 characters in an
-80-column terminal. So the grid is for scanning and the **detail pane is where
-you read and edit**, exactly as Arena has a spreadsheet and a dialog. Every
-field carries a line saying what it is for, and that line lives in the
-*schema*, not in this UI — a second front end would need the same sentence, and
-a test walks the registry and fails on any column that has none.
+**There is no canvas, and that is the one thing to know.** A model is this
+text, and a *connection* is the name of the next block typed into a `Next`
+field. Everything else maps onto Arena directly — `ARENA_MAP.md` has the table.
 
-**Enter on an Enum or a Reference cell opens a list**, which is Arena's
-drop-down:
+**Picking a module writes the whole record**, header and every field, blank:
 
 ```
-+-- Next --------------------------------------------------------------------------+
-| Where entities go after service. THIS IS THE CONNECTION: Arena draws a line      |
-| between two modules, this engine names the next block here. Blank means they     |
-| leave the system.                                                                |
-|  (none)                                                                          |
-|  Arrivals                                                                        |
-|  Serve                                                                           |
-|> Out                                                                             |
-+----------------------------------------------------------------------------------+
-Up/Down choose   Enter accept   Esc type it instead
+[Process]
+Name =
+Capacity =
+Resource =
+Units =
+Discipline =
+Service =
+Balk At =
+...
 ```
 
-The list and the compiler's reference pass are **one function**, so a list
-cannot offer a name that is then rejected. `Escape` does not cancel — it drops
-into the text editor, because naming a block *before that block exists* is the
-ordinary way a model gets built and no list can offer that. A second `Escape`
-abandons.
+Every field, not only the required ones — a template that hid the optional half
+would hide balking, reneging and entity types behind knowing they exist. Delete
+the lines you do not need; a blank field means "unset", which is what the
+schema's default already says.
 
-**^F shows the wiring**, read out of the cells rather than out of a compiled
-model — so it works on a document that does *not* compile, which is when you
-most need it:
+**`^L` on an enum or a reference is Arena's drop-down.** The list is built by
+the same function the compiler's reference pass checks against, so it cannot
+offer a name that is then rejected. `Escape` closes it and leaves you typing,
+because naming a block *before that block exists* is the ordinary way a model
+gets built and no list can offer that.
+
+**Errors are marked in the gutter, on the line they are about:**
 
 ```
-+-- flow --------------------------------------------------------------------------+
-|  Arrivals           Create     Next -> Serve                                     |
-|> Serve              Process    Next -> Out                                       |
-|  Out                Dispose    (leaves the system)                               |
-+----------------------------------------------------------------------------------+
-Up/Down move   Enter opens that block   any key returns
+|   4   Name = A                                       |
+|   5 E Entity Type = Gears                            |
+|   6   Interarrival = EXPO(0.6)                       |
+|   7 E Next = Nowhere                                 |
 ```
 
-It names exits that point nowhere and blocks nothing arrives at, and `Enter`
-jumps to the block under the marker. A `Decide` lists its branches **in the
-order they are tried**, with its `Next` shown last as `else ->`, because that
-is what it is.
+A diagnostic names a *cell*; `lineOf()` turns that back into a line, and `^J`
+takes you to the first one. Pressing `^R` on a model that does not compile
+names the actual problem rather than saying it will not run.
 
-**The tab bar is not a list in the source.** It is every module type the
-registry publishes, followed by any type the file holds that the registry does
-not — so a module added in a later version appears here without this code
-changing, and a file written by a later version shows its unknown modules
-rather than hiding them. Each tab carries its row count, and types with no rows
-are dimmed.
+**Many `[Run]` records, chosen by name.** Arena keeps one Run Setup and makes
+you edit it to try a longer horizon; a file can hold several:
 
-**Saving does not disturb what you did not touch.** Each row remembers the
-lines it was read from; only edited records are re-emitted. Open a file and
-save it without editing and you get byte-identical bytes.
+```
++-- runs --------------------------------------------------------------+
+|  name              length   warm-up   reps   seed                    |
+|> Short             50       0         1      12345                   |
+|  Long              5000     500       20     12345                   |
++----------------------------------------------------------------------+
+Up/Down choose   Enter runs it   ^N adds one   F1 keys
+```
 
-**A run with no knowable end draws no progress bar.** A `[Run]` that stops when
-drained cannot say how far through it is, and a bar sitting at zero until it
-jumps to full is a lie you cannot detect — so it says so in words instead.
+**Results are a tab**, dimmed until there are any, and the run lands on them
+when it finishes. `^W` writes the report beside the model, carrying which run
+produced it.
 
-**A model with no `[Run]` row runs anyway**, until the event list empties —
-which is what the reader's warning has always promised. Before v14 it aborted,
-and in the terminal UI that left the console in raw mode.
+**^F shows the wiring**, read from the cells rather than from a compiled model
+— so it works on a file that does *not* compile, which is when you most need
+it. It names exits that point nowhere and blocks nothing arrives at, and
+`Enter` puts the cursor on that record. A `Decide` lists its branches **in the
+order they are tried**, with its `Next` shown last as `else ->`.
+
+**A model with no `[Run]` record runs anyway**, until the event list empties —
+which is what the reader's warning has always promised.
 
 ## Watching a run
 
@@ -494,6 +520,7 @@ need to read the engine's source to build a model with it.
 | `V12_READLOG.md` | Runtime control: stepping, progress that can say it does not know, and three sabotages that proved nothing |
 | `V13_READLOG.md` | The terminal UI, and the v11 guarantee it proved false |
 | `V14_READLOG.md` | Building a model from nothing: pick lists, the starter model, and four bugs only looking found |
+| `V15_READLOG.md` | The grid becomes a text editor, and the assert that had been one keystroke away since v11 |
 | `ARENA_MAP.md` | Arena module → this engine, and where the two differ |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
@@ -506,7 +533,7 @@ sim/
 ├── cli/             the des command: check, run and regress
 ├── tui/             des_tui: the terminal UI, and the only platform code
 ├── examples/models/ hand-written .des models
-├── tests/           1397 unit checks
+├── tests/           1368 unit checks
 ├── include/         50 headers
 └── src/             42 sources
 ```

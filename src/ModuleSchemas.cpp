@@ -111,7 +111,8 @@ std::vector<ModuleSchema> buildSchemas() {
     s.push_back(make("Run", ModuleKind::Data,
                      "How long to run and how many times. Arena keeps this in "
                      "Run Setup; here it is a module, so the file says "
-                     "everything needed to reproduce a result. At most one row.",
+                     "everything needed to reproduce a result. Several may coexist -- "
+                     "name them and choose which to run.",
                      {ident("Name", "A label for this row. Any name will do."),
                       real("Length", "",
                            "Stop at this simulated time. Leave blank to run "

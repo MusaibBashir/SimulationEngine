@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
         // advanced and continued without ever reading a key, so Escape was
         // never seen -- and a model with no stopping condition, which is every
         // model somebody has just built, could not be stopped at all.
-        const bool busy = state.mode() == Mode::Running && state.running() != nullptr &&
+        const bool busy = state.running() != nullptr &&
                           (state.running()->state() == RunState::Ready ||
                            state.running()->state() == RunState::Running);
         if (busy && !terminal->keyPending()) {
@@ -43,7 +43,11 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        if (!handleKey(state, terminal->nextKey())) break;
+        // The SIZE goes with the key, because a click has to be turned back
+        // into what was clicked using the layout that drew it -- and the
+        // layout depends on how big the window is right now.
+        if (!handleKey(state, terminal->nextKey(), size.width, size.height)) break;
+        if (state.wantsQuit()) break;
     }
     // The terminal restores itself in its destructor, which is the only reason
     // it is an object rather than a pair of functions: a return from anywhere

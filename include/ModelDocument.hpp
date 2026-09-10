@@ -38,6 +38,12 @@ public:
         // it with it when it is deleted.
         std::vector<std::string> source;
         bool                     edited{false};
+
+        // v15: the line the row's [Header] was read from, 1-based. A cell
+        // carries its own line already; this is for the diagnostics that name
+        // a cell which is NOT THERE -- "Create needs a Name" has no cell to
+        // point at, and a text editor still has to put the error somewhere.
+        std::size_t              headerLine{0};
     };
 
 private:

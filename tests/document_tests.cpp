@@ -868,4 +868,87 @@ void runDocumentTests() {
         check(queue != nullptr && queue->help.find("READ ONLY") != std::string::npos,
               "and Queue says up front that it cannot be edited");
     }
+    section("Every half-typed prefix compiles without aborting");
+    {
+        // THE PROPERTY A TEXT EDITOR NEEDS. v15 re-reads and re-compiles after
+        // every keystroke, so every prefix of every model anyone ever types is
+        // a state this compiler sees. It only has to produce diagnostics --
+        // but it must never abort, and for four versions it did.
+        //
+        // `EXPO(` is enough. The parser reports the missing bracket and
+        // substitutes a zero placeholder for the argument; the placeholder is
+        // a constant, so the call builds its distribution eagerly, and
+        // Exponential ASSERTED on a non-positive mean rather than throwing.
+        // buildCall wraps every distribution constructor in a catch for
+        // ModelError -- and an assert is not a throw, so it went straight
+        // past. `des check` on a file holding a half-typed EXPO( aborted from
+        // v11 until v15.
+        const std::string full =
+            "version = 1\n"
+            "\n"
+            "[Run]\n"
+            "Name = Setup\n"
+            "Length = 480\n"
+            "\n"
+            "[Create]\n"
+            "Name = Arrivals\n"
+            "Interarrival = EXPO(1.0)\n"
+            "Max Arrivals = 200\n"
+            "Next = Serve\n"
+            "\n"
+            "[Process]\n"
+            "Name = Serve\n"
+            "Capacity = 1\n"
+            "Discipline = FIFO\n"
+            "Service = UNIF(1, 2)\n"
+            "Next = Sort\n"
+            "\n"
+            "[Decide]\n"
+            "Name = Sort\n"
+            "Type = Condition\n"
+            "Next = Out\n"
+            "\n"
+            "[Dispose]\n"
+            "Name = Out\n";
+
+        // Every prefix, and every prefix with one line truncated mid-word --
+        // which is what a person's file looks like between two keystrokes.
+        for (std::size_t n = 0; n <= full.size(); ++n) {
+            ReadResult read = readDocument(full.substr(0, n));
+            CompileResult r = compile(read.document);
+            (void)r;
+        }
+        check(true, "every prefix of a model compiles rather than aborting");
+
+        // The three distributions that used to assert, each reached the way a
+        // person reaches them: by typing the opening bracket.
+        for (const std::string& half : {std::string("EXPO("),
+                                        std::string("UNIF(1,"),
+                                        std::string("TRIA(1,2,"),
+                                        std::string("EXPO(0)"),
+                                        std::string("UNIF(2, 1)"),
+                                        std::string("TRIA(3, 2, 1)")}) {
+            const std::string text = "version = 1\n\n[Create]\nName = A\n"
+                                     "Interarrival = " + half + "\n";
+            ReadResult read = readDocument(text);
+            CompileResult r = compile(read.document);
+            check(hasErrors(r.diagnostics),
+                  "'" + half + "' is a DIAGNOSTIC, not an abort");
+            check(r.model == nullptr, "and builds no model");
+        }
+
+        // A bad parameter reaches the reader as a message about the cell,
+        // which is the whole point of turning it into a diagnostic.
+        {
+            ReadResult read = readDocument("version = 1\n\n[Create]\nName = A\n"
+                                           "Interarrival = EXPO(0)\n");
+            CompileResult r = compile(read.document);
+            bool named = false;
+            for (const Diagnostic& d : r.diagnostics)
+                if (d.cell && d.cell->column == "Interarrival" &&
+                    d.message.find("positive") != std::string::npos)
+                    named = true;
+            check(named, "and it names the cell and says what was wrong with it");
+        }
+    }
 }

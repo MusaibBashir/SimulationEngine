@@ -5,6 +5,85 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [15.0.0] — 2026-09-11 — "The text is the model"
+
+v13 put a spreadsheet grid on the screen and v14 taught it to explain itself.
+v15 replaces the grid: a module palette on the left, the `.des` file itself in
+a text editor on the right, and Flow, Runs and Results as tabs across the top.
+Narrative in `V15_READLOG.md`.
+
+The inversion is the point. v13 edited a `ModelDocument` and wrote it out,
+which meant a value could be wrong in two places and the writer had to work to
+keep comments alive — v11's central guarantee turned out to be false the first
+time a UI exercised it. Here the buffer IS the file: what is saved is what was
+typed, so the byte-identical round trip is free rather than a property to
+maintain.
+
+### Added
+
+- **`TextBuffer`** — lines, a caret, a selection, an undo/redo stack. The
+  editable value the whole interface now rests on.
+- **A module palette.** `Enter` (or a left click) writes that module's whole
+  record into the text — header and every field, blank — at the caret.
+- **A menu bar**: `Model ^B`, `Flow ^F`, `Runs ^U`, `Results ^E`. Results is
+  dimmed until there are any.
+- **Many `[Run]` records**, named, chosen on the Runs tab. `readRunSetup` takes
+  an index and `runNames()` lists them; `RunController::fromDocument` takes a
+  `whichRun`. v11 through v14 reported the second `[Run]` as an error.
+- **A Results view** that the run lands on when it finishes, with `^W` to save
+  the report beside the model — carrying which run produced it.
+- **Mouse support**, in both terminals: click a tab, click a module to insert
+  it, right-click it to read what it does, click into the text, wheel to
+  scroll. `ENABLE_MOUSE_INPUT` on Win32 and xterm SGR reporting on POSIX.
+- **`Key` carries mouse, function keys and shift** — one event stream, so
+  nothing has to merge two.
+- **`lineOf(document, diagnostic)`** — which line of the file a diagnostic is
+  about. A diagnostic names a *cell*; in a text editor that is useless until
+  something turns it back into a line.
+- **`Row::headerLine`** — where a record's `[Header]` was read from, so an
+  error about a field that is *not there* still has somewhere to point.
+- **Cut, copy, paste and select-all**, with Shift+arrows to select.
+- **`^G`** explains whatever the cursor is on; **`^L`** is Arena's drop-down;
+  **`^J`** jumps to the first error; **`F1`** lists the keys.
+
+### Changed
+
+- **The spreadsheet grid is gone**, along with `Mode`, the detail pane and the
+  per-cell picker. `TuiState` is built around the buffer instead.
+- The POSIX terminal now clears `ISIG`, `IXON` and `IEXTEN`. See Fixed.
+- An empty file no longer reports a missing `version = 1` line.
+- `des_tui` lands on the flowchart when opening a model.
+
+### Fixed
+
+- **A half-typed distribution aborted the program.** `EXPO(` — the open bracket
+  and nothing else — parses to a zero placeholder, and `Exponential` *asserted*
+  on a non-positive mean rather than throwing. `buildCall` wraps every
+  distribution constructor in a `catch (ModelError)` with a comment promising
+  "the parser never throws at a user"; an assert is not a throw, so it went
+  straight past. Six of the nine distributions threw and three asserted, and
+  the three that asserted — Exponential, Uniform, Triangular — were exactly the
+  three a user could reach. `des check` on a file holding `EXPO(` has aborted
+  since v11. In a release build `NDEBUG` deletes the assert instead, leaving a
+  distribution whose mean is zero, which draws zero forever.
+- **`^S` and `^C` never reached the UI on POSIX.** `IXON` meant the terminal
+  driver swallowed `^S` as XOFF and froze the output; `ISIG` meant `^C` raised
+  SIGINT and killed the program; `IEXTEN` meant `^V` ate the following
+  keystroke. Three keys the interface names in its own footer.
+- **`F1` after `^G` showed the field help again**, for ever: the key map is the
+  help overlay with no title, and nothing cleared the title.
+- The status line survived a change of view, so advice about the pick list sat
+  under the Runs tab.
+- The error marker ran into the text it marked: `5 EEntity Type = Gears`.
+- The Runs table header was two columns adrift of its own rows.
+- An overlay cleared only its own rectangle, leaving sentence fragments beside
+  it that read as text rather than as background.
+- **The test harness only flushed per line under MSVC.** Under MinGW an
+  `abort()` discarded every line printed before it, so a failing assert printed
+  its message and nothing else — a stack trace with the stack removed.
+
+---
+
 ## [14.0.0] — 2026-09-10 — "Somebody who has used Arena, and nothing else"
 
 v13 let you open, edit, save and run a model. It did not let you *build* one —
