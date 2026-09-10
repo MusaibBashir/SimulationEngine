@@ -747,7 +747,32 @@ void runTuiTests() {
               blank.document().rowCount("Run") == 1,
               "arrivals, a server, an exit and a Run row");
         check(!blank.document().preamble().empty(),
-              "with comments in the file, which v11 preserves through an edit");
+              "with comments, which v11 preserves through an edit");
+
+        // THE FILE, not the document. The first version of this check asked
+        // the document and passed, while writeCanonical dropped the preamble
+        // on the floor -- so the comments meant to teach reached nobody. A
+        // document built in code was the only kind that could have one, and
+        // v14 is the first caller to set one.
+        check(blank.save("tui_starter.des"), "and it saves");
+        {
+            std::ifstream in("tui_starter.des", std::ios::binary);
+            const std::string text((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            check(text.find("# A single teller") != std::string::npos,
+                  "and the comments are IN THE FILE it wrote");
+            check(text.find("version = 1") != std::string::npos,
+                  "with the version line");
+            check(text.find("version", text.find("version") + 1) == std::string::npos,
+                  "exactly once");
+        }
+        {
+            TuiState reopened = TuiState::open("tui_starter.des");
+            check(!hasErrors(reopened.diagnostics()),
+                  "and what it wrote opens clean");
+            check(!reopened.document().preamble().empty(),
+                  "with its comments read back");
+        }
 
         // It has to RUN, not merely compile. A starter model that needs a fix
         // before it works teaches the wrong first lesson.

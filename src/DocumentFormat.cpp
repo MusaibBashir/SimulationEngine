@@ -41,6 +41,21 @@ std::string writeCanonical(const ModelDocument& doc) {
     std::ostringstream out;
     out << "version = 1\n";
 
+    // The preamble a document was GIVEN, as opposed to one it was read with.
+    // This writer runs only for a document with no source lines -- one built
+    // in memory -- so anything here was set by a caller and dropping it loses
+    // work. v14's starter model is the first caller to set one, and its
+    // comments went nowhere until this existed.
+    //
+    // A read file keeps its version line IN the preamble, and writeMerged
+    // emits no separate one. Skipping it here means a preamble that came from
+    // either place writes the line exactly once.
+    for (const std::string& line : doc.preamble()) {
+        const std::size_t at = line.find_first_not_of(" \t");
+        if (at != std::string::npos && line.compare(at, 7, "version") == 0) continue;
+        out << line << "\n";
+    }
+
     for (const std::string& type : doc.types()) {
         const ModuleSchema* schema = reg.find(type);
         const std::size_t rows = doc.rowCount(type);
@@ -65,6 +80,7 @@ std::string writeCanonical(const ModelDocument& doc) {
             }
         }
     }
+    for (const std::string& line : doc.trailer()) out << line << "\n";
     return out.str();
 }
 
