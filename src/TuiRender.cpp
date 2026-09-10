@@ -28,6 +28,31 @@ std::string fitTail(const std::string& s, int room) {
     return "..." + s.substr(s.size() - static_cast<std::size_t>(room - 3));
 }
 
+// Break prose at spaces. Written because fit() alone cut a module description
+// off mid-word -- "Arena draws a line, thi" -- and a sentence that stops in the
+// middle reads as a rendering fault rather than as the help it is. fit() stays
+// as the backstop for a single word longer than the room.
+std::vector<std::string> wrapText(const std::string& text, int room) {
+    std::vector<std::string> lines;
+    if (room <= 0) return lines;
+    std::string line, word;
+    for (std::size_t i = 0; i <= text.size(); ++i) {
+        const bool end = (i == text.size());
+        if (!end && text[i] != ' ') { word.push_back(text[i]); continue; }
+        if (!word.empty()) {
+            if (static_cast<int>(line.size() + word.size() + 1) > room && !line.empty()) {
+                lines.push_back(line);
+                line.clear();
+            }
+            if (!line.empty()) line += " ";
+            line += word;
+            word.clear();
+        }
+    }
+    if (!line.empty()) lines.push_back(line);
+    return lines;
+}
+
 // Column widths are computed from the DATA, not fixed, because a schema added
 // in a later version has column names this file has never seen.
 int widthFor(const TuiState& state, const std::string& column) {
@@ -48,8 +73,15 @@ void renderTabs(const TuiState& state, Screen& screen) {
     const int nameRoom = std::min(static_cast<int>(name.size()), screen.width() / 2);
     screen.text(screen.width() - nameRoom - 1, 0, fitTail(name, nameRoom), Attr::Bold);
 
+    // The COUNT is on the tab. Seventeen tabs and no way to tell which hold
+    // anything meant tabbing through every one of them to find out what a
+    // model contains -- which is the question the tab bar is for. A type with
+    // no rows shows no number and is dimmed, so the model's shape reads at a
+    // glance.
     const auto labelOf = [&](const std::string& t) {
-        return (t == state.type()) ? "[" + t + "]" : " " + t + " ";
+        const std::size_t n = state.document().rowCount(t);
+        const std::string body = n > 0 ? t + " " + std::to_string(n) : t;
+        return (t == state.type()) ? "[" + body + "]" : " " + body + " ";
     };
 
     // Room for the two scroll markers is reserved WHETHER OR NOT they are
@@ -82,9 +114,11 @@ void renderTabs(const TuiState& state, Screen& screen) {
     int x = left;
     if (first > 0) screen.put(1, 0, '<', Attr::Dim);
     for (std::size_t i = first; i <= last && i < types.size(); ++i) {
-        const std::string label = labelOf(types[i]);
-        x = screen.text(x, 0, label,
-                        types[i] == state.type() ? Attr::Reverse : Attr::Normal);
+        const bool empty = state.document().rowCount(types[i]) == 0;
+        const Attr attr = types[i] == state.type()
+                              ? Attr::Reverse
+                              : (empty ? Attr::Dim : Attr::Normal);
+        x = screen.text(x, 0, labelOf(types[i]), attr);
     }
     if (last + 1 < types.size()) screen.put(x, 0, '>', Attr::Dim);
 }
@@ -113,29 +147,28 @@ void renderGrid(const TuiState& state, Screen& screen, int top, int bottom) {
         const ModuleSchema* schema = state.schemaHere();
         int y = top + 2;
         if (schema != nullptr && !schema->help.empty()) {
-            // Wrapped, not clipped: a module description is two or three lines
-            // and fit() alone would cut the rest off. fit() stays as the
-            // backstop, because a single word longer than the box would
-            // otherwise draw straight through the border.
             const int room = right - 4;
-            std::string lineText, word;
-            const std::string& help = schema->help;
-            for (std::size_t i = 0; i <= help.size() && y < bottom - 2; ++i) {
-                const bool end = (i == help.size());
-                if (!end && help[i] != ' ') { word.push_back(help[i]); continue; }
-                if (static_cast<int>(lineText.size() + word.size() + 1) > room) {
-                    screen.text(3, y++, fit(lineText, room), Attr::Dim);
-                    lineText.clear();
-                }
-                if (!lineText.empty()) lineText += " ";
-                lineText += word;
-                word.clear();
+            for (const std::string& ln : wrapText(schema->help, room)) {
+                if (y >= bottom - 2) break;
+                screen.text(3, y++, fit(ln, room), Attr::Dim);
             }
-            if (!lineText.empty() && y < bottom - 2)
-                screen.text(3, y++, fit(lineText, room), Attr::Dim);
         }
-        if (y < bottom - 1)
+        // A document with nothing in it ANYWHERE is a different situation from
+        // an empty table in a model that exists. The first is a blank page,
+        // and the answer to a blank page is a model you can run and take
+        // apart -- so that is what the blank page offers.
+        bool anywhere = false;
+        for (const std::string& t : state.document().types())
+            if (state.document().rowCount(t) > 0) anywhere = true;
+
+        if (y < bottom - 2 && !anywhere) {
+            screen.text(3, y + 1, "^T fills this in with a working model to "
+                                  "take apart", Attr::Bold);
+            if (y + 2 < bottom - 1)
+                screen.text(3, y + 2, "^N adds one empty row", Attr::Dim);
+        } else if (y < bottom - 1) {
             screen.text(3, y + 1, "no rows yet -- ^N adds one", Attr::Bold);
+        }
         return;
     }
     // Scroll so the cursor is always on screen, without moving when it does
@@ -178,9 +211,15 @@ void renderDetail(const TuiState& state, Screen& screen, int top) {
     // the fold and invisible.
     const int slots = height - 2;
     if (slots <= 0) return;
+    // HEADROOM below the selected field. Its help and its diagnostic are drawn
+    // UNDER it, so a cursor resting on the last visible row left no room for
+    // either -- the one field that shows its help was exactly the field that
+    // could not. Scrolling it up two lines early costs nothing and fixes both.
+    const std::size_t headroom = (slots > 4) ? 3 : 0;
     std::size_t first = 0;
-    if (state.column() >= static_cast<std::size_t>(slots))
-        first = state.column() - static_cast<std::size_t>(slots) + 1;
+    if (state.column() + headroom >= static_cast<std::size_t>(slots))
+        first = state.column() + headroom - static_cast<std::size_t>(slots) + 1;
+    if (first > state.column()) first = state.column();
     if (first > 0) screen.text(right - 6, top, "more^", Attr::Dim);
 
     int y = top + 1;
@@ -223,9 +262,9 @@ void renderDetail(const TuiState& state, Screen& screen, int top) {
         // "what is this one for" is only ever asked about the one you are on.
         if (here && schema != nullptr && y < top + height - 1) {
             if (const Column* col = schema->column(columns[c])) {
-                if (!col->help.empty()) {
-                    screen.text(18, y, fit(col->help, right - 18), Attr::Dim);
-                    ++y;
+                for (const std::string& ln : wrapText(col->help, right - 18)) {
+                    if (y >= top + height - 1) break;
+                    screen.text(18, y++, fit(ln, right - 18), Attr::Dim);
                 }
             }
         }
@@ -236,6 +275,170 @@ void renderDetail(const TuiState& state, Screen& screen, int top) {
                 screen.text(18, y, fit(what, right - 18), Attr::Error);
                 ++y;
             }
+        }
+    }
+}
+
+// Does the selected column offer a list? The footer says so while the pane is
+// open, because nothing else on screen tells you Enter does two things.
+bool pickableHere(const TuiState& state) {
+    const ModuleSchema* schema = state.schemaHere();
+    if (schema == nullptr) return false;
+    const std::vector<std::string> columns = state.columnsHere();
+    if (state.column() >= columns.size()) return false;
+    const Column* col = schema->column(columns[state.column()]);
+    return col != nullptr && (col->type == ColumnType::Enum ||
+                              col->type == ColumnType::Reference);
+}
+
+// The pick list, drawn where the detail pane would be. The GRID STAYS ABOVE it
+// on purpose: a list of block names means nothing without the row it is about.
+void renderPicker(const TuiState& state, Screen& screen, int top) {
+    const std::vector<std::string> columns = state.columnsHere();
+    const std::vector<std::string>& choices = state.choices();
+    const int height = screen.height() - top - 2;
+    screen.box(0, top, screen.width(), height);
+    const int right = screen.width() - 2;
+
+    const std::string column =
+        state.column() < columns.size() ? columns[state.column()] : std::string();
+    screen.text(3, top, " " + column + " ", Attr::Bold);
+
+    int listTop = top + 1;
+    if (const ModuleSchema* schema = state.schemaHere()) {
+        if (const Column* col = schema->column(column)) {
+            // At most two lines of it. The list is what this pane is for, and
+            // prose that pushes the choices off the bottom has stopped helping.
+            const std::vector<std::string> help = wrapText(col->help, right - 2);
+            for (std::size_t i = 0; i < help.size() && i < 2; ++i)
+                screen.text(2, listTop++, fit(help[i], right - 2), Attr::Dim);
+        }
+    }
+
+    const int slots = top + height - 1 - listTop;
+    if (slots <= 0) return;
+    std::size_t first = 0;
+    if (state.choice() >= static_cast<std::size_t>(slots))
+        first = state.choice() - static_cast<std::size_t>(slots) + 1;
+    if (first > 0) screen.text(right - 6, top, "more^", Attr::Dim);
+
+    for (int i = 0; i < slots; ++i) {
+        const std::size_t c = first + static_cast<std::size_t>(i);
+        if (c >= choices.size()) break;
+        const int y = listTop + i;
+        const bool here = (c == state.choice());
+        if (here) screen.put(1, y, '>', Attr::Bold);
+        // The empty choice needs a VISIBLE spelling. Drawn as itself it is a
+        // blank line with a cursor on it, which reads as a rendering fault
+        // rather than as an answer.
+        const std::string label = choices[c].empty() ? "(none)" : choices[c];
+        screen.text(3, y, fit(label, right - 3),
+                    here ? Attr::Reverse : (choices[c].empty() ? Attr::Dim : Attr::Normal));
+    }
+    if (first + static_cast<std::size_t>(slots) < choices.size())
+        screen.text(right - 6, top + height - 1, "more v", Attr::Dim);
+}
+
+// The key map. Two columns of keys, then a short paragraph on the two things
+// an Arena user will not guess: that a connection is a name typed in a Next
+// cell, and that a module type is a tab rather than a shape on a canvas.
+void renderHelp(Screen& screen) {
+    screen.box(0, 1, screen.width(), screen.height() - 3);
+    screen.text(3, 1, " keys ", Attr::Bold);
+    const int right = screen.width() - 2;
+
+    static const char* const KEYS[][2] = {
+        {"Tab / Shift-Tab", "the next module type, or the previous one"},
+        {"Up / Down",       "move between rows, or between fields"},
+        {"Enter",           "open the row; then a list, or the editor"},
+        {"Escape",          "back out one step"},
+        {"^N  /  ^D",       "add a row  /  delete this row"},
+        {"^Z",              "undo -- 64 deep, and it covers row moves"},
+        {"^S",              "save"},
+        {"^T",              "fill an empty model in with a working one"},
+        {"^F",              "the flow: who connects to whom, and what does not"},
+        {"^R",              "run it; Escape stops"},
+        {"?",               "this"},
+        {"q",               "quit, asking first if there is unsaved work"},
+    };
+
+    int y = 3;
+    for (const auto& row : KEYS) {
+        if (y >= screen.height() - 8) break;
+        screen.text(4, y, row[0], Attr::Bold);
+        screen.text(24, y, fit(row[1], right - 24));
+        ++y;
+    }
+
+    static const char* const NOTE =
+        "There is no canvas. A module type is a tab, its rows are a table, and "
+        "a CONNECTION is the name of the next block typed into a Next cell -- "
+        "which is the one thing that differs from drawing a line in Arena. "
+        "Every field explains itself in the pane below the grid.";
+    ++y;
+    for (const std::string& ln : wrapText(NOTE, right - 4)) {
+        if (y >= screen.height() - 3) break;
+        screen.text(4, y++, fit(ln, right - 4), Attr::Dim);
+    }
+}
+
+// Arena's canvas, as far as a terminal goes. NOT a compiled Model: a document
+// with a dangling exit does not compile, and that is exactly when somebody
+// needs to see the wiring. So this reads the cells.
+void renderFlow(const TuiState& state, Screen& screen) {
+    const std::vector<FlowBlock> blocks = flowOf(state.document());
+    screen.box(0, 1, screen.width(), screen.height() - 3);
+    screen.text(3, 1, " flow ", Attr::Bold);
+    const int right = screen.width() - 2;
+
+    const int slots = screen.height() - 6;
+    if (slots <= 0) return;
+    std::size_t first = 0;
+    if (state.flowCursor() >= static_cast<std::size_t>(slots))
+        first = state.flowCursor() - static_cast<std::size_t>(slots) + 1;
+    if (first > 0) screen.text(right - 6, 1, "more^", Attr::Dim);
+
+    int y = 3;
+    for (std::size_t i = first; i < blocks.size(); ++i) {
+        if (y >= screen.height() - 4) {
+            screen.text(right - 6, screen.height() - 4, "more v", Attr::Dim);
+            break;
+        }
+        const FlowBlock& b = blocks[i];
+        const bool here = (i == state.flowCursor());
+        if (here) screen.put(1, y, '>', Attr::Bold);
+
+        const std::string name = b.name.empty() ? "(unnamed)" : b.name;
+        screen.text(3, y, fit(name, 18), here ? Attr::Reverse : Attr::Bold);
+        screen.text(22, y, fit(b.type, 10), Attr::Dim);
+
+        std::string exits;
+        for (const std::string& e : b.exits) exits += (exits.empty() ? "" : "   ") + e;
+        // An exit that is genuinely empty is a statement, not an omission --
+        // the engine spells "leaves the system" as a null next -- so it is
+        // spelled out rather than left blank next to blocks that do wire on.
+        if (exits.empty()) exits = "(leaves the system)";
+        screen.text(33, y, fit(exits, right - 33),
+                    b.dangling ? Attr::Error : Attr::Normal);
+        ++y;
+    }
+
+    // Neither of these is an error on its own, and neither is said anywhere
+    // else. A dangling exit the compiler does report -- but as a cell
+    // reference, which is not the same as seeing the shape it leaves behind.
+    int problems = 0;
+    for (const FlowBlock& b : blocks)
+        if (b.dangling || b.unreached) ++problems;
+    if (problems > 0 && y < screen.height() - 4) {
+        ++y;
+        for (const FlowBlock& b : blocks) {
+            if (y >= screen.height() - 4) break;
+            if (b.dangling)
+                screen.text(3, y++, fit(b.name + ": an exit names a block that "
+                                        "does not exist", right - 3), Attr::Error);
+            else if (b.unreached)
+                screen.text(3, y++, fit(b.name + ": nothing arrives here",
+                                        right - 3), Attr::Dim);
         }
     }
 }
@@ -310,20 +513,51 @@ void render(const TuiState& state, Screen& screen) {
                     Attr::Dim);
         return;
     }
+    if (state.mode() == Mode::Help) {
+        renderTabs(state, screen);
+        renderHelp(screen);
+        screen.text(0, screen.height() - 2, fit(state.status(), screen.width()));
+        screen.text(0, screen.height() - 1, "any key returns", Attr::Dim);
+        return;
+    }
+    if (state.mode() == Mode::Flow) {
+        renderTabs(state, screen);
+        renderFlow(state, screen);
+        screen.text(0, screen.height() - 2, fit(state.status(), screen.width()));
+        screen.text(0, screen.height() - 1,
+                    "Up/Down move   Enter opens that block   any key returns",
+                    Attr::Dim);
+        return;
+    }
     renderTabs(state, screen);
     // The grid gives up half the screen when the detail pane is up: a wide
     // table is for scanning, and the pane is where it becomes readable.
-    const bool detail = state.mode() == Mode::Detail || state.mode() == Mode::Editing;
+    const bool picking = state.mode() == Mode::Picking;
+    const bool detail = picking || state.mode() == Mode::Detail ||
+                        state.mode() == Mode::Editing;
     const int gridBottom = detail ? (screen.height() / 2) : (screen.height() - 4);
     renderGrid(state, screen, 1, gridBottom);
-    if (detail) renderDetail(state, screen, gridBottom + 1);
+    if (picking)      renderPicker(state, screen, gridBottom + 1);
+    else if (detail)  renderDetail(state, screen, gridBottom + 1);
     screen.text(0, screen.height() - 2, fit(state.status(), screen.width()));
     if (state.mode() == Mode::Confirm)
         screen.text(0, screen.height() - 1,
                     "(s)ave and quit   (d)iscard and quit   (c)ancel", Attr::Bold);
-    else
+    else if (picking)
+        // "type it instead" rather than "cancel", because that is what it
+        // does, and because the person who needs it is the one whose answer is
+        // not on the list.
         screen.text(0, screen.height() - 1,
-                    "^S save  ^R run  ^N new  ^D delete  ^Z undo  Tab pane  q quit",
+                    "Up/Down choose   Enter accept   Esc type it instead", Attr::Dim);
+    else if (state.mode() == Mode::Detail && pickableHere(state))
+        screen.text(0, screen.height() - 1,
+                    "Enter  choose from a list        ^S save  ^R run  Esc back",
+                    Attr::Dim);
+    else
+        // ? EARNS ITS PLACE at the front: it is the key that makes the other
+        // dozen findable, and the only one a person needs to be told.
+        screen.text(0, screen.height() - 1,
+                    "? keys   ^S save  ^R run  ^F flow  ^N new  ^D delete  q quit",
                     Attr::Dim);
 }
 

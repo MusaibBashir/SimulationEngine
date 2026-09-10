@@ -18,7 +18,29 @@
 
 namespace des {
 
-enum class Mode { Grid, Detail, Editing, Running, Confirm };
+enum class Mode { Grid, Detail, Picking, Editing, Running, Confirm, Help, Flow };
+
+// One flowchart block as the flow view shows it. Built from the document, so
+// it says what the model SAYS rather than what a compiled Model ended up
+// holding -- a document with a dangling exit does not compile, and that is
+// exactly when a person most needs to see the wiring.
+struct FlowBlock {
+    std::string              name;
+    std::string              type;
+    std::size_t              row{0};
+    std::vector<std::string> exits;      // "Next -> Serve", "Balk To -> Wait"
+    bool                     dangling{false};   // an exit names nothing
+    bool                     unreached{false};  // nothing names this
+};
+
+std::vector<FlowBlock> flowOf(const ModelDocument& doc);
+
+// A working M/M/1: arrivals, one server, an exit, and a Run row. The blank
+// page answer was "empty, but the screen teaches"; this is the other half of
+// it. Somebody who has used Arena knows what a model looks like and not what
+// THIS one looks like, and a file they can run and then take apart says it
+// faster than any amount of prose. It carries comments for the same reason.
+ModelDocument starterModel();
 
 class TuiState {
 public:
@@ -75,6 +97,19 @@ public:
     bool canUndo() const { return !m_undo.empty(); }
     void undo();
 
+    // ^T. Refuses on a document that already has rows: it replaces everything,
+    // and a single keystroke must not be able to discard a model.
+    void insertStarter();
+
+    // ^F. Arena's canvas, as far as a terminal can go: who connects to whom,
+    // read out of the Next cells. Enter jumps the cursor to the block under
+    // the marker, which is what makes it a way of getting somewhere rather
+    // than a picture.
+    void openFlow();
+    std::size_t flowCursor() const { return m_flowCursor; }
+    void stepFlow(long long delta);
+    void gotoFlowBlock();
+
     bool readOnlyHere() const;
 
     // The cell being edited, held OUTSIDE the document until it commits. A
@@ -86,6 +121,23 @@ public:
     void backspaceEdit();
     void cancelEdit();
     void commitEdit();
+
+    // Arena's drop-down. An Enum cell offers the spellings it allows; a
+    // Reference cell offers what may go there, taken from the document.
+    //
+    // Returns false, having entered nothing, when this column is not one that
+    // can be picked from. The caller then opens the text editor -- which is
+    // also what beginPick leaves for a column that HAS a list but whose answer
+    // is not on it yet, the case that matters: wiring Serve -> Out before Out
+    // exists must not be something the UI makes hard.
+    bool beginPick();
+    const std::vector<std::string>& choices()  const { return m_choices; }
+    std::size_t                     choice()   const { return m_choice; }
+    void stepPick(long long delta);
+    void commitPick();
+    void cancelPick();
+    // Esc: abandon the list, keep the cell, and start typing it instead.
+    void typeInstead();
 
     // The first diagnostic against a column of the CURRENT row, or null.
     const Diagnostic* diagnosticFor(const std::string& column) const;
@@ -114,6 +166,9 @@ private:
     Mode                     m_mode{Mode::Grid};
     bool                     m_dirty{false};
     std::string              m_edit;
+    std::vector<std::string> m_choices;
+    std::size_t              m_choice{0};
+    std::size_t              m_flowCursor{0};
     std::vector<Diagnostic>  m_diagnostics;
 
     // Whole documents, not per-operation inverses. A snapshot cannot be

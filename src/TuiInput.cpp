@@ -61,6 +61,8 @@ bool handleGrid(TuiState& state, Key key) {
                 state.setMode(Mode::Confirm);
                 state.setStatus("unsaved changes -- (s)ave and quit, "
                                 "(d)iscard and quit, (c)ancel");
+            } else if (key.ch == '?') {
+                state.setMode(Mode::Help);
             }
             break;
         default: break;
@@ -86,7 +88,27 @@ bool handleDetail(TuiState& state, Key key) {
         case KeyKind::Up:     stepColumn(state, -1); break;
         case KeyKind::Down:   stepColumn(state, 1); break;
         case KeyKind::Escape: state.setMode(Mode::Grid); break;
-        case KeyKind::Enter:  state.beginEdit(); break;
+        // ONE key for both. Arena has no separate "open the drop-down": you
+        // click the cell and either a list appears or a caret does, and which
+        // it is depends on the column rather than on which key you knew.
+        case KeyKind::Enter:  if (!state.beginPick()) state.beginEdit(); break;
+        default: break;
+    }
+    return true;
+}
+
+bool handlePicking(TuiState& state, Key key) {
+    switch (key.kind) {
+        case KeyKind::Up:       state.stepPick(-1); break;
+        case KeyKind::Down:     state.stepPick(1); break;
+        case KeyKind::PageUp:   state.stepPick(-10); break;
+        case KeyKind::PageDown: state.stepPick(10); break;
+        case KeyKind::Enter:    state.commitPick(); break;
+        // Escape TYPES, it does not cancel. The one thing that must stay easy
+        // is naming a block before that block exists -- Serve -> Out while Out
+        // is still an idea -- and a list cannot offer that. The second Escape,
+        // out of the editor, is the one that abandons.
+        case KeyKind::Escape:   state.typeInstead(); break;
         default: break;
     }
     return true;
@@ -110,6 +132,43 @@ bool handleKey(TuiState& state, Key key) {
     // typed into a Service field would save a half-finished expression, and a
     // person editing text expects the text to receive their keys.
     if (state.mode() == Mode::Editing) return handleEditing(state, key);
+    // Picking swallows them for a different reason: ^N would add a row and move
+    // the cursor onto it, and the open list would then write its answer into a
+    // cell nobody was looking at.
+    if (state.mode() == Mode::Picking) return handlePicking(state, key);
+
+    if (state.mode() == Mode::Flow) {
+        switch (key.kind) {
+            case KeyKind::Up:     state.stepFlow(-1); return true;
+            case KeyKind::Down:   state.stepFlow(1);  return true;
+            case KeyKind::PageUp: state.stepFlow(-10); return true;
+            case KeyKind::PageDown: state.stepFlow(10); return true;
+            // Enter GOES THERE. A picture you cannot navigate from is a
+            // second place to look rather than a way of getting around.
+            case KeyKind::Enter:  state.gotoFlowBlock(); return true;
+            default: break;
+        }
+        if (key.kind == KeyKind::Char && key.ch == 'q') return false;
+        state.setMode(Mode::Grid);
+        return true;
+    }
+
+    // ANY key closes the key map, control keys included. A screen listing the
+    // keys, that you then have to work out how to leave, has undone its own
+    // job. q still quits, because a person who opened it by accident on their
+    // way out should not be trapped.
+    if (state.mode() == Mode::Help) {
+        if (key.kind == KeyKind::Char && key.ch == 'q') return false;
+        state.setMode(Mode::Grid);
+        return true;
+    }
+    // From the grid or the detail pane alike, because "what are the keys" is
+    // not a question that waits until you are back at the top.
+    if (key.kind == KeyKind::Char && key.ch == '?' &&
+        state.mode() != Mode::Confirm && state.mode() != Mode::Running) {
+        state.setMode(Mode::Help);
+        return true;
+    }
 
     if (key.kind == KeyKind::Ctrl) {
         switch (key.ch) {
@@ -117,6 +176,8 @@ bool handleKey(TuiState& state, Key key) {
             case 'N': state.addRow();    return true;
             case 'D': state.removeRow(); return true;
             case 'R': state.startRun(); return true;
+            case 'T': state.insertStarter(); return true;
+            case 'F': state.openFlow();      return true;
             case 'Z': state.undo();      return true;
             default:  return true;
         }

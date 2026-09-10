@@ -1,4 +1,5 @@
 #include "Compiler.hpp"
+#include <algorithm>
 #include <cstdlib>
 #include "ModuleSchema.hpp"
 #include "Parser.hpp"
@@ -112,24 +113,7 @@ void checkSchema(const ModelDocument& doc, std::vector<Diagnostic>& out) {
 // exit column points at. Everything else names one real module type.
 bool isDeclared(const ModelDocument& doc, const std::string& targetType,
                 const std::string& name) {
-    const ModuleRegistry& reg = ModuleRegistry::instance();
-
-    auto rowNames = [&doc](const std::string& type, std::vector<std::string>& into) {
-        const std::size_t rows = doc.rowCount(type);
-        for (std::size_t r = 0; r < rows; ++r) {
-            const std::string n = doc.cell(type, r, "Name");
-            if (!n.empty()) into.push_back(n);
-        }
-    };
-
-    std::vector<std::string> names;
-    if (targetType == "Block") {
-        for (const ModuleSchema& s : reg.all())
-            if (s.kind == ModuleKind::Flowchart) rowNames(s.typeName, names);
-    } else {
-        rowNames(targetType, names);
-    }
-    for (const std::string& n : names)
+    for (const std::string& n : referenceCandidates(doc, targetType))
         if (n == name) return true;
     return false;
 }
@@ -360,6 +344,34 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
 }
 
 }  // namespace
+
+std::vector<std::string> referenceCandidates(const ModelDocument& doc,
+                                             const std::string& targetType) {
+    const ModuleRegistry& reg = ModuleRegistry::instance();
+    std::vector<std::string> names;
+
+    auto rowNames = [&doc, &names](const std::string& type) {
+        const std::size_t rows = doc.rowCount(type);
+        for (std::size_t r = 0; r < rows; ++r) {
+            const std::string n = doc.cell(type, r, "Name");
+            // Unnamed rows are skipped and DUPLICATES are collapsed. A document
+            // may hold either -- pass 1 reports them -- and a pick list that
+            // shows the same name twice invites choosing the second one, which
+            // is not a different thing.
+            if (n.empty()) continue;
+            if (std::find(names.begin(), names.end(), n) == names.end())
+                names.push_back(n);
+        }
+    };
+
+    if (targetType == "Block") {
+        for (const ModuleSchema& s : reg.all())
+            if (s.kind == ModuleKind::Flowchart) rowNames(s.typeName);
+    } else {
+        rowNames(targetType);
+    }
+    return names;
+}
 
 bool compileInto(const ModelDocument& doc, Model& model,
                  std::vector<Diagnostic>& diagnostics, bool* structureChecked) {
