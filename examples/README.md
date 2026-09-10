@@ -421,7 +421,7 @@ teller.des: Process row 1, Service (col 9): error: expected ')'
 - **A `[Run]` with no stopping condition is a warning, not an error.** A Create
   with `Max Arrivals` is finite and ends on its own.
 
-## Editing a model (v13)
+## Editing a model, and building one (v13, v14)
 
 ```sh
 ./build/des_tui examples/models/teller.des
@@ -445,6 +445,25 @@ would be a lie you could not detect, so the UI says so in words.
 whatever columns they carry, marked unknown. That is deliberate: a file written
 by a later version must show you what is in it rather than quietly hiding the
 parts this build is too old to understand.
+
+**Every field explains itself.** The line under the field you are on comes from
+the *schema*, not from the UI — so it is there for any front end, and a test
+walks the registry and fails on any column that has none.
+
+**`Enter` on an enum or a reference opens a list.** It is built from the same
+function the compiler's reference pass checks against, so it cannot offer a
+name that is then rejected. `Escape` in the list does not cancel — it drops
+into typing, because wiring `Serve → Out` *before* `Out` exists is the ordinary
+way a model gets built and no list can offer that. A second `Escape` abandons.
+
+**`^T` on a blank file** writes a working single-server model, comments
+included, that runs as it stands. **`^F`** shows the wiring — read from the
+cells, so it works on a model that does not compile — naming exits that point
+nowhere and blocks nothing arrives at. **`?`** lists the keys.
+
+**A model with no `[Run]` row runs anyway**, until the event list empties.
+Before v14 that aborted the program, which in a terminal left the console in
+raw mode.
 
 ## Mistakes to avoid
 

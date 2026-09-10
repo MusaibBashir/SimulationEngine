@@ -307,11 +307,22 @@ void renderPicker(const TuiState& state, Screen& screen, int top) {
     int listTop = top + 1;
     if (const ModuleSchema* schema = state.schemaHere()) {
         if (const Column* col = schema->column(column)) {
-            // At most two lines of it. The list is what this pane is for, and
-            // prose that pushes the choices off the bottom has stopped helping.
+            // As much of it as fits while leaving room for four choices: the
+            // list is what this pane is for, and prose that pushes the choices
+            // off the bottom has stopped helping.
             const std::vector<std::string> help = wrapText(col->help, right - 2);
-            for (std::size_t i = 0; i < help.size() && i < 2; ++i)
-                screen.text(2, listTop++, fit(help[i], right - 2), Attr::Dim);
+            const std::size_t room =
+                (height > 6) ? static_cast<std::size_t>(height - 6) : 0;
+            const std::size_t shown = std::min(help.size(), room);
+            for (std::size_t i = 0; i < shown; ++i) {
+                // A CUT SENTENCE says so. Stopping at a line boundary in the
+                // middle of a sentence reads as a rendering fault, and the
+                // whole line is a keypress away in the detail pane.
+                const bool lastShown = (i + 1 == shown) && (shown < help.size());
+                screen.text(2, listTop++,
+                            fit(help[i] + (lastShown ? " ..." : ""), right - 2),
+                            Attr::Dim);
+            }
         }
     }
 

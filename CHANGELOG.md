@@ -5,6 +5,69 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [14.0.0] — 2026-09-10 — "Somebody who has used Arena, and nothing else"
+
+v13 let you open, edit, save and run a model. It did not let you *build* one —
+not for want of a keystroke, but because nothing on screen said what any of it
+meant. v14 is the version that can be sat down in front of cold. Narrative in
+`V14_READLOG.md`.
+
+### Added
+
+- **`Column::help` and `ModuleSchema::help`** — one line per column, one
+  paragraph per module, written for somebody who knows Arena. In the *schema*
+  rather than in the UI, because the schema is what a front end reads in order
+  to render. Every helper in `ModuleSchemas.cpp` takes it as a parameter, so a
+  column cannot be declared without one, and a registry-walking test fails on
+  any that is empty.
+- **Pick lists** (`Mode::Picking`). `Enter` on an Enum or Reference cell opens
+  Arena's drop-down. `Escape` does not cancel — it drops into the text editor,
+  so a block can be named before it exists.
+- **`referenceCandidates()`** — public in `Compiler.hpp`. The pick list and the
+  compiler's reference pass are one function, so a list cannot offer a name
+  that is then rejected.
+- **`^T`** — fills a blank document with a working single-server model,
+  comments included, that runs as it stands. Refuses on a document with rows.
+- **`?`** — the key map, and the one thing an Arena user will not guess: there
+  is no canvas, and a connection is a name typed into a `Next` cell.
+- **`^F`** (`Mode::Flow`, `flowOf()`, `FlowBlock`) — the wiring, read from the
+  cells rather than from a compiled model, so it works on a document that does
+  not compile. Names dangling exits and unreached blocks; `Enter` jumps there.
+- **`ITerminal::keyPending()`** — a fourth method, with `select()` on POSIX and
+  `PeekConsoleInputW` on Win32.
+- **`reportReplicationTable()` / `reportReplicationSummary()`** — shared by
+  `Experiment::report()` and `RunController::report()`.
+
+### Changed
+
+- Tabs carry their row count; types with no rows are dimmed.
+- Opening a model lands on its first **flowchart** type with rows, not on
+  `Variable`.
+- Help prose wraps at spaces everywhere (`wrapText`), and where a hard cap
+  applies the last line ends in `...`.
+- The detail pane scrolls three lines early, so the selected field's help and
+  diagnostic have somewhere to go.
+
+### Fixed
+
+- **`^R` on a model built from scratch aborted the program.** No `[Run]` row
+  meant no stopping rule, and `initialise()` asserts one exists — and `abort()`
+  skips destructors, so the terminal UI left the console in raw mode. An empty
+  `AnyOf` is never met, so the run ends when the event list empties, which is
+  what `readRunSetup`'s warning already promised.
+- **A run could not be interrupted.** The loop advanced without ever reading a
+  key.
+- **A multi-replication run printed only the summary.** `RunController::report`
+  had invented a second, poorer format instead of reusing `Experiment`'s. Both
+  now share the reporters; `Experiment::report()`'s output is byte-identical,
+  which the baseline gate proves through example 08.
+- **The flow view listed a Decide's `Next` first.** It is the ELSE exit, taken
+  last; printed first it reads as the default path being tried first.
+- Help was cut off mid-word at the border.
+- The last field in the detail pane could never show its help.
+
+---
+
 ## [13.0.0] — 2026-09-07 — "The spreadsheets get a screen"
 
 A terminal front end over the three layers built for it: open a `.des` file,

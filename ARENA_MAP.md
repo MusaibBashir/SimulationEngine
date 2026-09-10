@@ -93,6 +93,36 @@ is not a limitation of the front end — it is why v11's data model put routing 
 columns in the first place, and a canvas-based editor built later would have to
 render those columns as lines rather than the other way round.
 
+v14 goes as far towards the picture as a terminal can: `^F` reads those columns
+back out and prints the chain, naming exits that point nowhere and blocks
+nothing arrives at. It reads the *cells*, so it works on a model that does not
+yet compile — which is when the shape is hardest to hold in your head.
+
+## Arena's habits, and where they land (v14)
+
+| In Arena you would | Here |
+|---|---|
+| Drag a module onto the canvas | `Tab` to its type, `^N` |
+| Draw a connection between two modules | Type the next block's name into `Next` — or press `Enter` on that cell and pick it off a list |
+| Open a module's dialog | `Enter` on the row |
+| Pick from a drop-down | `Enter` on an Enum or Reference cell |
+| Type a name a drop-down does not offer yet | `Escape` in the list, then type it |
+| Look at the whole flowchart | `^F` |
+| Open Run Setup | the `Run` tab |
+| Read the queue's properties | the `Process` row — `Queue` is a read-only view |
+| Press F1 | every field carries its own line in the detail pane; `?` lists the keys |
+
+**Naming a block before it exists is normal, and stays easy.** Arena lets you
+draw a connection only between two modules that are both on the canvas. This
+engine's `Next` is text, so `Serve → Out` can be written before `Out` exists —
+the reference pass reports it as unresolved until it does, and the pick list
+gets out of the way (`Escape`) rather than blocking it. That is a genuine
+advantage of routing-in-columns, not a workaround for the lack of a canvas.
+
+**A model with no `[Run]` row still runs**, until the event list empties.
+Arena refuses to run without Run Setup values; this engine treats the absence
+as a stopping rule of its own and names it in the report.
+
 ## Report line → what to call
 
 | Arena report line | Here |

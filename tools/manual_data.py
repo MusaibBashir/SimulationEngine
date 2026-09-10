@@ -7,7 +7,7 @@ the call-flow chapters. Prose is passed to reportlab as markup, so use &amp;,
 &lt; and &gt; rather than the bare characters.
 """
 
-VERSION_LINE = "v13 — the terminal UI · 1069 checks · 113 types"
+VERSION_LINE = "v14 — building a model from nothing · 1397 checks · 114 types"
 
 FRONT_MATTER = (
     "A discrete-event simulation engine in the spirit of Arena's Basic Process "
@@ -65,7 +65,8 @@ TYPE_DOC = {
     "Key": "A keypress as a value. The platform layer turns a console record or an escape sequence into one of these, and everything above takes them -- which is what lets a test type a whole session without a terminal. Control keys normalise to upper case, so ^s and ^S are one key rather than two that can disagree.",
     "TerminalSize": "How many columns and rows the terminal has right now. Read every frame, because a person can resize a window mid-edit.",
     "ITerminal": "The only platform code in the project: report the size, blit a Screen, read a Key. It is an object rather than three functions because its destructor restores the console -- a return from anywhere in the loop must not leave somebody in raw mode with no cursor.",
-    "Mode": "Which part of the interface has the keyboard: the grid, the detail pane, a cell being edited, a run in progress, or the confirm prompt that stands between unsaved work and quitting.",
+    "Mode": "Which part of the interface has the keyboard: the grid, the detail pane, a pick list, a cell being edited, a run in progress, the key map, the flow view, or the confirm prompt that stands between unsaved work and quitting.",
+    "FlowBlock": "One flowchart block as the flow view shows it: its name, its type, and where its exits lead. Built from the DOCUMENT rather than from a compiled Model, because a document with a dangling exit does not compile -- and that is exactly when somebody needs to see the wiring. It also carries whether an exit names nothing and whether anything arrives here, neither of which is an error on its own and neither of which is said anywhere else.",
     "TuiState": "Everything the user interface knows: the document, where the cursor is, which mode is active, the diagnostics from the last compile, the undo stack and the run in progress. The renderer reads it and the input layer writes it, and neither touches a terminal.",
 
     # -- queues and resources
@@ -196,6 +197,10 @@ MEMBER_DOC = {
     "Screen::hline": "A horizontal run of one character.",
     "TuiState::fromDocument": "A state around a document already in memory, rather than one on disk. The tests use it so the suite does not need a file for every case.",
     "TuiState::moveRow": "Moves the current row up or down. Undoable like any other edit, because row order is SEMANTIC in this format -- a Decide takes the first branch that matches -- so moving one is a model change rather than a display preference.",
+    "ITerminal::keyPending": "Is a keypress waiting? The fourth method, and the one that makes a run interruptible: while a simulation is advancing the loop must not block in nextKey(), or Escape is never seen and an unbounded model runs until the process is killed. On Win32 it also DRAINS the mouse, focus and resize records the console reports alongside keys -- otherwise the handle stays signalled and the run never advances at all, the same bug wearing the opposite face.",
+    "TuiState::beginPick": "Opens Arena's drop-down on the current cell: an Enum offers the spellings it allows, a Reference offers what may go there. Returns false, having opened nothing, when the column is not one that can be picked from OR when nothing has been declared to pick -- the caller then opens the text editor, which is what a model being built from scratch needs, since the first Next is typed before anything exists to point at.",
+    "TuiState::stepPick": "Moves the cursor in the open list. Clamps rather than wraps, like every other cursor here.",
+    "TuiState::stepFlow": "Moves the marker in the flow view. Enter then opens the block it rests on, which is what makes the view a way of getting somewhere rather than a second place to look.",
     "TuiState::typeEdit": "Appends a character to the edit buffer. The document is not touched until the edit commits.",
     "ModelDocument::rowAt": "One row, mutable, by type and position. It exists for the reader, which fills in a row source block after parsing the record.",
     "Screen::put": "One glyph. Out of range is dropped, not an error.",
@@ -648,8 +653,27 @@ CHAPTERS = [
             "finished run reporting that its rule could not say how far along it was. The "
             "screen-as-a-value design makes rendering testable; it does not make it "
             "self-evaluating."),
+   ("h3", "Building one, rather than editing one"),
+   ("text", "v13 could open, edit, save and run a model; it could not be sat down in front "
+            "of cold. v14 is that: every column carries a line saying what it is for, in "
+            "the SCHEMA rather than here, because the schema is what a front end reads in "
+            "order to render and a second front end would need the same sentence. Enter on "
+            "an enum or a reference opens a list built from referenceCandidates() -- the "
+            "same function the compiler's reference pass is written in terms of, so a list "
+            "cannot offer a name that is then rejected."),
+   ("text", "Escape in that list does not cancel. It drops into the text editor, because "
+            "naming a block BEFORE that block exists is the ordinary way a model gets "
+            "built and no list can offer that. A second Escape abandons. The list is for "
+            "when you know, and it gets out of the way the instant you do not."),
+   ("h3", "The flow view reads cells, not a Model"),
+   ("text", "flowOf() walks the document rather than a compiled Model, because a document "
+            "with a dangling exit does not compile and that is exactly when the shape is "
+            "hardest to hold in your head. It also lists a Decide's branches in the order "
+            "they are tried, with its Next shown last as the else exit -- printed first, "
+            "as it was at first, it read as the default path being tried first, which is "
+            "the opposite of what happens."),
    ("types", ["Attr", "Screen", "KeyKind", "Key", "TerminalSize", "ITerminal",
-              "Mode", "TuiState"]),
+              "Mode", "FlowBlock", "TuiState"]),
   ]),
 
  (9, "The Flowchart",

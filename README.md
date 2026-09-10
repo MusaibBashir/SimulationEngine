@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1069/1069 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1397/1397 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -35,6 +35,15 @@ models and diffs their reports. See **Watching a run** below.
 one spreadsheet per module type, edits cells with the diagnostics shown against
 the cell that caused them, saves without disturbing the records you did not
 touch, and runs the model. See **The terminal UI** below.
+
+**v14: a model can be built from nothing, by somebody who has only used
+Arena.** Every column in every module carries a line saying what it is for —
+in the *schema*, so any front end gets it. `Enter` on an enum or a reference
+opens Arena's drop-down, built from the same function the compiler validates
+against, and `Escape` drops into typing so a block can be named before it
+exists. `^T` fills a blank page with a working model, `^F` shows the wiring,
+and `?` says the one thing an Arena user will not guess: there is no canvas,
+and a connection is a name typed into a `Next` cell.
 
 ```cpp
 #include "des.hpp"
@@ -258,43 +267,94 @@ if (compileInto(read.document, sim.model(), problems))
 ./build/des_tui examples/models/teller.des
 ```
 
+Or with no file at all — `des_tui newmodel.des` opens a blank page.
+
 ```
- < Resource  Expression  Run  Queue  Create [Process]>   examples/models/teller.des
+ < Expression  Run 1  Queue  Create 1 [Process 1]>       examples/models/teller.des
 +----------------------------------------------------------------------------------+
 | Name   Capacity  Resource  Units  Discipline  Service    Balk At  Balk To  Reneg |
 |>Serve  1                          FIFO        EXPO(0.8)                          |
 +----------------------------------------------------------------------------------+
-+-- row 1 of 1 --------------------------------------------------------------------+
-| Name            Serve                                                            |
-| Capacity        1                                                                |
-| Resource          -> Resource                                                    |
-| Discipline      FIFO  (FIFO LIFO PRIORITY SPT EDD RANDOM)                        |
-| Service         EXPO(0.8)                                                        |
-+---------------------------------------------------------------------------more v-+
-^S save  ^R run  ^N new  ^D delete  ^Z undo  Tab pane  q quit
++-- row 1 of 1 -------------------------------------------------------------more^--+
+| Renege To         -> Block                                                       |
+| Next            Out  -> Block                                                    |
+|                 Where entities go after service. THIS IS THE CONNECTION: Arena   |
+|                 draws a line between two modules, this engine names the next     |
+|                 block here. Blank means they leave the system.                   |
++----------------------------------------------------------------------------------+
+Enter  choose from a list        ^S save  ^R run  Esc back
 ```
 
 | Key | |
 |---|---|
+| `?` | the key map — and the one thing an Arena user will not guess |
 | `Tab` / `Shift-Tab` | the next or previous module type |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End` | move the row cursor |
-| `Enter` | into the detail pane, then into a cell |
-| `Escape` | out of a cell, then out of the pane |
+| `Enter` | into the detail pane, then into a **list** or a cell |
+| `Escape` | out of a list into typing, then out of the cell, then out of the pane |
 | `^S` `^N` `^D` `^Z` | save, new row, delete row, undo |
+| `^T` | fill a blank document with a working model |
+| `^F` | the flow: who connects to whom |
 | `^R` | run the model; `Escape` stops it |
 | `q` | quit — and it **asks** if there is unsaved work |
 
+**There is no canvas, and that is the one thing to know.** A module type is a
+tab, its rows are a table, and a *connection* is the name of the next block
+typed into a `Next` cell. Everything else maps onto Arena directly.
+
 **A Process has eleven columns**, which is about 130 characters in an
 80-column terminal. So the grid is for scanning and the **detail pane is where
-you read and edit**, exactly as Arena has a spreadsheet and a dialog. An enum
-column shows the spellings it allows; a reference column shows what it must
-name; a bad cell shows its diagnostic underneath.
+you read and edit**, exactly as Arena has a spreadsheet and a dialog. Every
+field carries a line saying what it is for, and that line lives in the
+*schema*, not in this UI — a second front end would need the same sentence, and
+a test walks the registry and fails on any column that has none.
+
+**Enter on an Enum or a Reference cell opens a list**, which is Arena's
+drop-down:
+
+```
++-- Next --------------------------------------------------------------------------+
+| Where entities go after service. THIS IS THE CONNECTION: Arena draws a line      |
+| between two modules, this engine names the next block here. Blank means they     |
+| leave the system.                                                                |
+|  (none)                                                                          |
+|  Arrivals                                                                        |
+|  Serve                                                                           |
+|> Out                                                                             |
++----------------------------------------------------------------------------------+
+Up/Down choose   Enter accept   Esc type it instead
+```
+
+The list and the compiler's reference pass are **one function**, so a list
+cannot offer a name that is then rejected. `Escape` does not cancel — it drops
+into the text editor, because naming a block *before that block exists* is the
+ordinary way a model gets built and no list can offer that. A second `Escape`
+abandons.
+
+**^F shows the wiring**, read out of the cells rather than out of a compiled
+model — so it works on a document that does *not* compile, which is when you
+most need it:
+
+```
++-- flow --------------------------------------------------------------------------+
+|  Arrivals           Create     Next -> Serve                                     |
+|> Serve              Process    Next -> Out                                       |
+|  Out                Dispose    (leaves the system)                               |
++----------------------------------------------------------------------------------+
+Up/Down move   Enter opens that block   any key returns
+```
+
+It names exits that point nowhere and blocks nothing arrives at, and `Enter`
+jumps to the block under the marker. A `Decide` lists its branches **in the
+order they are tried**, with its `Next` shown last as `else ->`, because that
+is what it is.
 
 **The tab bar is not a list in the source.** It is every module type the
 registry publishes, followed by any type the file holds that the registry does
 not — so a module added in a later version appears here without this code
 changing, and a file written by a later version shows its unknown modules
-rather than hiding them.
+rather than hiding them. Each tab carries its row count, and types with no rows
+are dimmed.
 
 **Saving does not disturb what you did not touch.** Each row remembers the
 lines it was read from; only edited records are re-emitted. Open a file and
@@ -303,6 +363,10 @@ save it without editing and you get byte-identical bytes.
 **A run with no knowable end draws no progress bar.** A `[Run]` that stops when
 drained cannot say how far through it is, and a bar sitting at zero until it
 jumps to full is a lie you cannot detect — so it says so in words instead.
+
+**A model with no `[Run]` row runs anyway**, until the event list empties —
+which is what the reader's warning has always promised. Before v14 it aborted,
+and in the terminal UI that left the console in raw mode.
 
 ## Watching a run
 
@@ -429,6 +493,7 @@ need to read the engine's source to build a model with it.
 | `V11_READLOG.md` | The document layer: schemas, the .des format, and two gates that were not gating |
 | `V12_READLOG.md` | Runtime control: stepping, progress that can say it does not know, and three sabotages that proved nothing |
 | `V13_READLOG.md` | The terminal UI, and the v11 guarantee it proved false |
+| `V14_READLOG.md` | Building a model from nothing: pick lists, the starter model, and four bugs only looking found |
 | `ARENA_MAP.md` | Arena module → this engine, and where the two differ |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
@@ -441,7 +506,7 @@ sim/
 ├── cli/             the des command: check, run and regress
 ├── tui/             des_tui: the terminal UI, and the only platform code
 ├── examples/models/ hand-written .des models
-├── tests/           1069 unit checks
+├── tests/           1397 unit checks
 ├── include/         50 headers
 └── src/             42 sources
 ```
@@ -544,25 +609,27 @@ two and every time-average goes quietly wrong with no error.
 
 ---
 
-# v14 — the order to do it in
+# v15 — the order to do it in
 
-1. **A module palette**, so a model can be built from nothing in the UI rather
-   than only edited. Adding a `Process` to a document that has none needs a
-   picker and an answer to "where does it go in file order", which is a design
-   question rather than a missing keystroke.
-2. **Resource schedules** — a nurse who goes off shift at 5pm. Arena has it; it
+1. **Resource schedules** — a nurse who goes off shift at 5pm. Arena has it; it
    needs a capacity that varies with time, which interacts with every ρ
    calculation in the model.
-3. **Preemption** — a high-priority entity taking a resource off a low-priority
+2. **Preemption** — a high-priority entity taking a resource off a low-priority
    one mid-service. Lazy cancellation does *not* solve this: the interrupted
    entity has to requeue carrying its remaining service time.
-4. **Redo**, and a saved-at marker in the undo stack so that undoing back to
+3. **Redo**, and a saved-at marker in the undo stack so that undoing back to
    what is on disk clears the dirty flag honestly instead of leaving it set.
-5. **Batch means** — one long run split into batches, as an alternative to
+4. **Batch means** — one long run split into batches, as an alternative to
    independent replications when the warm-up is expensive to repeat.
-6. **Distribution fitting** — hand it data, have it suggest a distribution and
+5. **Distribution fitting** — hand it data, have it suggest a distribution and
    report a goodness-of-fit statistic. `StreamTests` already has the chi-square
    and Kolmogorov–Smirnov machinery; this is mostly wiring plus parameter
    estimation.
+6. **A `[Run]` row from the UI without typing one.** ^T writes one; a model
+   built row by row does not get one, and it runs to event-list exhaustion
+   instead. That is honest but it is not what somebody wanted.
 
-Config-file input, item 4 on the v9 list, is what v11 turned out to be.
+Config-file input, item 4 on the v9 list, is what v11 turned out to be. The
+module palette, item 1 on the v14 list, turned out not to need a picker or an
+answer to "where does it go in file order": `^N` on a tab already appends, and
+the question was only ever which *type* — which the tab bar already answers.
