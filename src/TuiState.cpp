@@ -1,6 +1,7 @@
 #include "TuiState.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <utility>
@@ -298,6 +299,16 @@ void TuiState::paste() {
 bool TuiState::save() { return save(m_path); }
 
 bool TuiState::save(const std::string& toPath) {
+    // CREATE THE FOLDER FIRST. Double-clicking des_tui with no file opens
+    // <Documents>/DES Models/untitled.des, and on a laptop that has never run
+    // it that folder does not exist -- so the first ^S a new person ever
+    // pressed answered "could not write". A failure here is not reported on its
+    // own: the open below fails too, and says so.
+    const std::filesystem::path parent = std::filesystem::path(toPath).parent_path();
+    if (!parent.empty()) {
+        std::error_code ignored;
+        std::filesystem::create_directories(parent, ignored);
+    }
     std::ofstream out(toPath, std::ios::binary);
     if (!out.is_open()) { setStatus(toPath + ": could not write"); return false; }
     const std::string text = m_buffer.text();

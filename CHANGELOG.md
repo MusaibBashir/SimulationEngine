@@ -5,6 +5,67 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [15.1.0] — 2026-09-14 — "Something you can send"
+
+A build of `des_tui` that runs on somebody else's laptop with nothing
+installed — no compiler, no CMake, no libraries. `tools/package.sh` produces a
+folder, a zip and an installer, and refuses to unless the build that ships
+passes the whole suite, imports only Windows' own DLLs, and loads with no
+compiler anywhere on `PATH`. Narrative in `V15_READLOG.md`, section 15.1.
+
+### Added
+
+- **`tools/package.sh`** — a static, optimised build (`-static`, `-O2`, asserts
+  kept) staged into `dist/DES-Simulator/` with the example models and a README,
+  zipped, and compiled into an installer when Inno Setup 6 is installed.
+- **`installer/des-simulator.iss`** — per-user by default, so it installs
+  without administrator rights; Start Menu entries, an optional desktop icon,
+  an optional `.des` file association, and an uninstaller.
+- **`packaging/README.txt`** — the README that goes in the box, written for
+  someone who has never seen this project.
+- **Double-clicking works.** Started with no file, `des_tui` opens
+  `untitled.des` in `Documents\DES Models` — the real Documents folder, found the
+  way Windows finds it, so one redirected into OneDrive is the right one — and
+  reopens it next time.
+- The console window's title names the file that is open.
+- `ITerminal::setTitle`, and `defaultModelPath()` / `launchedOnOwnConsole()` in
+  `Terminal.hpp`. `openTerminal` now takes a `whyNot` and can return null.
+
+### Fixed
+
+- **The executable only ran on this machine.** The development build imports
+  `libstdc++-6.dll` and `libgcc_s_seh-1.dll`, which exist only inside a MinGW
+  install. The failure showed up here before it could reach anyone else: an
+  older `C:\MinGW\bin` sits ahead of WinLibs on `PATH`, and once the tests used
+  `std::filesystem` the test binary would not load — exit 127, and not a single
+  line of output.
+- **`EXPO(1) - 2` in a Service field aborted the program.** The negative
+  duration reached `SimulationSystem::scheduleEvent`, which met a time in the
+  past with an assert; a release build deletes that and schedules the event in
+  the past without a word. It throws now, and `Station::drawService` names the
+  process whose service time went negative.
+- **`SQRT(0 - 1)` and `MOD(1, 0)` ended the program.** `RunController::advance()`
+  caught nothing, so an expression error part way through a run went out through
+  the terminal UI's loop and out of `main`. The run fails with the message.
+- **Started without a console, `des_tui` spun forever** at full speed, because
+  every console read failed and was retried. It says why it cannot start and
+  exits.
+- **Double-clicking with no file flashed a usage line and closed.**
+- **The first save of a new model failed** when its folder did not exist yet.
+  `TuiState::save` creates it.
+- **The test harness only flushed per line under MSVC**, so under MinGW an
+  abort discarded every line printed before it. (15.0 found this; it is listed
+  here because 15.1 is what depended on it.)
+
+### Changed
+
+- A message printed on the way out holds the window open when the program was
+  double-clicked, and only then.
+- If anything still escapes the main loop, the terminal is restored first and an
+  unsaved model is written to `<file>.recovered` before the window can close.
+
+---
+
 ## [15.0.0] — 2026-09-11 — "The text is the model"
 
 v13 put a spreadsheet grid on the screen and v14 taught it to explain itself.

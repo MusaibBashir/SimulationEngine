@@ -181,10 +181,23 @@ std::size_t RunController::advance(std::size_t maxEvents) {
     }
 
     std::size_t done = 0;
-    while (done < maxEvents) {
-        if (m_sim && m_sim->stepOnce()) { ++done; ++m_events; continue; }
-        finishRun();
-        if (!startRun()) break;
+    try {
+        while (done < maxEvents) {
+            if (m_sim && m_sim->stepOnce()) { ++done; ++m_events; continue; }
+            finishRun();
+            if (!startRun()) break;
+        }
+    } catch (const ModelError& bad) {
+        // A MODEL THAT FAILS PART WAY THROUGH fails the run, the way one that
+        // fails during setup already did in startRun(). SQRT(0 - 1) in a Service
+        // field compiles and then throws at the first service; this caught
+        // nothing, so the error went out through every caller -- out of the
+        // terminal UI's loop and out of main, closing the window on somebody's
+        // unsaved model. It is a user's mistake in a cell, and it gets reported
+        // as one.
+        m_failure = bad.what();
+        m_state   = RunState::Failed;
+        m_sim.reset();
     }
     return done;
 }

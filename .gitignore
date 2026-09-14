@@ -102,3 +102,10 @@ __pycache__/
 /tui_edited.des
 /mm1_v15.des
 /brandnew.des
+/tui_newdir/
+build-release/
+dist/
+
+# The README that ships inside the package. The *.txt rule above is for
+# trace output; without this line a fresh clone could not build a package.
+!packaging/README.txt

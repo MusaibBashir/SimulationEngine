@@ -201,12 +201,31 @@ public:
         if (c > 0 && c < 27) return Key::control(static_cast<char>('a' + c - 1));
         return Key::character(c);
     }
+
+    void setTitle(const std::string& title) override {
+        // OSC 0: every terminal emulator worth the name reads it as the title.
+        std::fputs(("\033]0;" + title + "\007").c_str(), stdout);
+        std::fflush(stdout);
+    }
 };
 
 }  // namespace
 
-std::unique_ptr<ITerminal> openTerminal() {
+std::unique_ptr<ITerminal> openTerminal(std::string& whyNot) {
+    // Checked FIRST. Raw mode on a pipe does nothing, and nextKey() then reads
+    // end-of-file, returns Unknown, and is asked again -- forever, at full speed.
+    if (!::isatty(STDIN_FILENO) || !::isatty(STDOUT_FILENO)) {
+        whyNot = "it has to be run in a terminal window, with its input and "
+                 "output going to that window rather than redirected.";
+        return nullptr;
+    }
     return std::unique_ptr<ITerminal>(new PosixTerminal());
 }
+
+std::string defaultModelPath() { return "untitled.des"; }
+
+// A POSIX terminal outlives the program running in it, so there is never a
+// window about to vanish with the last message still in it.
+bool launchedOnOwnConsole() { return false; }
 
 }  // namespace des

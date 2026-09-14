@@ -1,6 +1,7 @@
 // ============================================================================
 // tests/runtime_tests.cpp  --  v12: the run as something a caller drives
 // ============================================================================
+#include <stdexcept>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -595,5 +596,60 @@ void runRuntimeTests() {
         single.report(solo);
         check(solo.str().find("simulation report") != std::string::npos,
               "a single replication prints the run's own report, not a table of one");
+    }
+
+    section("A model that fails DURING a run fails the run, not the program");
+    {
+        // Both of these compile, and both used to take the whole program down
+        // the moment they were run -- which, in a terminal UI somebody has been
+        // sent, is the window closing with their unsaved model in it.
+        //
+        //   SQRT(0 - 1)  throws ExpressionError at the first service. startRun()
+        //                caught model errors during setup; advance() caught
+        //                nothing, so it went out through the UI loop and main.
+        //   EXPO(1) - 2  is negative most of the time, and the scheduler met a
+        //                time in the past with an ASSERT. That aborts outright,
+        //                and a release build deletes it and schedules the event
+        //                in the past instead, silently.
+        //
+        // NORM(1, 5) looked like the obvious first case and was not one: the
+        // builder clamps a Normal's left tail at zero, so it runs to the end.
+        // Found by running each expression in its own process rather than by
+        // reading the code, which had suggested the opposite.
+        const auto runWith = [](const std::string& service) {
+            const ModelDocument doc = readDocument(
+                "version = 1\n\n[Run]\nName = R\nLength = 480\n\n"
+                "[Create]\nName = In\nInterarrival = EXPO(2)\nNext = Work\n\n"
+                "[Process]\nName = Work\nService = " + service + "\nNext = Out\n\n"
+                "[Dispose]\nName = Out\n").document;
+            std::vector<Diagnostic> problems;
+            return RunController::fromDocument(doc, problems);
+        };
+
+        for (const std::pair<std::string, std::string>& c :
+             {std::pair<std::string, std::string>{"SQRT(0 - 1)", "SQRT"},
+              std::pair<std::string, std::string>{"EXPO(1) - 2", "negative"}}) {
+            std::unique_ptr<RunController> run = runWith(c.first);
+            check(run != nullptr, "'" + c.first + "' compiles");
+            bool escaped = false;
+            try {
+                if (run) run->runToCompletion();
+            } catch (const std::exception&) {
+                escaped = true;
+            }
+            check(!escaped, "'" + c.first + "': the error does NOT escape advance()");
+            check(run && run->state() == RunState::Failed,
+                  "'" + c.first + "': the run is marked Failed");
+            check(run && run->failure().find(c.second) != std::string::npos,
+                  "'" + c.first + "': and the failure says what went wrong");
+            check(run && run->advance(100) == 0,
+                  "'" + c.first + "': and a failed run stays stopped");
+        }
+
+        // And the clamp that made NORM(1, 5) a non-case keeps working.
+        std::unique_ptr<RunController> norm = runWith("NORM(1, 5)");
+        if (norm) norm->runToCompletion();
+        check(norm && norm->state() == RunState::Finished,
+              "NORM(1, 5) still runs to the end, its left tail clamped at zero");
     }
 }

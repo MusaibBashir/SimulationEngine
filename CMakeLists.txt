@@ -120,6 +120,14 @@ else()
 endif()
 target_link_libraries(des_tui PRIVATE des_ui)
 target_compile_options(des_tui PRIVATE ${DES_WARNINGS})
+if(WIN32)
+    # shell32 and ole32 for SHGetKnownFolderPath and CoTaskMemFree, which find
+    # the user's REAL Documents folder -- redirected into OneDrive on a great
+    # many laptops, where %USERPROFILE%\Documents is an empty folder nobody looks
+    # in. uuid holds the FOLDERID constants in MinGW. All three are Windows' own
+    # libraries, so a static build still needs nothing installed.
+    target_link_libraries(des_tui PRIVATE shell32 ole32 uuid)
+endif()
 
 add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp)
 target_link_libraries(des_tests PRIVATE des_ui)

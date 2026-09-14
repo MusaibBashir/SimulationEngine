@@ -6,6 +6,7 @@
 // tui/ touches a terminal, so all of it runs under the sanitisers with
 // everything else.
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -929,5 +930,19 @@ void runTuiTests() {
               "with the values that were typed");
         check(back.buffer().text() == s.buffer().text(),
               "byte for byte, because the text IS the model");
+    }
+
+    section("Saving into a folder that does not exist yet creates it");
+    {
+        // Double-clicking des_tui with no file opens <Documents>/DES Models/
+        // untitled.des, and on a laptop that has never run it that folder is
+        // not there. ^S used to fail with "could not write" -- the first save
+        // a new person ever makes.
+        std::filesystem::remove_all("tui_newdir");
+        TuiState s = TuiState::fromText("version = 1\n", "tui_newdir/nested/model.des");
+        check(s.save(), "a save into a missing folder succeeds");
+        check(std::filesystem::exists("tui_newdir/nested/model.des"),
+              "and the file is there");
+        std::filesystem::remove_all("tui_newdir");
     }
 }

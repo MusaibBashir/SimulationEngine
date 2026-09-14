@@ -276,3 +276,140 @@ Progress is not the output; it goes to stderr.
 - Undo of a pick-list choice restores the line but not the caret column.
 - Undo is a whole-buffer snapshot per edit. Fine at this size, and not fine at
   ten thousand lines.
+
+---
+
+## 15.1 — something you can send
+
+The ask was one executable, sent to someone else and run on their laptop with no
+codebase, no CMake and no compiler. Four things stood between the 15.0 build and
+that, and none of them were visible from inside this machine's own setup —
+which is the point of the ask.
+
+### The exe only ran here
+
+The development build imports `libstdc++-6.dll` and `libgcc_s_seh-1.dll`, which
+exist only inside a MinGW install. Sent as it was, it would have opened on
+someone else's laptop with *"libstdc++-6.dll was not found"*.
+
+It demonstrated that without leaving the desk. An older `C:\MinGW\bin` sits
+ahead of WinLibs on this machine's `PATH`. The moment the tests used
+`std::filesystem`, the test binary stopped loading — **exit 127, and not one
+line of output**, because a process that never reaches `main` prints nothing.
+It looked exactly like a crash in a test. `des.exe` and `des_tui.exe` went on
+loading against the old DLL only because they did not use the missing symbols
+*yet*.
+
+The package links statically, and `tools/package.sh` checks what the result
+imports against an allowlist of Windows' own libraries, then copies it out of
+the repository and starts it with `PATH` cut down to `C:\Windows`. It is built
+`-O2` **without** `-DNDEBUG`: sections 2 and below are a record of asserts
+guarding things a person can type, and a release build that deletes them runs
+wrong instead of stopping.
+
+### A model could still kill it
+
+Sent to strangers, "the window closed" is the entire bug report. So before
+packaging, every kind of failure a person can type was run — **each in its own
+process**, because in one process an abort takes the buffered output of every
+case before it, and the first attempt at this printed one assert message and
+nothing to say which input had caused it:
+
+| Service field | Before | After |
+|---|---|---|
+| `SQRT(0 - 1)`, `MOD(1, 0)` | the error escaped `RunController::advance()` and ended the program | the run fails, with the message |
+| `EXPO(1) - 2` | **aborted** on the scheduler's past-time assert | *process 'Work': its service time came out negative (-1.86)* |
+| `NORM(1, 5)` | finished | finished |
+
+`advance()` now catches model errors the way `startRun()` always had. The
+scheduler's `assert(t >= now)` is a throw: it was written for the engine's own
+bugs, but every duration a model computes passes through it, so it is also
+where a person's typing arrives — and it still stops right where the mistake
+is made. `Station::drawService` checks first, so the common case names the
+process.
+
+**The first test written for this was wrong.** It used `NORM(1, 5)`, expecting
+a throw, and reported that nothing escaped *and* that the run had not failed —
+which only makes sense if nothing was thrown at all. It wasn't: the `NORM`
+builder clamps a Normal's left tail at zero, so there was never anything to
+catch. The test now uses the inputs that actually failed, and keeps
+`NORM(1, 5)` as the case that must go on finishing.
+
+### A double-click was an error
+
+Started with no file, `des_tui` printed a usage line and exited — which, from a
+double-click, is a window that flashes and vanishes, and looks exactly like a
+program that is broken. It now opens `untitled.des` in `Documents\DES Models`
+and reopens that file next time. The Documents folder is asked of Windows, not
+built from `%USERPROFILE%`, because on a great many laptops it has been moved
+into OneDrive and the other one is an empty folder nobody looks in. `save()`
+creates the folder, since on a laptop that has never run this it is not there —
+the first `^S` a new person made would have said "could not write".
+
+A message printed on the way out now holds the window open, but only when this
+program is alone on its console; in a terminal somebody opened themselves, the
+window stays anyway and a pause would just be in the way.
+
+### Without a console it spun
+
+With its input redirected, the Win32 terminal's mode calls failed quietly, every
+`ReadConsoleInputW` failed, `nextKey()` returned *Unknown*, and the loop asked
+again — forever, at full speed. `openTerminal` now checks first and says why it
+cannot start. That same check is what lets `package.sh` prove the packaged exe
+*loads*: redirected, the right behaviour is a message and exit 1, and only a
+program that started can give it.
+
+The POSIX terminal changed with it, and **no gate compiles that file** —
+`verify.sh`'s Linux leg builds the tests and `src/`, not `tui/`. It was checked
+by hand under WSL's GCC with the full warning set, and that is recorded here
+because the next change to it will have to be checked the same way.
+
+### The zip was malformed
+
+`Compress-Archive` wrote the zip's entry names with backslashes —
+`DES-Simulator\DES-Simulator.exe` — and so did .NET's `ZipFile`, tried next on
+the strength of its documentation. The zip format does not allow backslashes.
+Windows Explorer copes, which is why it looked fine; `unzip` on a Mac or a Linux
+machine extracts that as a single file with a backslash in its name, so a zip
+forwarded through anybody else's computer would have arrived broken.
+
+Windows' own `bsdtar` writes forward slashes, so the zip is built with that.
+Each candidate was judged by reading back the entries it had actually written.
+
+**The first guard against this coming back measured nothing.** It listed the
+zip with `tar -tf` and looked for a backslash — and run against a
+`Compress-Archive` zip known to be full of them, it stayed quiet, because
+`bsdtar` turns backslashes into forward slashes when it *lists* an archive. A
+check that reads through a tool which hides the defect cannot find the defect.
+The guard now reads the zip's own bytes: entry names are stored uncompressed,
+so `DES-Simulator\` followed by a name is either in the file or it is not.
+
+That version was tested the way the first should have been: the function was
+pulled out of `package.sh` as written — not retyped, since retyping it through a
+shell had already turned its backslash pattern into a grep error that read as
+"quiet" — and run against both zips. It fires on the `Compress-Archive` one and
+stays quiet on the `bsdtar` one.
+
+### Backstop
+
+If anything still escapes the loop, `main` restores the terminal *first* — so
+the message is not drawn on a screen about to be discarded — writes an unsaved
+model to `<file>.recovered`, and holds the window. None of the failures found so
+far reach it. "None found so far" is exactly the claim this project has been
+wrong about, and here the cost of being wrong is somebody's afternoon of work.
+
+### Rules this added
+
+- **A program people are sent is tested as the file they are sent** — the
+  optimised static build runs the suite as itself, and is started away from the
+  toolchain that built it.
+- **Suspect inputs run one per process.** An abort does not only fail its own
+  case; it erases the evidence of every case before it.
+- **A file no gate compiles is checked by hand, and it says so.**
+
+### Still open (15.1)
+
+- The exe is not code-signed, so Windows SmartScreen warns on first run.
+- Nothing is packaged for macOS or Linux.
+- There is no Open or Save As inside the program: another model is opened by
+  dragging it onto the exe, or by double-clicking it after installing.

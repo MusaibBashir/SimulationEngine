@@ -4,6 +4,7 @@
 #include <string>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shlobj.h>
 
 namespace des {
 namespace {
@@ -187,12 +188,85 @@ public:
             if (ch >= 32 && ch < 127) return Key::character(static_cast<char>(ch));
         }
     }
+
+    void setTitle(const std::string& title) override {
+        SetConsoleTitleA(title.c_str());
+    }
 };
 
 }  // namespace
 
-std::unique_ptr<ITerminal> openTerminal() {
+std::unique_ptr<ITerminal> openTerminal(std::string& whyNot) {
+    HANDLE in  = GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD inMode = 0;
+    DWORD outMode = 0;
+
+    // Checked FIRST, and it is what "not a console" means on Windows:
+    // GetConsoleMode fails on a pipe or a file. Unchecked, the constructor's
+    // SetConsoleMode calls failed quietly, ReadConsoleInputW then failed on
+    // every call, nextKey() returned Unknown each time, and the loop spun at
+    // full speed forever -- which from outside is indistinguishable from a hang.
+    if (in == INVALID_HANDLE_VALUE || !GetConsoleMode(in, &inMode) ||
+        out == INVALID_HANDLE_VALUE || !GetConsoleMode(out, &outMode)) {
+        whyNot = "it has to be run in a console window, with its input and output "
+                 "going to that window rather than redirected. Double-click "
+                 "DES-Simulator.exe, or start it from Command Prompt or PowerShell.";
+        return nullptr;
+    }
+
+    // Every glyph is drawn with VT escape sequences, and a console that cannot
+    // interpret them -- Windows before 10 -- prints them as text. Try it, then
+    // put the mode back: the constructor sets it for real and the destructor
+    // restores it, and neither should inherit a half-done probe.
+    if (!SetConsoleMode(out, outMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
+        whyNot = "this console does not understand the display codes the program "
+                 "draws with. It needs Windows 10 or 11.";
+        return nullptr;
+    }
+    SetConsoleMode(out, outMode);
     return std::unique_ptr<ITerminal>(new Win32Terminal());
+}
+
+std::string defaultModelPath() {
+    const std::string fallback = "untitled.des";
+
+    // The caller frees the path whether or not the call succeeded -- that is
+    // how SHGetKnownFolderPath is documented, and a failure path that skipped
+    // it would leak on exactly the machines that are already unusual.
+    PWSTR wide = nullptr;
+    const HRESULT found = SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &wide);
+    if (FAILED(found) || wide == nullptr) {
+        if (wide != nullptr) CoTaskMemFree(wide);
+        return fallback;
+    }
+
+    // To the ANSI code page, because every file this program opens goes through
+    // a narrow std::fstream, which on Windows means ANSI. A Documents path with
+    // characters that page cannot hold -- a user name in a script the system
+    // locale does not cover -- could not be opened that way at all, so it falls
+    // back to the current folder rather than to a mangled path that saves the
+    // model somewhere nobody would ever find it.
+    std::string result = fallback;
+    const int n = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, wide, -1,
+                                      nullptr, 0, nullptr, nullptr);
+    if (n > 1) {
+        std::string narrow(static_cast<std::size_t>(n), '\0');
+        BOOL lossy = FALSE;
+        WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, wide, -1,
+                            &narrow[0], n, nullptr, &lossy);
+        narrow.resize(static_cast<std::size_t>(n - 1));
+        if (!lossy) result = narrow + "\\DES Models\\untitled.des";
+    }
+    CoTaskMemFree(wide);
+    return result;
+}
+
+bool launchedOnOwnConsole() {
+    // Double-clicked, this process is the only one on the console. Started from
+    // a Command Prompt, the shell is attached too and the count is at least two.
+    DWORD ids[2];
+    return GetConsoleProcessList(ids, 2) == 1u;
 }
 
 }  // namespace des

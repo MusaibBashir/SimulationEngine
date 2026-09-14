@@ -502,6 +502,40 @@ than as a slightly-off average — which is a far stronger statement.
 guide written for someone who knows C++ but not this codebase. You should not
 need to read the engine's source to build a model with it.
 
+## Sending it to someone else
+
+```
+bash tools/package.sh 15.1.0
+```
+
+produces, in `dist/`:
+
+| File | For |
+|---|---|
+| `DES-Simulator-15.1.0-windows-x64.zip` | unzip anywhere, double-click `DES-Simulator.exe` |
+| `DES-Simulator-15.1.0-setup.exe` | an installer: no administrator rights needed, a Start Menu entry, and — if ticked — `.des` files open on double-click |
+
+Either runs on Windows 10 or 11 with **nothing else installed**: no compiler,
+no CMake, no DLLs. The exe is linked statically, because the development build
+needs `libstdc++-6.dll` and `libgcc_s_seh-1.dll` from a MinGW install and simply
+will not start without them.
+
+The script **refuses to produce either** unless the build that ships passes the
+whole test suite as itself, imports nothing but Windows' own libraries, and
+loads with `PATH` cut down to `C:\Windows`. It is built `-O2` but *without*
+`-DNDEBUG`: this project's asserts guard things a person can type, and a release
+build that deleted them would run wrong rather than stop.
+
+**Double-clicked with no file**, it opens `untitled.des` in
+`Documents\DES Models` and reopens that file next time. Drag any `.des` onto the
+exe to open it instead.
+
+**Windows will warn the first time** — "Windows protected your PC" — because the
+exe is not code-signed. *More info → Run anyway*. Removing that needs a paid
+code-signing certificate.
+
+**Windows only, for now.** Nothing has been packaged for macOS or Linux.
+
 ## Documents
 
 | File | What it is |
