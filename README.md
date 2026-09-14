@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1368/1368 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1383/1383 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -83,7 +83,7 @@ g++ -std=c++17 -Wall -Wextra -Wpedantic -Iinclude main.cpp src/*.cpp -o des
 **The verification gate, in one command each:**
 
 ```
-bash tools/verify.sh      # both compilers warning-clean, plus MSVC AddressSanitizer
+bash tools/verify.sh      # GCC + Clang warning-clean, MSVC ASan, WSL ASan + UBSan
 bash tools/baseline.sh check   # every example still byte-identical
 ./build/des regress            # every model file still produces its report
 ```
@@ -97,6 +97,18 @@ too old. **UBSan does not exist on the Windows side** — MinGW ships no
 `libubsan` and MSVC has none — so the script runs ASan and UBSan through **WSL's
 Linux GCC** instead, and skips that leg loudly if WSL is absent rather than
 passing silently.
+
+**The three legs run at the same time.** On a 4-core laptop that takes about
+2¾ minutes once the WSL leg's object cache is warm, and about 5½ from cold —
+down from about 25. The MSVC leg builds optimised with asserts kept, because
+*running* the suite in its Debug build took over five minutes on its own; the
+iterator checking that Debug build provided is done by the WSL leg under
+`_GLIBCXX_DEBUG` instead. `VERIFY_MSVC_CONFIG=Debug bash tools/verify.sh asan`
+brings the old MSVC leg back.
+
+**Each sanitised suite run has a time limit** — fifteen minutes by default,
+`VERIFY_SUITE_TIMEOUT=<seconds>` to change it. A run that hits it fails, naming
+the section it was stopped in, instead of holding the gate open indefinitely.
 
 Before and after any refactor — entities are destroyed at departure, so a
 routing mistake becomes a use-after-free, and this is what proves it hasn't:
@@ -567,7 +579,7 @@ sim/
 ├── cli/             the des command: check, run and regress
 ├── tui/             des_tui: the terminal UI, and the only platform code
 ├── examples/models/ hand-written .des models
-├── tests/           1368 unit checks
+├── tests/           1383 unit checks
 ├── include/         50 headers
 └── src/             42 sources
 ```

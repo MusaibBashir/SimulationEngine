@@ -413,3 +413,187 @@ wrong about, and here the cost of being wrong is somebody's afternoon of work.
 - Nothing is packaged for macOS or Linux.
 - There is no Open or Save As inside the program: another model is opened by
   dragging it onto the exe, or by double-clicking it after installing.
+
+---
+
+## 15.2 — a gate you can wait for
+
+`tools/verify.sh` took about 25 minutes. That is long enough that nobody runs
+it until the end of a change, and a gate that only runs at the end finds
+problems when they are most expensive to fix.
+
+An explanation came with the complaint: WSL compiling across the 9P filesystem
+bridge, compiles running on one core, `src/` built seven times over, MSVC not
+using its cores. Some of that was right. The drop-in fixes offered with it would
+not have run — they passed a Git Bash path into WSL, where it does not exist,
+and copied the sources without the example models the suite reads, so the leg
+would have reported *inconclusive* on every run. And the largest single cost
+was not on the list at all. So everything was measured before anything changed.
+
+### Where the time actually went
+
+| Measured on a Ryzen 5 7235HS — 4 cores, 8 threads | |
+|---|---|
+| sanitised `Compiler.cpp`: through `/mnt/c` / from WSL's own disk | 11.8 s / 10.6 s |
+| one file, `-fsyntax-only`: GCC / Clang | 1–3 s / 1.4–5.6 s |
+| files the warnings leg parsed, per compiler | ~137 — `src/` three times over |
+| the suite, Debug build, no sanitiser | 19 s |
+| **the suite, MSVC ASan, Debug build** | **327 s** |
+| the same, with only iterator debugging switched off | 132 s |
+| the same, built `/O2` with asserts kept | 84 s |
+| the suite, WSL ASan + UBSan | 32 s |
+| the same, with `_GLIBCXX_DEBUG` | 84 s |
+| WSL: compiling all 49 files, 8 at a time, no cache | 156 s |
+
+Three things stand out.
+
+**The 9P bridge was real and small.** Reading headers across it costs about 11%
+on a sanitised compile; generating the code is where the ten seconds go.
+
+**`-fsyntax-only` links nothing**, so the warnings leg's three "link units" —
+one per program with a `main()` — did nothing but parse every file in `src/`
+three times per compiler.
+
+**The biggest cost nobody named was MSVC *running* the suite.** Not compiling:
+running. The same tests took 19 s in a plain Debug build and 327 s under MSVC's
+AddressSanitizer in Debug. Two variants built side by side split that up:
+switching off only the STL's iterator debugging brought it to 132 s, and
+building `/O2` brought it to 84 s. Both still passed all 1381 checks.
+
+### What changed
+
+- The warnings leg parses every file once per compiler, all at once, and gained
+  `tui/` — which no gate had compiled.
+- The MSVC leg builds `/O2` with `/MP` and `--parallel`.
+- The WSL leg compiles in parallel on a copy in WSL's own filesystem that
+  includes `examples/`, reuses unchanged objects, and adds the POSIX terminal.
+- The legs run at the same time. The WSL copy is what makes that safe: from it,
+  the suite's scratch files cannot collide with the MSVC leg's.
+
+### The optimised build keeps its asserts, and that was checked
+
+CMake's optimised flags define `NDEBUG`, which deletes every assert — and
+sections 2 and 15.1 of this log are a record of asserts guarding things a person
+can type. The leg overrides those flags to leave it out, and reconfigures rather
+than trust a cached configuration that has it back.
+
+"The asserts are kept" is exactly the kind of claim this project has been wrong
+about, so the generated Visual Studio projects were read. `NDEBUG` appears four
+times in each one, every time inside the Release or MinSizeRel blocks; the
+RelWithDebInfo block defines nothing but `CMAKE_INTDIR`. The first attempt at
+this check picked up the wrong block and printed the *Debug* configuration's
+settings, which would have "confirmed" the answer from the wrong place.
+
+### Iterator checking moved; it did not go
+
+The MSVC STL's iterator debugging is a genuine check. It stops a program using an
+iterator that an insert or erase has invalidated, and ASan alone can miss that.
+Dropping it for speed and saying nothing would have made the gate faster and
+quietly weaker. So the WSL leg now builds with libstdc++'s own debug mode,
+`_GLIBCXX_DEBUG`, which catches the same class of mistake in this code. It costs
+that leg 84 s of running instead of 32 s. The whole suite passed under it, and
+found no iterator misuse.
+
+What is actually lost is checking of the *MSVC STL's* own behaviour, as opposed
+to this code's use of an STL. `VERIFY_MSVC_CONFIG=Debug` puts it back for anyone
+who needs it.
+
+### The object cache is keyed on content, not timestamps
+
+The WSL leg rebuilt all 49 objects on every run, and that took 156 s on four
+cores for a tree in which most runs change a file or two. It now reuses an
+object when the compiler version, the flags and the *preprocessed* source — every
+header expanded — are byte for byte what they were. That is what the compiler
+sees, so a reused object is the object it would have built.
+
+It is not a `make`-style timestamp check, because timestamps lie: a file restored
+with an older time than its object — by `cp -p`, an archive, a stash — would be
+linked stale, and a gate that links a stale object has tested code that is not in
+the tree. Preprocessing still costs a second or two a file; building the
+sanitised object costs ten. The cache keeps only what the last run used, so it
+cannot grow without bound across branches.
+
+### A hole closed on the way
+
+Reading the MSVC leg to change it turned up this: if the ASan build *failed*, the
+leg printed the errors and then ran the `des_tests.exe` left over from the last
+good build — which reported clean. A stale binary passing the gate, the same
+hole `baseline.sh` had in v11. The build's exit code is checked now.
+
+### The result
+
+| | Wall | Warnings | MSVC ASan | WSL |
+|---|---|---|---|---|
+| before | ~25 min | | | |
+| cold — first `/O2` build, empty cache | **334 s** | 171 s | 270 s | 332 s |
+| warm — the everyday run | **165 s** | 107 s | 163 s | 154 s |
+| final — after the time limits, the capped loops and every sabotage | **160 s** | 93 s | 159 s | 158 s |
+
+All three runs `VERIFY CLEAN`, with the same count in both sanitiser legs: 1381
+for the first two, and 1383 for the final one, after the capped loops gained a
+check each. On the warm run the WSL leg compiled for 10 s, taking all 49 objects
+from the cache.
+
+That is not the 90 seconds the original suggestion estimated, and the reason is
+worth being plain about. What remains is mostly the two sanitised suites
+*running*, at the same moment as each other and the warnings leg, on four real
+cores — the WSL suite took 121 s under that load against 84 s on its own.
+Getting under that means running less of the suite, which is not what a gate is
+for.
+
+### The gate had to be seen failing before it was trusted
+
+Five sabotages, run one at a time against the tree, each reverted before the next:
+
+| Sabotage | Should | What happened |
+|---|---|---|
+| an unused variable in `src/Screen.cpp` | the warnings leg names the file | **caught** — GCC and Clang both named it |
+| a syntax error in `src/Screen.cpp` | the MSVC leg refuses to run the old binary | **caught** — *the ASan build failed -- not running a stale des_tests.exe* |
+| `Key::control` no longer upper-casing | the WSL leg rebuilds what includes it, and the suite fails | **hung the gate** — below |
+| the same, with a 180 s suite limit | both legs stop, and name the section | **both stopped and named one** — below |
+| `Key::control` broken again, after the loops were capped and the cache refreshed | the suite finishes, the key checks fail, and what includes `Key.hpp` is rebuilt | **caught** — the suite finished in 62 s with the key checks failing; 47 of 49 objects came from the cache, and the 2 rebuilt are exactly the two that include `Key.hpp` |
+
+The first two also printed `VERIFY FAILED: nothing was checked` — which says no
+toolchain was found. The verdict asked whether anything had passed before it
+asked whether anything had failed. It asks in the other order now.
+
+### A hang is a failure with a name now
+
+The third sabotage did not fail. It hung. With `Key::control` no longer
+upper-casing, `^P` never reached the palette, so a test that pressed `c` until the
+palette showed *Create* pressed it forever — twenty minutes at full CPU, with
+nothing on screen to say anything was wrong. The old `verify.sh` had exactly the
+same hazard; nobody had sent a test round a loop yet.
+
+Two changes, because either alone is not enough. The three test loops that press
+a key until something moves are capped, and assert that they arrived, so they
+fail instead of spinning. And both sanitiser legs run the suite under a time
+limit — fifteen minutes by default, far above the two it takes under load — and
+when it runs out the leg fails and names the section the suite was stopped in. A
+loop nobody has found yet now costs fifteen minutes and a section name, not an
+afternoon.
+
+### The time limit's first catch was a hang nobody planted
+
+The run that tested the time limit stopped both legs in the same section — and
+not the one the sabotage should have hung in. Both named *The regression
+harness*, and that was first put down to load. It was not load.
+
+Between two runs, `examples/models/shared.des` had been edited: `Length` from
+480 to 4,800,000, and `Max Arrivals = 200` removed — what somebody does to make a
+model run long enough to watch. Nothing in the gate or the tests wrote it; its
+timestamp falls in a stretch when the only thing running was the WSL leg, on its
+copy in `/tmp`. But the regression harness runs that model, and with no cap and
+a horizon ten thousand times longer, it ran for as long as it was allowed to. So
+the limit's first real catch was a genuine hang, in the section it named. The
+file was restored to the committed version.
+
+It is also a second way the gate could have been held open forever before the
+limit existed: not a test that never ends, but a *model* that never does.
+
+### Still open (15.2)
+
+- The MSVC STL's own iterator debugging no longer runs by default;
+  `VERIFY_MSVC_CONFIG=Debug` runs it, at roughly four times the leg's cost.
+- The warnings leg has no cache, so on a warm run it spends 107 s parsing files
+  that have not changed.

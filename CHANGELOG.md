@@ -5,6 +5,64 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [15.2.0] — 2026-09-14 — "A gate you can wait for"
+
+`tools/verify.sh` took about 25 minutes. On a 4-core laptop it now takes about
+**2 min 45 s warm and 5 min 35 s cold**, and it checks at least as much as it
+did. Every change came from measuring where the time went rather than from the
+first explanation of it. Narrative in `V15_READLOG.md`, section 15.2.
+
+### Changed
+
+- **The warnings leg parses each file once per compiler**, all at once. It had
+  re-parsed all of `src/` three times per compiler — once per link unit —
+  although `-fsyntax-only` links nothing.
+- **The MSVC ASan leg builds `/O2` with asserts kept.** Running the suite in the
+  Debug build took 327 s: about 60% was the MSVC STL's iterator debugging, most
+  of the rest `/Od`. Optimised, it runs in 84 s. `NDEBUG` is left out on
+  purpose, and a cached optimised configuration that contains it is
+  reconfigured rather than trusted. `VERIFY_MSVC_CONFIG=Debug` restores the old
+  leg.
+- **The WSL leg builds with `_GLIBCXX_DEBUG`**, so the iterator checking the
+  MSVC leg gave up moved rather than disappearing. It compiles in parallel, on a
+  copy in WSL's own filesystem, and reuses objects from a cache keyed on the
+  compiler, the flags and the preprocessed source.
+- **The three legs run at once**, each reported as it finishes, their results
+  printed in a fixed order.
+- The MSVC build uses `/MP` and `--parallel`.
+- The DES Engine Reference is brought up to date: its version line,
+  `ITerminal::setTitle`, `RunController::advance`'s failed-run behaviour, and
+  the free functions it had never listed — the terminal functions and the
+  document helpers.
+
+### Added
+
+- `tools/verify_wsl.sh`, the WSL leg as its own script, fed to WSL on stdin.
+- **`tui/` is checked.** The Windows terminal goes through GCC and Clang with
+  the full warning set, and the POSIX terminal through WSL's GCC. Until now no
+  gate compiled either.
+- **The two sanitiser legs must agree on the number of checks.** They run the
+  same suite, so a difference means one of them ran less of it.
+- **A time limit on each sanitised suite run** — 15 minutes by default,
+  `VERIFY_SUITE_TIMEOUT` to change it, three times as long for the Debug MSVC
+  configuration. When it runs out the leg fails and names the section the suite
+  was stopped in. Before it, one test sent round a loop held the whole gate open
+  for as long as nobody noticed.
+
+### Fixed
+
+- **The MSVC leg could pass on a stale binary.** A build that failed printed its
+  errors and then ran the previous `des_tests.exe`, which reported clean. The
+  build's exit code is checked now.
+- **A failed gate said "nothing was checked".** The verdict asked whether any leg
+  had passed before asking whether any had failed, so a leg that ran, found a
+  problem and failed was reported as though no toolchain had been found.
+- **Three test loops could spin forever.** Each pressed a key until the palette
+  or the caret moved, and nothing stopped it if that never happened. They are
+  capped now, and assert that they arrived.
+
+---
+
 ## [15.1.0] — 2026-09-14 — "Something you can send"
 
 A build of `des_tui` that runs on somebody else's laptop with nothing

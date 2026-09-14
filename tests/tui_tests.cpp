@@ -401,8 +401,15 @@ void runTuiTests() {
         // worked -- seventeen types is a long way to arrow through.
         typeText(s, "c");
         check(s.palette()[s.paletteIndex()][0] == 'C', "a letter jumps to that module");
-        while (s.palette()[s.paletteIndex()] != "Create")
+        // BOUNDED. This loop, as a bare `while`, is what hung the gate: with
+        // Key::control sabotaged, ^P never reached the palette, the 'c' went
+        // into the text instead, and the palette never moved -- for twenty
+        // minutes at full CPU. A loop driven by keys has to be able to fail.
+        for (std::size_t i = 0; i <= s.palette().size() &&
+                                s.palette()[s.paletteIndex()] != "Create"; ++i)
             handleKey(s, Key::character('c'));
+        check(s.palette()[s.paletteIndex()] == "Create",
+              "repeating the letter reaches Create");
 
         handleKey(s, Key::special(KeyKind::Enter));
         check(s.focus() == Pane::Editor, "Enter inserts and hands back the keyboard");
@@ -450,8 +457,10 @@ void runTuiTests() {
 
         // In the palette it explains the module you are on, with every field.
         handleKey(s, Key::control('p'));
-        while (s.palette()[s.paletteIndex()] != "Decide")
+        for (std::size_t i = 0; i <= s.palette().size() &&
+                                s.palette()[s.paletteIndex()] != "Decide"; ++i)
             handleKey(s, Key::special(KeyKind::Down));
+        check(s.palette()[s.paletteIndex()] == "Decide", "Down reaches Decide");
         handleKey(s, Key::control('g'));
         check(s.overlay() == Overlay::Help && s.helpTitle() == "Decide",
               "and the palette explains a module before you insert it");
@@ -515,7 +524,8 @@ void runTuiTests() {
         check(s.status().find("nothing selected") != std::string::npos,
               "copy with no selection says so rather than doing nothing");
 
-        while (s.buffer().caret().line > 0) handleKey(s, Key::special(KeyKind::Up));
+        for (std::size_t i = 0; i <= s.buffer().lineCount() && s.buffer().caret().line > 0; ++i)
+            handleKey(s, Key::special(KeyKind::Up));
         handleKey(s, Key::shifted(KeyKind::Down));
         handleKey(s, Key::control('x'));
         check(s.buffer().lineAt(0) == "two", "^X cuts the selection");

@@ -7,7 +7,7 @@ the call-flow chapters. Prose is passed to reportlab as markup, so use &amp;,
 &lt; and &gt; rather than the bare characters.
 """
 
-VERSION_LINE = "v15 — the text is the model · 1368 checks · 120 types"
+VERSION_LINE = "v15.2 — a gate you can wait for · 1383 checks · 120 types"
 
 FRONT_MATTER = (
     "A discrete-event simulation engine in the spirit of Arena's Basic Process "
@@ -73,7 +73,7 @@ TYPE_DOC = {
     "KeyKind": "What kind of keypress this is: a printable character, a control chord, or one of the named keys a terminal sends as an escape sequence.",
     "Key": "A keypress as a value. The platform layer turns a console record or an escape sequence into one of these, and everything above takes them -- which is what lets a test type a whole session without a terminal. Control keys normalise to upper case, so ^s and ^S are one key rather than two that can disagree.",
     "TerminalSize": "How many columns and rows the terminal has right now. Read every frame, because a person can resize a window mid-edit.",
-    "ITerminal": "The only platform code in the project: report the size, blit a Screen, read a Key. It is an object rather than three functions because its destructor restores the console -- a return from anywhere in the loop must not leave somebody in raw mode with no cursor.",
+    "ITerminal": "The only platform code in the project: report the size, blit a Screen, read a Key, say whether one is waiting, and name the window. It is an object rather than a handful of functions because its destructor restores the console -- a return from anywhere in the loop must not leave somebody in raw mode with no cursor. openTerminal() can refuse, with a reason: a console that was not a console used to be driven anyway, and the loop then spun forever reading nothing.",
     "FlowBlock": "One flowchart block as the flow view shows it: its name, its type, and where its exits lead. Built from the DOCUMENT rather than from a compiled Model, because a document with a dangling exit does not compile -- and that is exactly when somebody needs to see the wiring. It also carries whether an exit names nothing and whether anything arrives here, neither of which is an error on its own and neither of which is said anywhere else.",
     "TuiState": "Everything the user interface knows: the document, where the cursor is, which mode is active, the diagnostics from the last compile, the undo stack and the run in progress. The renderer reads it and the input layer writes it, and neither touches a terminal.",
 
@@ -229,6 +229,7 @@ MEMBER_DOC = {
     "Screen::hline": "A horizontal run of one character.",
     "TuiState::fromDocument": "A state around a document already in memory, rather than one on disk. The tests use it so the suite does not need a file for every case.",
     "TuiState::moveRow": "Moves the current row up or down. Undoable like any other edit, because row order is SEMANTIC in this format -- a Decide takes the first branch that matches -- so moving one is a model change rather than a display preference.",
+    "ITerminal::setTitle": "Names the window after the file that is open. With two models open, every window used to say the same thing, and a person could not tell which was which.",
     "ITerminal::keyPending": "Is a keypress waiting? The fourth method, and the one that makes a run interruptible: while a simulation is advancing the loop must not block in nextKey(), or Escape is never seen and an unbounded model runs until the process is killed. On Win32 it also DRAINS the mouse, focus and resize records the console reports alongside keys -- otherwise the handle stays signalled and the run never advances at all, the same bug wearing the opposite face.",
     "TuiState::beginPick": "Opens Arena's drop-down on the current cell: an Enum offers the spellings it allows, a Reference offers what may go there. Returns false, having opened nothing, when the column is not one that can be picked from OR when nothing has been declared to pick -- the caller then opens the text editor, which is what a model being built from scratch needs, since the first Next is typed before anything exists to point at.",
     "TuiState::stepPick": "Moves the cursor in the open list. Clamps rather than wraps, like every other cursor here.",
@@ -273,7 +274,7 @@ MEMBER_DOC = {
     "ModelDocument::cellOrDefault": "The cell, or the schema default when it is empty. Every build-time read goes through here, so a defaulted column behaves the same whether the file spelled it out or left it off.",
     "ITerminationRule::progress": "How far through this rule the run is, or NOTHING when it cannot tell. Nothing does not mean zero: a drained-system rule has no knowable fraction, and a progress bar that reads 0% throughout and then jumps to 100% is a lie the caller cannot detect.",
     "RunController::fromDocument": "Builds a controller from a document: reads [Run], compiles once so every bad cell is reported before an event runs, and keeps a copy of the document because each replication needs a fresh Model and a Model can be neither reused nor copied.",
-    "RunController::advance": "Does at most maxEvents events, rolling on to the next replication when one ends, and returns how many it actually did. Zero when paused, finished, cancelled or failed.",
+    "RunController::advance": "Does at most maxEvents events, rolling on to the next replication when one ends, and returns how many it actually did. Zero when paused, finished, cancelled or failed. A model error part way through a run -- SQRT of a negative number, a service time that comes out negative -- marks the run Failed with that message instead of propagating. Until 15.1 it went out through every caller, and in the terminal UI that ended the program.",
     "RunController::pause": "Running becomes Paused, and advance() then does nothing.",
     "RunController::resume": "Paused becomes Running. It cannot undo a cancel.",
     "RunController::cancel": "Stops for good. The run so far stays readable.",
@@ -917,6 +918,39 @@ CHAPTERS = [
               ["whenDrained()", "the system is empty, which may be a transient gap."],
               ["anyOf(a, b, ...)", "any composed rule fires."]],
     [0.36, 0.64]),
+   ("h3", "The platform boundary, from Terminal.hpp"),
+   ("text", "The only functions that differ by operating system. Everything above them "
+            "is a value a test can inspect; these are the part that cannot be."),
+   ("table", [["Function", "Does"],
+              ["openTerminal(whyNot)", "The console in raw mode -- or null with the reason, "
+               "when input or output is redirected or the console cannot draw."],
+              ["defaultModelPath()", "Where a model goes when the program starts with no "
+               "file: untitled.des in a DES Models folder inside the real Documents "
+               "folder, asked of Windows so that one redirected into OneDrive is found."],
+              ["launchedOnOwnConsole()", "Whether this program is alone on its console -- "
+               "double-clicked -- so a message printed on the way out needs the window "
+               "held open to be read."]],
+    [0.46, 0.54]),
+   ("h3", "Reading a document"),
+   ("table", [["Function", "Does"],
+              ["referenceCandidates(doc, type)", "Every name a Reference column may hold. "
+               "The pick list and the reference pass are this one function, so a list "
+               "cannot offer a name that is then rejected."],
+              ["lineOf(doc, diagnostic)", "Which line of the file a diagnostic is about, "
+               "or 0 when it cannot say. A diagnostic names a cell; an editor needs a line."],
+              ["runNames(doc)", "The Name of each [Run] record, with a stand-in for one "
+               "that has none."],
+              ["readRunSetup(doc, out, which)", "One [Run] record by position; past the "
+               "end it reads as the defaults rather than as an error."],
+              ["flowOf(doc)", "The flowchart as the Flow view shows it, read from the "
+               "cells so it still works on a model that does not compile."],
+              ["templateFor(schema)", "The lines a module inserts: its header, then every "
+               "field, blank."],
+              ["blockTypeAt / keyOfLine", "Which record a line of text is inside, and the "
+               "key of a key = value line."],
+              ["starterModelText()", "A working single-server model, as text, with its "
+               "comments."]],
+    [0.58, 0.42]),
    ("h3", "The expression layer"),
    ("table", [["Function", "Does"],
               ["tokenise(text)", "Text to tokens with spans. Never throws."],
