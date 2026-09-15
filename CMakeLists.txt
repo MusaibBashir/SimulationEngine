@@ -77,6 +77,27 @@ endif()
 target_compile_options(des_engine PRIVATE ${DES_WARNINGS})
 
 # ----------------------------------------------------------------------------
+# The user interface, as a SECOND library. des_ui links des_engine and never
+# the reverse -- that is the whole of the layering, and it is what a repository
+# boundary would otherwise have been protecting.
+#
+# The portable half lives in src/ deliberately: tools/verify.sh compiles
+# src/*.cpp and its WSL leg compiles tests/*.cpp src/*.cpp, so putting it here
+# runs the entire UI through GCC, Clang, ASan and UBSan with no change to any
+# gate script. Only platform code lives in tui/, and platform code cannot be
+# tested anyway.
+# ----------------------------------------------------------------------------
+add_library(des_ui STATIC
+    src/Screen.cpp
+    src/TextBuffer.cpp
+    src/TuiState.cpp
+    src/TuiRender.cpp
+    src/TuiInput.cpp
+)
+target_link_libraries(des_ui PUBLIC des_engine)
+target_compile_options(des_ui PRIVATE ${DES_WARNINGS})
+
+# ----------------------------------------------------------------------------
 # Programs
 # ----------------------------------------------------------------------------
 add_executable(des_demo main.cpp)
@@ -89,8 +110,27 @@ add_executable(des cli/main.cpp)
 target_link_libraries(des PRIVATE des_engine)
 target_compile_options(des PRIVATE ${DES_WARNINGS})
 
-add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp)
-target_link_libraries(des_tests PRIVATE des_engine)
+# The platform half. WIN32 and non-WIN32 sources are mutually exclusive: each
+# includes headers the other platform does not have. Terminal.hpp is not in
+# des_ui.hpp -- it is the platform boundary, and only tui/ includes it.
+if(WIN32)
+    add_executable(des_tui tui/main.cpp tui/Terminal_win32.cpp)
+else()
+    add_executable(des_tui tui/main.cpp tui/Terminal_posix.cpp)
+endif()
+target_link_libraries(des_tui PRIVATE des_ui)
+target_compile_options(des_tui PRIVATE ${DES_WARNINGS})
+if(WIN32)
+    # shell32 and ole32 for SHGetKnownFolderPath and CoTaskMemFree, which find
+    # the user's REAL Documents folder -- redirected into OneDrive on a great
+    # many laptops, where %USERPROFILE%\Documents is an empty folder nobody looks
+    # in. uuid holds the FOLDERID constants in MinGW. All three are Windows' own
+    # libraries, so a static build still needs nothing installed.
+    target_link_libraries(des_tui PRIVATE shell32 ole32 uuid)
+endif()
+
+add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp)
+target_link_libraries(des_tests PRIVATE des_ui)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
 
 # The decisive v11 test reads the shipped .des files. The suite is not always

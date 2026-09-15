@@ -102,6 +102,20 @@ bool RunController::startRun() {
         if (m_setup.warmUp > 0.0)          m_sim->setWarmUp(m_setup.warmUp);
         if (m_setup.observeInterval > 0.0) m_sim->setObservationInterval(m_setup.observeInterval);
         if (auto rule = ruleFrom(m_setup)) m_sim->setTermination(std::move(rule));
+        if (m_sim->termination() == nullptr) {
+            // NOBODY set one -- neither the setup nor the builder. That happens
+            // for a document with no [Run] row, which is every model somebody
+            // has just built from scratch, and initialise() asserts a rule
+            // exists: pressing run on a new model ABORTED the program. In the
+            // terminal UI that is worse than a crash, because abort() skips
+            // destructors and the console is left in raw mode with no cursor.
+            //
+            // An empty AnyOf is never met, so the run ends when the event list
+            // empties -- which is exactly what readRunSetup's warning already
+            // promises a model with no stopping condition will do. This makes
+            // that promise true rather than fatal.
+            m_sim->setTermination(std::make_unique<AnyOf>());
+        }
         m_sim->initialise();
     } catch (const ModelError& bad) {
         m_failure = bad.what();
@@ -167,10 +181,23 @@ std::size_t RunController::advance(std::size_t maxEvents) {
     }
 
     std::size_t done = 0;
-    while (done < maxEvents) {
-        if (m_sim && m_sim->stepOnce()) { ++done; ++m_events; continue; }
-        finishRun();
-        if (!startRun()) break;
+    try {
+        while (done < maxEvents) {
+            if (m_sim && m_sim->stepOnce()) { ++done; ++m_events; continue; }
+            finishRun();
+            if (!startRun()) break;
+        }
+    } catch (const ModelError& bad) {
+        // A MODEL THAT FAILS PART WAY THROUGH fails the run, the way one that
+        // fails during setup already did in startRun(). SQRT(0 - 1) in a Service
+        // field compiles and then throws at the first service; this caught
+        // nothing, so the error went out through every caller -- out of the
+        // terminal UI's loop and out of main, closing the window on somebody's
+        // unsaved model. It is a user's mistake in a cell, and it gets reported
+        // as one.
+        m_failure = bad.what();
+        m_state   = RunState::Failed;
+        m_sim.reset();
     }
     return done;
 }
@@ -222,8 +249,9 @@ RunSnapshot RunController::snapshot() const {
 
 std::unique_ptr<RunController>
 RunController::fromDocument(const ModelDocument& doc, std::vector<Diagnostic>& out,
-                            std::optional<SimTime> lengthOverride) {
-    RunSetup setup = readRunSetup(doc, out);
+                            std::optional<SimTime> lengthOverride,
+                            std::size_t whichRun) {
+    RunSetup setup = readRunSetup(doc, out, whichRun);
     if (lengthOverride) setup.length = lengthOverride;
 
     // Compile once, HERE, so a bad cell is reported before a single event runs
@@ -252,21 +280,18 @@ void RunController::report(std::ostream& os) const {
         os << m_lastReport.str();
         return;
     }
-    os << "\n=== " << m_results.size() << " replications ===\n";
-    os << std::fixed << std::setprecision(4);
-    const auto line = [&](const char* label, double ReplicationResult::* field) {
-        std::vector<double> xs;
-        for (const ReplicationResult& r : m_results) xs.push_back(r.*field);
-        os << "  " << std::setw(24) << std::left << label << std::right
-           << std::setw(12) << Summary::mean(xs)
-           << "  +/- " << std::setw(10) << Summary::halfWidth95(xs) << "\n";
-    };
-    line("average wait",   &ReplicationResult::averageWait);
-    line("time in system", &ReplicationResult::averageTimeInSystem);
-    line("Lq",             &ReplicationResult::Lq);
-    line("L",              &ReplicationResult::L);
-    line("utilisation",    &ReplicationResult::utilisation);
-    os << "===========================================================\n";
+    // EVERY replication, then the summary. v12 printed only the summary, and
+    // with an unlabelled "+/-" beside each number a reader could not tell
+    // whether they were looking at the last replication or an average over all
+    // of them -- which is exactly what somebody reading it in the terminal UI
+    // asked. The per-replication rows are the evidence the interval is built
+    // from, and v4 exists to say a single run is one sample from a random
+    // variable; hiding the samples argues against that.
+    os << "\n=== " << m_results.size() << " replications, seeds "
+       << m_results.front().seed << ".." << m_results.back().seed << " ===\n";
+    reportReplicationTable(os, m_results);
+    reportReplicationSummary(os, m_results);
+    os << "=====================================================================\n";
 }
 
 }  // namespace des

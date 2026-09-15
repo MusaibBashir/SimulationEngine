@@ -21,6 +21,7 @@
 #pragma once
 
 #include <functional>
+#include <ostream>
 #include <string>
 #include <vector>
 #include "Common.hpp"
@@ -68,6 +69,22 @@ public:
     // The t table itself, exposed so it can be tested directly.
     static double tCritical95(int degreesOfFreedom);
 };
+
+// v13: the two halves of a replication report, on any stream.
+//
+// They are free functions because there are now two callers and only one
+// correct format. RunController grew its own summary in v12 -- unlabelled
+// means with a bare +/- beside them -- and a person reading it in the
+// terminal UI could not tell whether the numbers were the last replication
+// or an average over all of them. Two formats for one thing is how the worse
+// one survives.
+//
+// The summary emits exactly what Experiment::report() has always emitted,
+// which is checked by the byte-identical gate: example 08 prints it.
+void reportReplicationTable(std::ostream& os,
+                            const std::vector<ReplicationResult>& results);
+void reportReplicationSummary(std::ostream& os,
+                              const std::vector<ReplicationResult>& results);
 
 class Experiment {
 public:

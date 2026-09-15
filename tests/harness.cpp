@@ -24,18 +24,34 @@ struct FailLoudlyNotModally {
             _CrtSetReportMode(report, _CRTDBG_MODE_FILE);
             _CrtSetReportFile(report, _CRTDBG_FILE_STDERR);
         }
-        // abort() does NOT flush stdio. Redirected to a file the output is
-        // fully buffered, so an abort discards every line printed before it and
-        // the run looks like it died at the first check. Flushing per insertion
-        // is slow and is the only way the last section printed is the section
-        // that actually failed.
-        std::cout << std::unitbuf;
-        std::cerr << std::unitbuf;
     }
 };
 const FailLoudlyNotModally g_failLoudly;
 }  // namespace
 #endif
+
+namespace {
+// abort() does NOT flush stdio. Redirected to a file -- or piped, which is how
+// every gate script reads this -- the output is fully buffered, so an abort
+// discards every line printed before it and the run looks like it died before
+// the first check. Flushing per insertion is slow, and is the only way the last
+// section printed is the section that actually failed.
+//
+// This was inside an #ifdef _MSC_VER, and the reasoning above never mentioned
+// MSVC: an assert under MinGW printed its message and nothing else, which is a
+// stack trace with the stack removed. It costs nothing to be right everywhere.
+struct FlushEveryLine {
+    // Touching std::cout from a static constructor is only safe once
+    // std::ios_base::Init has run. Declaring one HERE, before it is used, is
+    // the documented way to guarantee that.
+    std::ios_base::Init m_ioGuard;
+    FlushEveryLine() {
+        std::cout << std::unitbuf;
+        std::cerr << std::unitbuf;
+    }
+};
+const FlushEveryLine g_flushEveryLine;
+}  // namespace
 
 namespace des_test {
 

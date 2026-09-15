@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "SimulationSystem.hpp"
+#include "ModelError.hpp"
 #include "Activity.hpp"
 #include "Build.hpp"
 #include "Nodes.hpp"
@@ -422,7 +423,21 @@ void SimulationSystem::initialise() {
 void SimulationSystem::scheduleEvent(EventType type, SimTime t, Entity* e, INode* node) {
     // Scheduling into the PAST is the most common DES bug. Catch it where the
     // mistake is made, not ten thousand events later.
-    assert(t >= m_clock.now());
+    //
+    // A THROW, not an assert, since v15. This was written for the engine's own
+    // bugs, but every duration a model computes passes through here -- a
+    // `Delay = EXPO(1) - 2`, an interarrival that goes below zero -- so it is
+    // also where a person's typing arrives. As an assert it aborted the whole
+    // program, and a release build deleted it and put the event in the past,
+    // which corrupts the run without a word. Thrown, it fails the run and the
+    // message reaches the person who typed it. It still stops right here, so it
+    // still catches an engine bug where the mistake is made. `!(t >= now)`
+    // rather than `t < now`, so a NaN time is refused too.
+    if (!(t >= m_clock.now()))
+        throw ModelError("an event was scheduled for time " + std::to_string(t) +
+                         ", which is before now (" + std::to_string(m_clock.now()) +
+                         ") -- a delay, service or interarrival expression "
+                         "produced a negative duration");
     m_fel.schedule(EventNotice(type, t, e, node));
 }
 

@@ -93,3 +93,19 @@ __pycache__/
 /chunk_1.md
 /chunk_13.md
 /chunk_watched.md
+/tui_roundtrip.des
+/tui_confirm.des
+/tui_session.des
+/tui_mm1.des
+/tui_starter.des
+/tui_quit.des
+/tui_edited.des
+/mm1_v15.des
+/brandnew.des
+/tui_newdir/
+build-release/
+dist/
+
+# The README that ships inside the package. The *.txt rule above is for
+# trace output; without this line a fresh clone could not build a package.
+!packaging/README.txt

@@ -77,6 +77,10 @@ bool AnyOf::isMet(const SimulationSystem& sim) const {
 }
 
 std::string AnyOf::describe() const {
+    // An EMPTY AnyOf is never met, so the run ends when the event list empties.
+    // "AnyOf[]" is technically what it is and tells a reader nothing; a report
+    // header should say what actually stopped the run.
+    if (m_rules.empty()) return "until the model runs out of events";
     std::ostringstream os;
     os << "AnyOf[";
     for (std::size_t i = 0; i < m_rules.size(); ++i) {

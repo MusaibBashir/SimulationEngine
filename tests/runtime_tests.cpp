@@ -1,6 +1,7 @@
 // ============================================================================
 // tests/runtime_tests.cpp  --  v12: the run as something a caller drives
 // ============================================================================
+#include <stdexcept>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -283,16 +284,46 @@ void runRuntimeTests() {
                   "it just means the defaults");
         }
         {
+            // MANY [Run] ROWS, and choosing between them. v11 through v14
+            // reported the second one as an error, on the reasoning that Arena
+            // has one Run Setup. But a file can hold several where a dialog
+            // cannot, and editing the same numbers back and forth to compare a
+            // long horizon against a short one loses what they were.
             ModelDocument m;
-            m.addRow("Run"); m.setCell("Run", 0, "Name", "A");
+            m.addRow("Run"); m.setCell("Run", 0, "Name", "Short");
             m.setCell("Run", 0, "Length", "10");
-            m.addRow("Run"); m.setCell("Run", 1, "Name", "B");
+            m.addRow("Run"); m.setCell("Run", 1, "Name", "Long");
+            m.setCell("Run", 1, "Length", "5000");
+            m.setCell("Run", 1, "Replications", "20");
+
             std::vector<Diagnostic> out;
-            (void)readRunSetup(m, out);
-            bool second = false;
-            for (const Diagnostic& g : out)
-                if (g.cell && g.cell->moduleType == "Run" && g.cell->row == 1) second = true;
-            check(second, "a SECOND [Run] row is reported at that row");
+            const RunSetup first = readRunSetup(m, out, 0);
+            const RunSetup second = readRunSetup(m, out, 1);
+            check(!hasErrors(out), "a second [Run] is no longer an error");
+            check(first.length && *first.length == 10.0, "the first is read by index");
+            check(second.length && *second.length == 5000.0, "and so is the second");
+            check(second.replications == 20, "with its own replication count");
+
+            const std::vector<std::string> names = runNames(m);
+            check(names.size() == 2 && names[0] == "Short" && names[1] == "Long",
+                  "and they are listed by name, which is how one is chosen");
+
+            // OUT OF RANGE READS AS THE DEFAULTS, not as an error. A caller
+            // holding a stale index after a row was deleted is not a broken
+            // model, and refusing would turn an editing mistake into a failure.
+            std::vector<Diagnostic> stale;
+            const RunSetup gone = readRunSetup(m, stale, 9);
+            check(!gone.length.has_value() && !hasErrors(stale),
+                  "an index past the end reads as the defaults");
+        }
+        {
+            // A row with no Name is still a row you may want to run, so it gets
+            // a stand-in rather than an empty line in the list.
+            ModelDocument m;
+            m.addRow("Run");
+            const std::vector<std::string> names = runNames(m);
+            check(names.size() == 1 && !names[0].empty(),
+                  "an unnamed [Run] still has something to call it");
         }
         {
             // Legitimate: a Create with Max Arrivals is finite and the future
@@ -514,5 +545,111 @@ void runRuntimeTests() {
         for (std::size_t i = 0; i < pb.size() && i < ps.size(); ++i)
             checkClose(ps[i].averageWait, pb[i].averageWait, 1e-12,
                        "and a budget boundary between the halves of a pair changes nothing");
+    }
+    section("A multi-replication report shows EVERY replication");
+    {
+        // Reported from the terminal UI: a twelve-replication run printed five
+        // numbers with a bare "+/-" beside each and nothing else, so a reader
+        // could not tell whether those were the last replication or an average
+        // over all twelve. They were the average, and the evidence for it was
+        // not on screen. v4 exists to say a single run is one sample from a
+        // random variable; hiding the samples argues against it.
+        auto build = [](SimulationSystem& sim) {
+            sim.model().arrivals("EXPO(1.0)")
+                       .station("Serve", 1, FIFO, "EXPO(0.8)")
+                       .entryAt("Serve");
+            sim.stopAt(120.0);
+        };
+        RunSetup setup;
+        setup.replications = 5;
+        setup.baseSeed     = 900u;
+
+        RunController c(setup, build);
+        c.runToCompletion();
+        std::ostringstream out;
+        c.report(out);
+        const std::string text = out.str();
+
+        check(text.find("5 replications") != std::string::npos, "it says how many");
+        check(text.find("seeds 900..904") != std::string::npos,
+              "and which seeds, so a result can be reproduced");
+        check(text.find("rep   seed   served") != std::string::npos,
+              "there is a per-replication table");
+        for (const ReplicationResult& r : c.results()) {
+            std::ostringstream seed;
+            seed << r.seed;
+            check(text.find(seed.str()) != std::string::npos,
+                  "with a row for every replication");
+        }
+        check(text.find("95% half-width") != std::string::npos,
+              "and the summary SAYS the interval is a 95% half-width, rather "
+              "than leaving a bare +/- to be guessed at");
+        check(text.find("average wait (Wq)") != std::string::npos,
+              "naming each quantity the way Experiment::report does");
+
+        // One replication is a single run, and prints that run's own report.
+        RunSetup one;
+        one.baseSeed = 900u;
+        RunController single(one, build);
+        single.runToCompletion();
+        std::ostringstream solo;
+        single.report(solo);
+        check(solo.str().find("simulation report") != std::string::npos,
+              "a single replication prints the run's own report, not a table of one");
+    }
+
+    section("A model that fails DURING a run fails the run, not the program");
+    {
+        // Both of these compile, and both used to take the whole program down
+        // the moment they were run -- which, in a terminal UI somebody has been
+        // sent, is the window closing with their unsaved model in it.
+        //
+        //   SQRT(0 - 1)  throws ExpressionError at the first service. startRun()
+        //                caught model errors during setup; advance() caught
+        //                nothing, so it went out through the UI loop and main.
+        //   EXPO(1) - 2  is negative most of the time, and the scheduler met a
+        //                time in the past with an ASSERT. That aborts outright,
+        //                and a release build deletes it and schedules the event
+        //                in the past instead, silently.
+        //
+        // NORM(1, 5) looked like the obvious first case and was not one: the
+        // builder clamps a Normal's left tail at zero, so it runs to the end.
+        // Found by running each expression in its own process rather than by
+        // reading the code, which had suggested the opposite.
+        const auto runWith = [](const std::string& service) {
+            const ModelDocument doc = readDocument(
+                "version = 1\n\n[Run]\nName = R\nLength = 480\n\n"
+                "[Create]\nName = In\nInterarrival = EXPO(2)\nNext = Work\n\n"
+                "[Process]\nName = Work\nService = " + service + "\nNext = Out\n\n"
+                "[Dispose]\nName = Out\n").document;
+            std::vector<Diagnostic> problems;
+            return RunController::fromDocument(doc, problems);
+        };
+
+        for (const std::pair<std::string, std::string>& c :
+             {std::pair<std::string, std::string>{"SQRT(0 - 1)", "SQRT"},
+              std::pair<std::string, std::string>{"EXPO(1) - 2", "negative"}}) {
+            std::unique_ptr<RunController> run = runWith(c.first);
+            check(run != nullptr, "'" + c.first + "' compiles");
+            bool escaped = false;
+            try {
+                if (run) run->runToCompletion();
+            } catch (const std::exception&) {
+                escaped = true;
+            }
+            check(!escaped, "'" + c.first + "': the error does NOT escape advance()");
+            check(run && run->state() == RunState::Failed,
+                  "'" + c.first + "': the run is marked Failed");
+            check(run && run->failure().find(c.second) != std::string::npos,
+                  "'" + c.first + "': and the failure says what went wrong");
+            check(run && run->advance(100) == 0,
+                  "'" + c.first + "': and a failed run stays stopped");
+        }
+
+        // And the clamp that made NORM(1, 5) a non-case keeps working.
+        std::unique_ptr<RunController> norm = runWith("NORM(1, 5)");
+        if (norm) norm->runToCompletion();
+        check(norm && norm->state() == RunState::Finished,
+              "NORM(1, 5) still runs to the end, its left tail clamped at zero");
     }
 }

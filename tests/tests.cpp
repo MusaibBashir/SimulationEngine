@@ -27,6 +27,7 @@ using des_test::section;
 void runExpressionTests();   // tests/expression_tests.cpp
 void runDocumentTests();     // tests/document_tests.cpp
 void runRuntimeTests();      // tests/runtime_tests.cpp
+void runTuiTests();          // tests/tui_tests.cpp
 
 namespace {
 
@@ -1634,6 +1635,7 @@ int main() {
     runExpressionTests();
     runDocumentTests();
     runRuntimeTests();
+    runTuiTests();
 
     std::cout << "\n" << (des_test::g_checks - des_test::g_failures)
               << " / " << des_test::g_checks << " checks passed\n";

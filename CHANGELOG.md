@@ -5,6 +5,324 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [15.2.0] — 2026-09-14 — "A gate you can wait for"
+
+`tools/verify.sh` took about 25 minutes. On a 4-core laptop it now takes about
+**2 min 45 s warm and 5 min 35 s cold**, and it checks at least as much as it
+did. Every change came from measuring where the time went rather than from the
+first explanation of it. Narrative in `V15_READLOG.md`, section 15.2.
+
+### Changed
+
+- **The warnings leg parses each file once per compiler**, all at once. It had
+  re-parsed all of `src/` three times per compiler — once per link unit —
+  although `-fsyntax-only` links nothing.
+- **The MSVC ASan leg builds `/O2` with asserts kept.** Running the suite in the
+  Debug build took 327 s: about 60% was the MSVC STL's iterator debugging, most
+  of the rest `/Od`. Optimised, it runs in 84 s. `NDEBUG` is left out on
+  purpose, and a cached optimised configuration that contains it is
+  reconfigured rather than trusted. `VERIFY_MSVC_CONFIG=Debug` restores the old
+  leg.
+- **The WSL leg builds with `_GLIBCXX_DEBUG`**, so the iterator checking the
+  MSVC leg gave up moved rather than disappearing. It compiles in parallel, on a
+  copy in WSL's own filesystem, and reuses objects from a cache keyed on the
+  compiler, the flags and the preprocessed source.
+- **The three legs run at once**, each reported as it finishes, their results
+  printed in a fixed order.
+- The MSVC build uses `/MP` and `--parallel`.
+- The DES Engine Reference is brought up to date: its version line,
+  `ITerminal::setTitle`, `RunController::advance`'s failed-run behaviour, and
+  the free functions it had never listed — the terminal functions and the
+  document helpers.
+
+### Added
+
+- `tools/verify_wsl.sh`, the WSL leg as its own script, fed to WSL on stdin.
+- **`tui/` is checked.** The Windows terminal goes through GCC and Clang with
+  the full warning set, and the POSIX terminal through WSL's GCC. Until now no
+  gate compiled either.
+- **The two sanitiser legs must agree on the number of checks.** They run the
+  same suite, so a difference means one of them ran less of it.
+- **A time limit on each sanitised suite run** — 15 minutes by default,
+  `VERIFY_SUITE_TIMEOUT` to change it, three times as long for the Debug MSVC
+  configuration. When it runs out the leg fails and names the section the suite
+  was stopped in. Before it, one test sent round a loop held the whole gate open
+  for as long as nobody noticed.
+
+### Fixed
+
+- **The MSVC leg could pass on a stale binary.** A build that failed printed its
+  errors and then ran the previous `des_tests.exe`, which reported clean. The
+  build's exit code is checked now.
+- **A failed gate said "nothing was checked".** The verdict asked whether any leg
+  had passed before asking whether any had failed, so a leg that ran, found a
+  problem and failed was reported as though no toolchain had been found.
+- **Three test loops could spin forever.** Each pressed a key until the palette
+  or the caret moved, and nothing stopped it if that never happened. They are
+  capped now, and assert that they arrived.
+
+---
+
+## [15.1.0] — 2026-09-14 — "Something you can send"
+
+A build of `des_tui` that runs on somebody else's laptop with nothing
+installed — no compiler, no CMake, no libraries. `tools/package.sh` produces a
+folder, a zip and an installer, and refuses to unless the build that ships
+passes the whole suite, imports only Windows' own DLLs, and loads with no
+compiler anywhere on `PATH`. Narrative in `V15_READLOG.md`, section 15.1.
+
+### Added
+
+- **`tools/package.sh`** — a static, optimised build (`-static`, `-O2`, asserts
+  kept) staged into `dist/DES-Simulator/` with the example models and a README,
+  zipped, and compiled into an installer when Inno Setup 6 is installed.
+- **`installer/des-simulator.iss`** — per-user by default, so it installs
+  without administrator rights; Start Menu entries, an optional desktop icon,
+  an optional `.des` file association, and an uninstaller.
+- **`packaging/README.txt`** — the README that goes in the box, written for
+  someone who has never seen this project.
+- **Double-clicking works.** Started with no file, `des_tui` opens
+  `untitled.des` in `Documents\DES Models` — the real Documents folder, found the
+  way Windows finds it, so one redirected into OneDrive is the right one — and
+  reopens it next time.
+- The console window's title names the file that is open.
+- `ITerminal::setTitle`, and `defaultModelPath()` / `launchedOnOwnConsole()` in
+  `Terminal.hpp`. `openTerminal` now takes a `whyNot` and can return null.
+
+### Fixed
+
+- **The executable only ran on this machine.** The development build imports
+  `libstdc++-6.dll` and `libgcc_s_seh-1.dll`, which exist only inside a MinGW
+  install. The failure showed up here before it could reach anyone else: an
+  older `C:\MinGW\bin` sits ahead of WinLibs on `PATH`, and once the tests used
+  `std::filesystem` the test binary would not load — exit 127, and not a single
+  line of output.
+- **`EXPO(1) - 2` in a Service field aborted the program.** The negative
+  duration reached `SimulationSystem::scheduleEvent`, which met a time in the
+  past with an assert; a release build deletes that and schedules the event in
+  the past without a word. It throws now, and `Station::drawService` names the
+  process whose service time went negative.
+- **`SQRT(0 - 1)` and `MOD(1, 0)` ended the program.** `RunController::advance()`
+  caught nothing, so an expression error part way through a run went out through
+  the terminal UI's loop and out of `main`. The run fails with the message.
+- **Started without a console, `des_tui` spun forever** at full speed, because
+  every console read failed and was retried. It says why it cannot start and
+  exits.
+- **Double-clicking with no file flashed a usage line and closed.**
+- **The first save of a new model failed** when its folder did not exist yet.
+  `TuiState::save` creates it.
+- **The test harness only flushed per line under MSVC**, so under MinGW an
+  abort discarded every line printed before it. (15.0 found this; it is listed
+  here because 15.1 is what depended on it.)
+
+### Changed
+
+- A message printed on the way out holds the window open when the program was
+  double-clicked, and only then.
+- If anything still escapes the main loop, the terminal is restored first and an
+  unsaved model is written to `<file>.recovered` before the window can close.
+
+---
+
+## [15.0.0] — 2026-09-11 — "The text is the model"
+
+v13 put a spreadsheet grid on the screen and v14 taught it to explain itself.
+v15 replaces the grid: a module palette on the left, the `.des` file itself in
+a text editor on the right, and Flow, Runs and Results as tabs across the top.
+Narrative in `V15_READLOG.md`.
+
+The inversion is the point. v13 edited a `ModelDocument` and wrote it out,
+which meant a value could be wrong in two places and the writer had to work to
+keep comments alive — v11's central guarantee turned out to be false the first
+time a UI exercised it. Here the buffer IS the file: what is saved is what was
+typed, so the byte-identical round trip is free rather than a property to
+maintain.
+
+### Added
+
+- **`TextBuffer`** — lines, a caret, a selection, an undo/redo stack. The
+  editable value the whole interface now rests on.
+- **A module palette.** `Enter` (or a left click) writes that module's whole
+  record into the text — header and every field, blank — at the caret.
+- **A menu bar**: `Model ^B`, `Flow ^F`, `Runs ^U`, `Results ^E`. Results is
+  dimmed until there are any.
+- **Many `[Run]` records**, named, chosen on the Runs tab. `readRunSetup` takes
+  an index and `runNames()` lists them; `RunController::fromDocument` takes a
+  `whichRun`. v11 through v14 reported the second `[Run]` as an error.
+- **A Results view** that the run lands on when it finishes, with `^W` to save
+  the report beside the model — carrying which run produced it.
+- **Mouse support**, in both terminals: click a tab, click a module to insert
+  it, right-click it to read what it does, click into the text, wheel to
+  scroll. `ENABLE_MOUSE_INPUT` on Win32 and xterm SGR reporting on POSIX.
+- **`Key` carries mouse, function keys and shift** — one event stream, so
+  nothing has to merge two.
+- **`lineOf(document, diagnostic)`** — which line of the file a diagnostic is
+  about. A diagnostic names a *cell*; in a text editor that is useless until
+  something turns it back into a line.
+- **`Row::headerLine`** — where a record's `[Header]` was read from, so an
+  error about a field that is *not there* still has somewhere to point.
+- **Cut, copy, paste and select-all**, with Shift+arrows to select.
+- **`^G`** explains whatever the cursor is on; **`^L`** is Arena's drop-down;
+  **`^J`** jumps to the first error; **`F1`** lists the keys.
+
+### Changed
+
+- **The spreadsheet grid is gone**, along with `Mode`, the detail pane and the
+  per-cell picker. `TuiState` is built around the buffer instead.
+- The POSIX terminal now clears `ISIG`, `IXON` and `IEXTEN`. See Fixed.
+- An empty file no longer reports a missing `version = 1` line.
+- `des_tui` lands on the flowchart when opening a model.
+
+### Fixed
+
+- **A half-typed distribution aborted the program.** `EXPO(` — the open bracket
+  and nothing else — parses to a zero placeholder, and `Exponential` *asserted*
+  on a non-positive mean rather than throwing. `buildCall` wraps every
+  distribution constructor in a `catch (ModelError)` with a comment promising
+  "the parser never throws at a user"; an assert is not a throw, so it went
+  straight past. Six of the nine distributions threw and three asserted, and
+  the three that asserted — Exponential, Uniform, Triangular — were exactly the
+  three a user could reach. `des check` on a file holding `EXPO(` has aborted
+  since v11. In a release build `NDEBUG` deletes the assert instead, leaving a
+  distribution whose mean is zero, which draws zero forever.
+- **`^S` and `^C` never reached the UI on POSIX.** `IXON` meant the terminal
+  driver swallowed `^S` as XOFF and froze the output; `ISIG` meant `^C` raised
+  SIGINT and killed the program; `IEXTEN` meant `^V` ate the following
+  keystroke. Three keys the interface names in its own footer.
+- **`F1` after `^G` showed the field help again**, for ever: the key map is the
+  help overlay with no title, and nothing cleared the title.
+- The status line survived a change of view, so advice about the pick list sat
+  under the Runs tab.
+- The error marker ran into the text it marked: `5 EEntity Type = Gears`.
+- The Runs table header was two columns adrift of its own rows.
+- An overlay cleared only its own rectangle, leaving sentence fragments beside
+  it that read as text rather than as background.
+- **The test harness only flushed per line under MSVC.** Under MinGW an
+  `abort()` discarded every line printed before it, so a failing assert printed
+  its message and nothing else — a stack trace with the stack removed.
+
+---
+
+## [14.0.0] — 2026-09-10 — "Somebody who has used Arena, and nothing else"
+
+v13 let you open, edit, save and run a model. It did not let you *build* one —
+not for want of a keystroke, but because nothing on screen said what any of it
+meant. v14 is the version that can be sat down in front of cold. Narrative in
+`V14_READLOG.md`.
+
+### Added
+
+- **`Column::help` and `ModuleSchema::help`** — one line per column, one
+  paragraph per module, written for somebody who knows Arena. In the *schema*
+  rather than in the UI, because the schema is what a front end reads in order
+  to render. Every helper in `ModuleSchemas.cpp` takes it as a parameter, so a
+  column cannot be declared without one, and a registry-walking test fails on
+  any that is empty.
+- **Pick lists** (`Mode::Picking`). `Enter` on an Enum or Reference cell opens
+  Arena's drop-down. `Escape` does not cancel — it drops into the text editor,
+  so a block can be named before it exists.
+- **`referenceCandidates()`** — public in `Compiler.hpp`. The pick list and the
+  compiler's reference pass are one function, so a list cannot offer a name
+  that is then rejected.
+- **`^T`** — fills a blank document with a working single-server model,
+  comments included, that runs as it stands. Refuses on a document with rows.
+- **`?`** — the key map, and the one thing an Arena user will not guess: there
+  is no canvas, and a connection is a name typed into a `Next` cell.
+- **`^F`** (`Mode::Flow`, `flowOf()`, `FlowBlock`) — the wiring, read from the
+  cells rather than from a compiled model, so it works on a document that does
+  not compile. Names dangling exits and unreached blocks; `Enter` jumps there.
+- **`ITerminal::keyPending()`** — a fourth method, with `select()` on POSIX and
+  `PeekConsoleInputW` on Win32.
+- **`reportReplicationTable()` / `reportReplicationSummary()`** — shared by
+  `Experiment::report()` and `RunController::report()`.
+
+### Changed
+
+- Tabs carry their row count; types with no rows are dimmed.
+- Opening a model lands on its first **flowchart** type with rows, not on
+  `Variable`.
+- Help prose wraps at spaces everywhere (`wrapText`), and where a hard cap
+  applies the last line ends in `...`.
+- The detail pane scrolls three lines early, so the selected field's help and
+  diagnostic have somewhere to go.
+
+### Fixed
+
+- **`^R` on a model built from scratch aborted the program.** No `[Run]` row
+  meant no stopping rule, and `initialise()` asserts one exists — and `abort()`
+  skips destructors, so the terminal UI left the console in raw mode. An empty
+  `AnyOf` is never met, so the run ends when the event list empties, which is
+  what `readRunSetup`'s warning already promised.
+- **A run could not be interrupted.** The loop advanced without ever reading a
+  key.
+- **A multi-replication run printed only the summary.** `RunController::report`
+  had invented a second, poorer format instead of reusing `Experiment`'s. Both
+  now share the reporters; `Experiment::report()`'s output is byte-identical,
+  which the baseline gate proves through example 08.
+- **The flow view listed a Decide's `Next` first.** It is the ELSE exit, taken
+  last; printed first it reads as the default path being tried first.
+- Help was cut off mid-word at the border.
+- The last field in the detail pane could never show its help.
+
+---
+
+## [13.0.0] — 2026-09-07 — "The spreadsheets get a screen"
+
+A terminal front end over the three layers built for it: open a `.des` file,
+edit it as spreadsheets, save without disturbing what you did not touch, and
+run it. Narrative in `V13_READLOG.md`.
+
+### Added
+
+- **`des_tui`** — the terminal UI. A tab bar of module types, a grid, a
+  row-detail pane where editing happens, diagnostics against the cell that
+  caused them, undo, and a run view.
+- **`Screen`** — a grid of glyphs, comparable and printable as plain text.
+  The value the whole design rests on: `render()` fills one and a test asserts
+  on what a person would read.
+- **`Key`** — a keypress as a value, so a test can type without a terminal.
+- **`ITerminal` and `openTerminal()`** — three methods and the only platform
+  code in the project, with a Win32 console and a POSIX termios implementation.
+- **`TuiState`, `render()`, `handleKey()`** — the document, cursor, modes,
+  diagnostics and undo stack; a pure renderer; a pure input handler.
+- **`des_ui`** — a second library target linking `des_engine`, and
+  `include/des_ui.hpp`, a second umbrella. The engine's umbrella does not pull
+  in the UI.
+- **`ModelDocument::Row::source` and `Row::edited`** — per-row source text and
+  edit tracking.
+
+### Changed
+
+- **An edit no longer reformats the whole file.** See Fixed.
+- `tools/baseline.sh` compares the newest source against the newest build
+  artefact rather than the newest example binary.
+
+### Fixed
+
+- **A single cell edit destroyed every comment in the file.** `m_edited` was
+  one flag for the whole document, so any edit re-emitted everything
+  canonically — the exact failure `V11_READLOG.md` says a front end must not
+  have, in the same paragraph where it claimed v11 avoided it. Each row now
+  carries its own source block and edited flag, including the comments that
+  preceded its header, so a record keeps its annotation when it moves and takes
+  it away when deleted. That readlog now carries the correction.
+- **`tools/baseline.sh` refused to run after a successful build.** Its
+  staleness guard compared against example binaries, which no longer relink
+  when a UI source changes.
+- Six layout bugs found by rendering the UI and reading it, none of which any
+  assertion on screen text could have caught: the selected tab could be off the
+  edge, the file name was trimmed from the wrong end, the detail pane did not
+  scroll, an enum hint ran on from the value, text overflowed the frame, and a
+  finished run reported that its rule could not say how far along it was.
+
+### Compatibility
+
+Nothing existing breaks. All 930 v12 checks pass unchanged, every gated example
+traces byte-identically, every gated model file still produces its report, and
+an unedited document still round-trips byte for byte.
+
+---
+
 ## [12.0.0] — 2026-09-06 — "The run becomes something you can drive"
 
 A run is now something a caller owns: step it, watch it, pause it, cancel it,

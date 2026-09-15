@@ -77,14 +77,30 @@ void Station::setUnitsNeeded(int units) {
 }
 
 SimTime Station::drawService(NodeContext& ctx, const Entity& e) {
+    // THROWS, NOT ASSERTS, and names the process. Both of these are reached by
+    // what a person types: `Service = EXPO(1) - 2` is negative most of the
+    // time, and an attribute an Assign never set is one typo away. As asserts
+    // they aborted the program with a file and line number from inside the
+    // engine; a release build deleted them and scheduled the service to end
+    // before it began. `!(t >= 0)` rather than `t < 0`, so a NaN is refused too.
     if (m_serviceAttribute.empty()) {
         EvalContext ectx = ctx.evaluationContext(&e);
-        return static_cast<SimTime>(asNumber(m_service->evaluate(ectx)));
+        const SimTime t = static_cast<SimTime>(asNumber(m_service->evaluate(ectx)));
+        if (!(t >= 0.0))
+            throw ModelError("process '" + m_name + "': its service time came out "
+                             "negative (" + std::to_string(t) + ") -- a duration "
+                             "cannot be");
+        return t;
     }
-    assert(e.hasAttribute(m_serviceAttribute) &&
-           "station reads service time from an attribute the entity does not have");
+    if (!e.hasAttribute(m_serviceAttribute))
+        throw ModelError("process '" + m_name + "' reads its service time from the "
+                         "attribute '" + m_serviceAttribute + "', which this entity "
+                         "was never given");
     const SimTime t = e.attribute(m_serviceAttribute);
-    assert(t >= 0.0 && "negative service time");
+    if (!(t >= 0.0))
+        throw ModelError("process '" + m_name + "': the attribute '" +
+                         m_serviceAttribute + "' holds a negative service time (" +
+                         std::to_string(t) + ")");
     return t;
 }
 

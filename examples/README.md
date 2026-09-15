@@ -421,6 +421,58 @@ teller.des: Process row 1, Service (col 9): error: expected ')'
 - **A `[Run]` with no stopping condition is a warning, not an error.** A Create
   with `Max Arrivals` is finite and ends on its own.
 
+## Editing a model, and building one (v15)
+
+```sh
+./build/des_tui examples/models/teller.des
+```
+
+A module palette on the left, the `.des` file itself in a text editor on the
+right, and `Model` / `Flow` / `Runs` / `Results` as tabs across the top. The
+mouse works: click a tab, click a module to insert it, right-click one to read
+what it does, click into the text.
+
+**The text is the model.** The buffer holds the file and the parsed document,
+the diagnostics, the flow and the list of runs are all derived from it after
+every keystroke. What you save is what you typed, so comments, spacing and
+ordering survive because nothing rewrites them.
+
+| | |
+|---|---|
+| `F1` | the key map |
+| `^B` `^F` `^U` `^E` | Model, Flow, Runs, Results |
+| `Tab` | between the palette and the text |
+| `Enter` in the palette | write that module's record into the text |
+| `^G` | explain whatever the cursor is on |
+| `^L` | list the values a field allows |
+| `^J` | jump to the first error |
+| `^T` | write a working model into an empty file |
+| `^R` / `^W` | run / save the results |
+| `^S` `^Z` `^Y` `^X` `^C` `^V` `^A` | save, undo, redo, cut, copy, paste, select all |
+| `^Q` | quit, asking first if there is unsaved work |
+
+**Picking a module writes every field, blank** — not only the required ones.
+Delete the lines you do not need.
+
+**`^L` on an enum or a reference is Arena's drop-down.** It is built from the
+same function the compiler's reference pass checks against, so it cannot offer
+a name that is then rejected. `Escape` closes it and leaves you typing, because
+wiring `Serve → Out` *before* `Out` exists is the ordinary way a model gets
+built.
+
+**Errors are marked in the gutter on the line they are about**, and `^J` goes
+to the first one. Pressing `^R` on a model that does not compile names the
+actual problem rather than saying it will not run.
+
+**Many `[Run]` records.** Name them and pick one on the Runs tab; the Results
+tab remembers which produced what, and `^W` saves the report beside the model.
+
+**`^F` shows the wiring**, read from the cells — so it works on a file that
+does not compile, naming exits that point nowhere and blocks nothing arrives
+at.
+
+**A model with no `[Run]` record runs anyway**, until the event list empties.
+
 ## Mistakes to avoid
 
 **Reading one block's utilisation as its resource's.** With a shared pool, each

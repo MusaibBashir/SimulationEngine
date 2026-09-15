@@ -78,6 +78,67 @@ what an earlier one wrote.
 the next. A terminal front end cannot, so `Next`, `Duplicate`, `Balk To` and
 `Renege To` are cells. A blank exit means the entity leaves the system.
 
+## The spreadsheets, on a screen (v13), and then the file itself (v15)
+
+v13 rendered these tables the way Arena renders its module spreadsheets: a list
+of module types, a grid of rows, and a detail view of the current row where
+editing happens.
+
+**v15 edits the file instead.** A module palette on the left plays the part of
+Arena's project bar — pick a module, and its whole record appears in the text
+with every field listed and blank, which is what an Arena dialog shows you.
+There is no grid and no dialog, because there is no representation between you
+and the model: the `.des` text is the model.
+
+**The one difference that will not go away.** Arena has a canvas: you draw a
+connection from one module to the next and the picture is the model. A terminal
+cannot draw, so this engine's flowchart lives in `Next`, `Duplicate`, `Balk To`
+and `Renege To` columns, and the shape of a model is read rather than seen. That
+is not a limitation of the front end — it is why v11's data model put routing in
+columns in the first place, and a canvas-based editor built later would have to
+render those columns as lines rather than the other way round.
+
+v14 goes as far towards the picture as a terminal can: `^F` reads those columns
+back out and prints the chain, naming exits that point nowhere and blocks
+nothing arrives at. It reads the *cells*, so it works on a model that does not
+yet compile — which is when the shape is hardest to hold in your head.
+
+## Arena's habits, and where they land (v15)
+
+| In Arena you would | Here |
+|---|---|
+| Drag a module onto the canvas | Pick it from the palette on the left — `Enter`, or click it |
+| Draw a connection between two modules | Type the next block's name into `Next` — or `^L` on that line and pick it off a list |
+| Open a module's dialog | The record is already in front of you; every field is a line |
+| Pick from a drop-down | `^L` on an Enum or Reference line |
+| Type a name a drop-down does not offer yet | `Escape` in the list, then type it |
+| Look at the whole flowchart | `^F` |
+| Open Run Setup | the `Runs` tab, and there may be several |
+| Read the queue's properties | the `[Process]` record — Arena's Queue module is a view of it |
+| Press F1 | `^G` explains the field the cursor is on; `F1` lists the keys |
+| Read the output report | the `Results` tab; `^W` saves it |
+
+**Naming a block before it exists is normal, and stays easy.** Arena lets you
+draw a connection only between two modules that are both on the canvas. This
+engine's `Next` is text, so `Serve → Out` can be written before `Out` exists —
+the reference pass reports it as unresolved until it does, and the pick list
+gets out of the way (`Escape`) rather than blocking it. That is a genuine
+advantage of routing-in-columns, not a workaround for the lack of a canvas.
+
+**A model with no `[Run]` row still runs**, until the event list empties.
+Arena refuses to run without Run Setup values; this engine treats the absence
+as a stopping rule of its own and names it in the report.
+
+**Several Run Setups at once.** Arena keeps one, and comparing a 500-hour run
+against a 50-hour one means editing it and editing it back. A `.des` file holds
+as many `[Run]` records as you like; name them, and the Runs tab picks which to
+run. The Results tab says which one produced what.
+
+**There is no canvas, and the file is the model.** Arena's `.doe` is a binary
+its editor owns. A `.des` file is text you can diff, review, generate, keep in
+version control and edit in anything — and `des_tui` edits that text directly
+rather than a representation of it.
+
 ## Report line → what to call
 
 | Arena report line | Here |

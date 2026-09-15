@@ -14,7 +14,27 @@ namespace des {
 
 
 // ------------------------------------------------------------- Exponential --
-Exponential::Exponential(SimTime mean) : m_mean(mean) { assert(mean > 0.0); }
+// THROWS, and does not assert. Six of the nine distributions in this file threw
+// a ModelError on a bad parameter and three asserted, and the three that
+// asserted were exactly the three a user could reach: buildCall() wraps every
+// distribution constructor in a catch for ModelError, with a comment promising
+// that "the parser never throws at a user" -- and an assert is not a throw, so
+// it went straight past.
+//
+// Typing EXPO( into a cell was enough. The parser reports the missing bracket
+// and substitutes a zero placeholder for the argument; the placeholder is a
+// constant, so the call builds its distribution eagerly, and exponential(0)
+// aborted the program. `des check` on a file holding a half-typed EXPO( has
+// done that since v11. It surfaced in v15 because a text editor re-compiles on
+// every keystroke, so EXPO( is a state the compiler sees every single time
+// somebody types EXPO(1.0).
+//
+// Worse in a release build: NDEBUG deletes the assert, leaving a distribution
+// whose mean is zero, which draws zero forever and wedges the event loop at
+// time 0 with no message at all.
+Exponential::Exponential(SimTime mean) : m_mean(mean) {
+    if (mean <= 0.0) throw ModelError("Exponential: mean must be positive");
+}
 
 SimTime Exponential::draw(RandomStream& rng) { return pick(rng).exponential(m_mean); }
 
@@ -47,7 +67,9 @@ std::string Constant::describe() const {
 
 // ----------------------------------------------------------------- Uniform --
 Uniform::Uniform(SimTime low, SimTime high) : m_low(low), m_high(high) {
-    assert(high >= low);
+    // Reachable from a cell: UNIF(1, is a zero placeholder for the second
+    // argument, and 0 >= 1 is false. See the note on Exponential.
+    if (high < low) throw ModelError("Uniform: high must be at least low");
 }
 
 SimTime Uniform::draw(RandomStream& rng) { return pick(rng).uniform(m_low, m_high); }
@@ -61,7 +83,9 @@ std::string Uniform::describe() const {
 // -------------------------------------------------------------- Triangular --
 Triangular::Triangular(SimTime low, SimTime mode, SimTime high)
     : m_low(low), m_mode(mode), m_high(high) {
-    assert(low <= mode && mode <= high);
+    // Reachable from a cell: TRIA(1,2, leaves a zero where the high should be.
+    if (!(low <= mode && mode <= high))
+        throw ModelError("Triangular: needs low <= mode <= high");
 }
 
 SimTime Triangular::draw(RandomStream& rng) {
@@ -79,7 +103,10 @@ std::string Triangular::describe() const {
 // ----------------------------------------------------------- Deterministic --
 Deterministic::Deterministic(std::vector<SimTime> values, bool repeat)
     : m_values(std::move(values)), m_cursor(0), m_repeat(repeat) {
-    assert(!m_values.empty() && "Deterministic needs at least one value");
+    // Not reachable from a cell -- Deterministic has no Arena spelling and
+    // stays programmatic-only -- but a constructor validating its parameter is
+    // the same shape as the three above, and one file should answer one way.
+    if (m_values.empty()) throw ModelError("Deterministic: needs at least one value");
 }
 
 SimTime Deterministic::draw(RandomStream& /*rng*/) {

@@ -3,7 +3,7 @@
 Written from the simulation theory table up, as a way of learning OOP and system
 design rather than as a way of getting a simulator.
 
-**Current state: v12.** A flowchart simulator in the spirit of Arena's Basic
+**Current state: v13.** A flowchart simulator in the spirit of Arena's Basic
 Process template — Process, Delay, Assign, Decide, Batch, Separate, Record,
 Dispose — with **shared resources**, balking and reneging, warm-up removal,
 replications and confidence intervals. Refuses to run an unstable model, working
@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 930/930 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1383/1383 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -31,6 +31,27 @@ owns the loop: advance a budget of events, redraw, advance again. Pause, cancel
 and live statistics fall out of that, and `des regress` runs a manifest of
 models and diffs their reports. See **Watching a run** below.
 
+**v13: a model can be edited on a screen.** `des_tui` opens a `.des` file as
+one spreadsheet per module type, edits cells with the diagnostics shown against
+the cell that caused them, saves without disturbing the records you did not
+touch, and runs the model. See **The terminal UI** below.
+
+**v14: a model can be built from nothing, by somebody who has only used
+Arena.** Every column in every module carries a line saying what it is for —
+in the *schema*, so any front end gets it. `Enter` on an enum or a reference
+opens Arena's drop-down, built from the same function the compiler validates
+against, and `Escape` drops into typing so a block can be named before it
+exists. `^T` fills a blank page with a working model, `^F` shows the wiring,
+and a key map says the one thing an Arena user will not guess: there is no
+canvas, and a connection is a name typed into a `Next` field.
+
+**v15: the model IS the text.** A module palette on the left, the `.des` file
+in an editor on the right, and Flow, Runs and Results as tabs across the top —
+with the mouse working throughout. The buffer is the source of truth and
+everything else is derived from it after every keystroke, so what you save is
+what you typed. `[Run]` records can be named and kept side by side, and the
+Results tab remembers which one produced what.
+
 ```cpp
 #include "des.hpp"
 using namespace des;
@@ -48,6 +69,7 @@ sim.stopAt(480.0).execute().report();
 cmake -S . -B build && cmake --build build
 ./build/des_demo     # five demonstration scenarios
 ./build/des          # the model-file tool: des check / des run / des regress
+./build/des_tui      # the terminal UI: edit a model file
 ./build/des_tests    # the unit suite
 cd build && ctest
 ```
@@ -61,7 +83,7 @@ g++ -std=c++17 -Wall -Wextra -Wpedantic -Iinclude main.cpp src/*.cpp -o des
 **The verification gate, in one command each:**
 
 ```
-bash tools/verify.sh      # both compilers warning-clean, plus MSVC AddressSanitizer
+bash tools/verify.sh      # GCC + Clang warning-clean, MSVC ASan, WSL ASan + UBSan
 bash tools/baseline.sh check   # every example still byte-identical
 ./build/des regress            # every model file still produces its report
 ```
@@ -75,6 +97,18 @@ too old. **UBSan does not exist on the Windows side** — MinGW ships no
 `libubsan` and MSVC has none — so the script runs ASan and UBSan through **WSL's
 Linux GCC** instead, and skips that leg loudly if WSL is absent rather than
 passing silently.
+
+**The three legs run at the same time.** On a 4-core laptop that takes about
+2¾ minutes once the WSL leg's object cache is warm, and about 5½ from cold —
+down from about 25. The MSVC leg builds optimised with asserts kept, because
+*running* the suite in its Debug build took over five minutes on its own; the
+iterator checking that Debug build provided is done by the WSL leg under
+`_GLIBCXX_DEBUG` instead. `VERIFY_MSVC_CONFIG=Debug bash tools/verify.sh asan`
+brings the old MSVC leg back.
+
+**Each sanitised suite run has a time limit** — fifteen minutes by default,
+`VERIFY_SUITE_TIMEOUT=<seconds>` to change it. A run that hits it fails, naming
+the section it was stopped in, instead of holding the gate open indefinitely.
 
 Before and after any refactor — entities are destroyed at departure, so a
 routing mistake becomes a use-after-free, and this is what proves it hasn't:
@@ -246,6 +280,132 @@ if (compileInto(read.document, sim.model(), problems))
     sim.stopAt(480.0).execute().report();
 ```
 
+## The terminal UI
+
+```
+./build/des_tui examples/models/teller.des
+```
+
+`des_tui newmodel.des` on a file that does not exist opens a blank page.
+
+A **module palette** on the left, the **`.des` file itself** on the right, and
+the other three views as tabs across the top:
+
+```
+  Model ^B  Flow ^F  Runs ^U  Results ^E                 examples/models/teller.des
++- Modules ------- 25 lines --------------------------------------------------+
+| Variable      |   1   version = 1                                           |
+| Entity        |   2                                                         |
+| Resource      |   3   # How to run it. Arena keeps this in Run Setup; here  |
+| Expression    |   4   # it is a module like any other.                      |
+| Run 1         |   5   [Run]                                                 |
+| Create 1      |   6   Name         = Setup                                  |
+| Process 1     |   7   Length       = 480                                    |
+| Delay         |   8   Replications = 1                                      |
+| Assign        |   9                                                         |
+| Decide        |  10   [Create]                                              |
+| Batch         |  11   Name         = Arrivals                               |
+| Separate      |  12   Interarrival = EXPO(1.0)                              |
+| Record        |  13   Next         = Serve                                  |
+| Dispose 1     |  14                                                         |
+| DecideBranch  |  15   [Process]                                             |
+| AssignField   |  16   Name       = Serve                                    |
++-----------------------------------------------------------------------more v-+
+examples/models/teller.des
+^S save  ^R run  ^L list  ^G help  ^J error  ^T starter  F1 keys
+```
+
+**The text is the model.** The buffer holds the file and everything else — the
+parsed document, the diagnostics, the flow, the list of runs — is derived from
+it after every keystroke. So what you save is what you typed: comments,
+spacing and ordering survive because nothing rewrites them.
+
+| Key | |
+|---|---|
+| `F1` | the key map, and the one thing an Arena user will not guess |
+| `^B` `^F` `^U` `^E` | Model, Flow, Runs, Results |
+| `Tab` | swap between the palette and the text |
+| `Enter` | in the palette: write that module into the text |
+| `^G` | explain whatever the cursor is on |
+| `^L` | list the values a field allows — Arena's drop-down |
+| `^J` | jump to the first error |
+| `^T` | write a working model into an empty file |
+| `^R` | run it; `^N` on the Runs tab adds another `[Run]` |
+| `^W` | save the results |
+| `^S` `^Z` `^Y` `^X` `^C` `^V` `^A` | save, undo, redo, cut, copy, paste, select all |
+| `^Q` | quit — and it **asks** if there is unsaved work |
+
+**The mouse works too**: click a tab, click a module to insert it, right-click
+one to read what it does, click into the text to put the caret there, and the
+wheel scrolls whatever is under it.
+
+**There is no canvas, and that is the one thing to know.** A model is this
+text, and a *connection* is the name of the next block typed into a `Next`
+field. Everything else maps onto Arena directly — `ARENA_MAP.md` has the table.
+
+**Picking a module writes the whole record**, header and every field, blank:
+
+```
+[Process]
+Name =
+Capacity =
+Resource =
+Units =
+Discipline =
+Service =
+Balk At =
+...
+```
+
+Every field, not only the required ones — a template that hid the optional half
+would hide balking, reneging and entity types behind knowing they exist. Delete
+the lines you do not need; a blank field means "unset", which is what the
+schema's default already says.
+
+**`^L` on an enum or a reference is Arena's drop-down.** The list is built by
+the same function the compiler's reference pass checks against, so it cannot
+offer a name that is then rejected. `Escape` closes it and leaves you typing,
+because naming a block *before that block exists* is the ordinary way a model
+gets built and no list can offer that.
+
+**Errors are marked in the gutter, on the line they are about:**
+
+```
+|   4   Name = A                                       |
+|   5 E Entity Type = Gears                            |
+|   6   Interarrival = EXPO(0.6)                       |
+|   7 E Next = Nowhere                                 |
+```
+
+A diagnostic names a *cell*; `lineOf()` turns that back into a line, and `^J`
+takes you to the first one. Pressing `^R` on a model that does not compile
+names the actual problem rather than saying it will not run.
+
+**Many `[Run]` records, chosen by name.** Arena keeps one Run Setup and makes
+you edit it to try a longer horizon; a file can hold several:
+
+```
++-- runs --------------------------------------------------------------+
+|  name              length   warm-up   reps   seed                    |
+|> Short             50       0         1      12345                   |
+|  Long              5000     500       20     12345                   |
++----------------------------------------------------------------------+
+Up/Down choose   Enter runs it   ^N adds one   F1 keys
+```
+
+**Results are a tab**, dimmed until there are any, and the run lands on them
+when it finishes. `^W` writes the report beside the model, carrying which run
+produced it.
+
+**^F shows the wiring**, read from the cells rather than from a compiled model
+— so it works on a file that does *not* compile, which is when you most need
+it. It names exits that point nowhere and blocks nothing arrives at, and
+`Enter` puts the cursor on that record. A `Decide` lists its branches **in the
+order they are tried**, with its `Next` shown last as `else ->`.
+
+**A model with no `[Run]` record runs anyway**, until the event list empties —
+which is what the reader's warning has always promised.
+
 ## Watching a run
 
 `run()` blocks until the stopping rule is met, which is right for a program and
@@ -354,6 +514,40 @@ than as a slightly-off average — which is a far stronger statement.
 guide written for someone who knows C++ but not this codebase. You should not
 need to read the engine's source to build a model with it.
 
+## Sending it to someone else
+
+```
+bash tools/package.sh 15.1.0
+```
+
+produces, in `dist/`:
+
+| File | For |
+|---|---|
+| `DES-Simulator-15.1.0-windows-x64.zip` | unzip anywhere, double-click `DES-Simulator.exe` |
+| `DES-Simulator-15.1.0-setup.exe` | an installer: no administrator rights needed, a Start Menu entry, and — if ticked — `.des` files open on double-click |
+
+Either runs on Windows 10 or 11 with **nothing else installed**: no compiler,
+no CMake, no DLLs. The exe is linked statically, because the development build
+needs `libstdc++-6.dll` and `libgcc_s_seh-1.dll` from a MinGW install and simply
+will not start without them.
+
+The script **refuses to produce either** unless the build that ships passes the
+whole test suite as itself, imports nothing but Windows' own libraries, and
+loads with `PATH` cut down to `C:\Windows`. It is built `-O2` but *without*
+`-DNDEBUG`: this project's asserts guard things a person can type, and a release
+build that deleted them would run wrong rather than stop.
+
+**Double-clicked with no file**, it opens `untitled.des` in
+`Documents\DES Models` and reopens that file next time. Drag any `.des` onto the
+exe to open it instead.
+
+**Windows will warn the first time** — "Windows protected your PC" — because the
+exe is not code-signed. *More info → Run anyway*. Removing that needs a paid
+code-signing certificate.
+
+**Windows only, for now.** Nothing has been packaged for macOS or Linux.
+
 ## Documents
 
 | File | What it is |
@@ -370,6 +564,9 @@ need to read the engine's source to build a model with it.
 | `V9_READLOG.md` | Multiple sources, entity types, matched batching, terminating runs |
 | `V11_READLOG.md` | The document layer: schemas, the .des format, and two gates that were not gating |
 | `V12_READLOG.md` | Runtime control: stepping, progress that can say it does not know, and three sabotages that proved nothing |
+| `V13_READLOG.md` | The terminal UI, and the v11 guarantee it proved false |
+| `V14_READLOG.md` | Building a model from nothing: pick lists, the starter model, and four bugs only looking found |
+| `V15_READLOG.md` | The grid becomes a text editor, and the assert that had been one keystroke away since v11 |
 | `ARENA_MAP.md` | Arena module → this engine, and where the two differ |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
@@ -379,11 +576,12 @@ need to read the engine's source to build a model with it.
 sim/
 ├── CMakeLists.txt   README.md   CHANGELOG.md   V2_READLOG.md   V3_READLOG.md
 ├── main.cpp         five scenarios (des_demo)
-├── cli/             the des command: check and run a model file
+├── cli/             the des command: check, run and regress
+├── tui/             des_tui: the terminal UI, and the only platform code
 ├── examples/models/ hand-written .des models
-├── tests/           930 unit checks
-├── include/         43 headers
-└── src/             38 sources
+├── tests/           1383 unit checks
+├── include/         50 headers
+└── src/             42 sources
 ```
 
 Headers declare, sources define. One-line getters stay inline. Every `.cpp`
@@ -484,20 +682,7 @@ two and every time-average goes quietly wrong with no error.
 
 ---
 
-# v13 — the order to do it in
-
-1. **The TUI**, in its own repository, over `ModuleRegistry`, `ModelDocument`
-   and `RunController`: a module list, a spreadsheet per module type, a cell
-   editor, and a run it can watch. It reads the schema at runtime, so it must
-   never name a module type in its own source — that is the property the flat
-   child tables were chosen to protect. Everything it needs now exists; nothing
-   renders it.
-2. **Diagnostics rendered in the grid**, using the `CellRef` v11 added. The
-   mechanism exists; nothing displays it yet.
-3. **Undo** — which is why document rows are addressed by position and why the
-   document keeps its source lines.
-
-Still open from v9, untouched by v10, v11 or v12:
+# v15 — the order to do it in
 
 1. **Resource schedules** — a nurse who goes off shift at 5pm. Arena has it; it
    needs a capacity that varies with time, which interacts with every ρ
@@ -505,11 +690,19 @@ Still open from v9, untouched by v10, v11 or v12:
 2. **Preemption** — a high-priority entity taking a resource off a low-priority
    one mid-service. Lazy cancellation does *not* solve this: the interrupted
    entity has to requeue carrying its remaining service time.
-3. **Batch means** — one long run split into batches, as an alternative to
+3. **Redo**, and a saved-at marker in the undo stack so that undoing back to
+   what is on disk clears the dirty flag honestly instead of leaving it set.
+4. **Batch means** — one long run split into batches, as an alternative to
    independent replications when the warm-up is expensive to repeat.
-4. **Distribution fitting** — hand it data, have it suggest a distribution and
+5. **Distribution fitting** — hand it data, have it suggest a distribution and
    report a goodness-of-fit statistic. `StreamTests` already has the chi-square
    and Kolmogorov–Smirnov machinery; this is mostly wiring plus parameter
    estimation.
+6. **A `[Run]` row from the UI without typing one.** ^T writes one; a model
+   built row by row does not get one, and it runs to event-list exhaustion
+   instead. That is honest but it is not what somebody wanted.
 
-Config-file input, item 4 on the v9 list, is what v11 turned out to be.
+Config-file input, item 4 on the v9 list, is what v11 turned out to be. The
+module palette, item 1 on the v14 list, turned out not to need a picker or an
+answer to "where does it go in file order": `^N` on a tab already appends, and
+the question was only ever which *type* — which the tab bar already answers.

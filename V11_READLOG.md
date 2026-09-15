@@ -74,8 +74,19 @@ That is more state than a document layer wants, and it is worth being explicit
 about why it earns its place. A front end that cannot save is annoying. A front
 end that saves a file the user did not edit, silently reformatting it and
 destroying their comments, is *worse than one that cannot save at all* — the
-damage is invisible until they diff it. Only edited rows are re-emitted, in
-canonical schema-column order; everything else comes back untouched.
+damage is invisible until they diff it.
+
+> **This paragraph used to end "Only edited rows are re-emitted, in canonical
+> schema-column order; everything else comes back untouched." That was false
+> when it was written, and it stayed false for a whole version.** v11's edited
+> flag was one bool for the entire document: an untouched file wrote back
+> verbatim, but *any* edit re-emitted the whole thing canonically and destroyed
+> every comment in it — the exact failure the sentence above calls worse than
+> not being able to save at all. Nothing caught it because nothing could edit
+> and save except code that did not care; v13's terminal UI was the first
+> caller to reach it, and its round-trip test failed on the first run. v13 gives
+> each ROW its own source block and edited flag, so the claim is now true. See
+> `V13_READLOG.md`.
 
 The same property is why `.gitattributes` now pins `*.des` to LF. Git on Windows
 would check the files out with CRLF, the reader drops CR and the writer emits

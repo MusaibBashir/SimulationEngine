@@ -199,16 +199,55 @@ bool Experiment::writeWelchSeries(const std::string& path, int window) const {
 }
 
 namespace {
-void line(const char* label, const std::vector<double>& xs) {
+void line(std::ostream& os, const char* label, const std::vector<double>& xs) {
     const double m  = Summary::mean(xs);
     const double hw = Summary::halfWidth95(xs);
-    std::cout << "  " << std::setw(22) << std::left << label << std::right
-              << std::setw(10) << m
-              << "  +/- " << std::setw(8) << hw
-              << "   [" << std::setw(9) << (m - hw)
-              << ", " << std::setw(9) << (m + hw) << "]\n";
+    os << "  " << std::setw(22) << std::left << label << std::right
+       << std::setw(10) << m
+       << "  +/- " << std::setw(8) << hw
+       << "   [" << std::setw(9) << (m - hw)
+       << ", " << std::setw(9) << (m + hw) << "]\n";
+}
+
+std::vector<double> columnOf(const std::vector<ReplicationResult>& rs,
+                             double ReplicationResult::* field) {
+    std::vector<double> xs;
+    xs.reserve(rs.size());
+    for (const ReplicationResult& r : rs) xs.push_back(r.*field);
+    return xs;
 }
 }  // namespace
+
+void reportReplicationTable(std::ostream& os,
+                            const std::vector<ReplicationResult>& results) {
+    os << std::fixed << std::setprecision(4);
+    os << "  rep   seed   served   avg wait   in system         Lq          L     util\n";
+    os << "  --------------------------------------------------------------------------\n";
+    int n = 0;
+    for (const ReplicationResult& r : results) {
+        os << "  " << std::setw(3) << ++n
+           << std::setw(7) << r.seed
+           << std::setw(9) << r.served
+           << std::setw(11) << r.averageWait
+           << std::setw(12) << r.averageTimeInSystem
+           << std::setw(11) << r.Lq
+           << std::setw(11) << r.L
+           << std::setw(9) << r.utilisation << "\n";
+    }
+}
+
+void reportReplicationSummary(std::ostream& os,
+                              const std::vector<ReplicationResult>& results) {
+    os << std::fixed << std::setprecision(4);
+    os << "\n  " << std::setw(22) << std::left << "quantity" << std::right
+       << std::setw(10) << "mean" << "      95% half-width      interval\n";
+    os << "  ---------------------------------------------------------------------\n";
+    line(os, "average wait (Wq)",    columnOf(results, &ReplicationResult::averageWait));
+    line(os, "time in system (W)",   columnOf(results, &ReplicationResult::averageTimeInSystem));
+    line(os, "number in queue (Lq)", columnOf(results, &ReplicationResult::Lq));
+    line(os, "number in system (L)", columnOf(results, &ReplicationResult::L));
+    line(os, "utilisation (rho)",    columnOf(results, &ReplicationResult::utilisation));
+}
 
 Experiment::Comparison Experiment::compare(Experiment& a, Experiment& b,
                                            double ReplicationResult::* field) {
@@ -241,14 +280,7 @@ void Experiment::report() const {
     std::cout << "warm-up discarded        : " << m_warmUp << "\n";
     if (!m_results.empty())
         std::cout << "measured period per rep  : " << m_results.front().measuredTime << "\n";
-    std::cout << "\n  " << std::setw(22) << std::left << "quantity" << std::right
-              << std::setw(10) << "mean" << "      95% half-width      interval\n";
-    std::cout << "  ---------------------------------------------------------------------\n";
-    line("average wait (Wq)",   column(&ReplicationResult::averageWait));
-    line("time in system (W)",  column(&ReplicationResult::averageTimeInSystem));
-    line("number in queue (Lq)", column(&ReplicationResult::Lq));
-    line("number in system (L)", column(&ReplicationResult::L));
-    line("utilisation (rho)",   column(&ReplicationResult::utilisation));
+    reportReplicationSummary(std::cout, m_results);
     std::cout << "=====================================================================\n";
 }
 

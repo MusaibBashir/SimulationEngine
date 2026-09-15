@@ -51,9 +51,11 @@ void printDiagnostics(const std::vector<Diagnostic>& ds, const std::string& path
 }
 
 int usage() {
-    std::cout << "usage: des check   <model.des>\n"
-                 "       des run     <model.des> [until]\n"
-                 "       des regress [dir] [--capture] [--force]\n";
+    std::cout << "usage: des check   <model.des> [--run <name>]\n"
+                 "       des run     <model.des> [until] [--run <name>]\n"
+                 "       des regress [dir] [--capture] [--force]\n"
+                 "\n"
+                 "  --run picks one of several [Run] records by its Name.\n";
     return 2;
 }
 
@@ -91,17 +93,28 @@ int main(int argc, char** argv) {
 
     if (verb == "regress") return regress(argc, argv);
     if (verb != "check" && verb != "run") return usage();
-    if (verb == "check" && argc != 3) return usage();
-    if (verb == "run" && (argc < 3 || argc > 4)) return usage();
+    if (argc < 3) return usage();
 
     const std::string path = argv[2];
 
+    // v15 lets a file hold several named [Run] records, so the CLI has to be
+    // able to say which. Otherwise a model the editor can run four ways runs
+    // only one way from a script -- and the script is the half that gets
+    // automated.
     std::optional<SimTime> override;
-    if (argc == 4) {
+    std::string wantedRun;
+    for (int i = 3; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--run") {
+            if (i + 1 >= argc) { std::cout << "des: --run needs a name\n"; return usage(); }
+            wantedRun = argv[++i];
+            continue;
+        }
+        if (verb != "run") return usage();
         char* end = nullptr;
-        const double given = std::strtod(argv[3], &end);
-        if (end == argv[3] || *end != '\0' || !(given > 0.0)) {
-            std::cout << "des: `" << argv[3] << "' is not a run length\n";
+        const double given = std::strtod(arg.c_str(), &end);
+        if (end == arg.c_str() || *end != '\0' || !(given > 0.0)) {
+            std::cout << "des: `" << arg << "' is not a run length\n";
             return usage();
         }
         override = given;
@@ -111,25 +124,61 @@ int main(int argc, char** argv) {
     printDiagnostics(read.diagnostics, path);
     if (hasErrors(read.diagnostics)) return 1;
 
+    const std::vector<std::string> names = runNames(read.document);
+    std::size_t which = 0;
+    if (!wantedRun.empty()) {
+        bool found = false;
+        for (std::size_t i = 0; i < names.size(); ++i)
+            if (names[i] == wantedRun) { which = i; found = true; break; }
+        if (!found) {
+            // LIST WHAT IT HAS. "no [Run] named 'Lng'" and nothing else leaves
+            // somebody opening the file to find out what they meant to type.
+            std::cout << path << ": no [Run] named '" << wantedRun << "'";
+            if (names.empty()) {
+                std::cout << " -- this model has none\n";
+            } else {
+                std::cout << " -- it has:";
+                for (const std::string& n : names) std::cout << " " << n;
+                std::cout << "\n";
+            }
+            return 1;
+        }
+    }
+
     std::vector<Diagnostic> problems;
     std::unique_ptr<RunController> run =
-        RunController::fromDocument(read.document, problems, override);
+        RunController::fromDocument(read.document, problems, override, which);
     printDiagnostics(problems, path);
     if (run == nullptr) return 1;
 
     if (verb == "check") {
-        std::cout << path << ": ok\n";
+        std::cout << path << ": ok";
+        if (names.size() > 1) {
+            std::cout << " (" << names.size() << " runs:";
+            for (const std::string& n : names) std::cout << " " << n;
+            std::cout << ")";
+        }
+        std::cout << "\n";
         return 0;
     }
+
+    // WHICH RUN produced this, whenever there is a choice. A report that does
+    // not say which settings made it is a report you cannot file.
+    if (names.size() > 1) std::cout << "run: " << names[which] << "\n";
 
     while (run->state() == RunState::Ready || run->state() == RunState::Running) {
         run->advance(4096);
         const RunProgress p = run->progress();
+        // STDERR, not stdout. This is a carriage-return ticker that overwrites
+        // itself, which is right on a terminal and garbage in a file:
+        // `des run m.des > results.txt` collected
+        // "replication 1 of 5replication 2 of 5replication 2 of 5..." at the
+        // top of the results. Progress is not the output.
         if (p.replications > 1)
-            std::cout << "\rreplication " << p.replication << " of "
+            std::cerr << "\rreplication " << p.replication << " of "
                       << p.replications << std::flush;
     }
-    if (run->progress().replications > 1) std::cout << "\n";
+    if (run->progress().replications > 1) std::cerr << "\n";
     if (run->state() == RunState::Failed) {
         std::cout << path << ": error: " << run->failure() << "\n";
         return 1;
