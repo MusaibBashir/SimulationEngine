@@ -134,6 +134,7 @@ public:
     void report(std::ostream& os) const;
 
     const std::vector<ReplicationResult>&   results() const { return m_results; }
+    const std::vector<std::vector<NamedStatistic>>& namedStatistics() const { return m_named; }
     const std::vector<std::vector<double>>& series()  const { return m_series; }
 
     // Drives to the end. Loops on STATE rather than on advance()'s return
@@ -157,6 +158,8 @@ private:
     std::unique_ptr<SimulationSystem> m_sim;
     ReplicationResult                 m_firstHalf;   // antithetic pairing
     std::vector<ReplicationResult>    m_results;
+    std::vector<std::vector<NamedStatistic>> m_named;   // v16: per replication
+    std::vector<NamedStatistic>       m_firstNamed;     // antithetic pairing
     std::vector<std::vector<double>>  m_series;
     // Taken while the system is alive: report() is a VIEW of a
     // SimulationSystem, and the system does not survive its replication.

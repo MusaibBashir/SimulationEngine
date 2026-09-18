@@ -655,6 +655,46 @@ RunResults SimulationSystem::results() const {
     return r;
 }
 
+std::vector<NamedStatistic> SimulationSystem::namedStatistics() const {
+    std::vector<NamedStatistic> out;
+    const SimTime now = m_clock.now();
+
+    // Records sharing a statistic are POOLED: a counter is their sum, a tally
+    // the mean of every value any of them recorded -- not a mean of means.
+    struct Pool { bool counter{false}; double total{0.0}; long long count{0}; };
+    std::vector<std::string> order;
+    std::map<std::string, Pool> pools;
+    for (std::size_t i = 0; i < m_model.nodeCount(); ++i) {
+        const auto* r = dynamic_cast<const RecordNode*>(&m_model.nodeAt(i));
+        if (r == nullptr || r->statistic().empty()) continue;
+        auto it = pools.find(r->statistic());
+        if (it == pools.end()) {
+            order.push_back(r->statistic());
+            it = pools.emplace(r->statistic(), Pool{r->isCounter(), 0.0, 0}).first;
+        }
+        it->second.total += r->total();
+        it->second.count += r->count();
+    }
+    for (const std::string& name : order) {
+        const Pool& p = pools[name];
+        if (p.counter) out.push_back({name + " (counter)", p.total});
+        else out.push_back({name + " (tally)",
+                            p.count ? p.total / static_cast<double>(p.count) : 0.0});
+    }
+
+    for (std::size_t i = 0; i < m_model.nodeCount(); ++i) {
+        const INode& n = m_model.nodeAt(i);
+        if (const auto* l = dynamic_cast<const MatchLaneNode*>(&n)) {
+            out.push_back({l->name() + " avg number", l->averageWaiting(now)});
+            out.push_back({l->name() + " avg wait", l->averageWait()});
+            out.push_back({l->name() + " at end", static_cast<double>(l->waiting())});
+        } else if (const auto* rt = dynamic_cast<const RouteNode*>(&n)) {
+            out.push_back({rt->name() + " avg in transit", rt->averageInTransit(now)});
+        }
+    }
+    return out;
+}
+
 void SimulationSystem::reportArenaStyle(std::ostream& os) const {
     const RunResults r = results();
     const SimTime T = r.measuredTime;
@@ -790,6 +830,14 @@ void SimulationSystem::report(std::ostream& os) const {
                   << std::setw(8)  << s.utilisation
                   << std::setw(7)  << s.maxQueueLength
                   << "\n";
+    }
+    const std::vector<NamedStatistic> named = namedStatistics();
+    if (!named.empty()) {
+        os << "\n  statistic                                       value\n";
+        os << "  -----------------------------------------------------------------\n";
+        for (const NamedStatistic& n : named)
+            os << "  " << std::setw(40) << std::left << n.label << std::right
+               << std::setw(14) << n.value << "\n";
     }
     os << "===========================================================\n";
 }

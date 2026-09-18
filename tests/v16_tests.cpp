@@ -490,4 +490,50 @@ void runV16Tests() {
                     zero, d);
         check(hasErrors(d), "a schedule where nothing ever arrives is an error");
     }
+
+    section("Named statistics reach both reports");
+    {
+        const std::string many =
+            "version = 1\n[Run]\nName = R\nLength = 50\nReplications = 3\n"
+            "[Create]\nName = C\nInterarrival = EXPO(1)\nNext = W\n"
+            "[Record]\nName = W\nWhat = Count\nStatistic = Trips\nNext = G\n"
+            "[Route]\nName = G\nRoute Time = 2\nDestination = S\n"
+            "[Station]\nName = S\n";
+        std::vector<Diagnostic> d;
+        auto run = RunController::fromDocument(readDocument(many).document, d);
+        check(run != nullptr, "a model with no Process can be set up");
+        run->runToCompletion();
+        check(run->state() == RunState::Finished, "and run to the end of a study");
+        std::ostringstream os;
+        run->report(os);
+        check(os.str().find("Trips (counter)") != std::string::npos,
+              "the counter is in the multi-replication report");
+        check(os.str().find("G avg in transit") != std::string::npos, "so is the Route");
+        check(os.str().find("+/-") != std::string::npos, "with half-widths");
+        check(run->namedStatistics().size() == 3 && run->namedStatistics()[0].size() == 2,
+              "one list per replication");
+
+        std::string once = many;
+        once.replace(once.find("Replications = 3"), 16, "Replications = 1");
+        std::vector<Diagnostic> d1;
+        auto single = RunController::fromDocument(readDocument(once).document, d1);
+        single->runToCompletion();
+        std::ostringstream one;
+        single->report(one);
+        check(one.str().find("Trips (counter)") != std::string::npos,
+              "and in the single-run report");
+
+        // Two Records into one tally are pooled over every value recorded.
+        SimulationSystem sim(1);
+        std::vector<Diagnostic> d2;
+        compileInto(readDocument(
+            "version = 1\n[Create]\nName = C\nInterarrival = 1\nMax Arrivals = 3\nNext = A\n"
+            "[Record]\nName = A\nWhat = Expression\nValue = 1\nStatistic = X\nNext = B\n"
+            "[Record]\nName = B\nWhat = Expression\nValue = 4\nStatistic = X\n").document,
+            sim.model(), d2);
+        sim.stopAt(10).execute();
+        const std::vector<NamedStatistic> named = sim.namedStatistics();
+        check(named.size() == 1 && named[0].label == "X (tally)" && named[0].value == 2.5,
+              "one tally, the mean of all six values");
+    }
 }

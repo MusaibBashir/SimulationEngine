@@ -85,6 +85,10 @@ void reportReplicationTable(std::ostream& os,
                             const std::vector<ReplicationResult>& results);
 void reportReplicationSummary(std::ostream& os,
                               const std::vector<ReplicationResult>& results);
+// v16: every named statistic, mean and 95% half-width across replications.
+// Prints nothing when there are none.
+void reportNamedStatistics(std::ostream& os,
+                           const std::vector<std::vector<NamedStatistic>>& perReplication);
 
 class Experiment {
 public:
