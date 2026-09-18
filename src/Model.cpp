@@ -71,6 +71,20 @@ Model& Model::arrivals(std::unique_ptr<IDistribution> d) {
 
 Model& Model::allowOverload(bool on) { m_allowOverload = on; return *this; }
 
+Model& Model::scheduledSource(const std::string& name, const std::string& entityType,
+                              const std::string& scheduleName, ArrivalSchedule schedule,
+                              long long maxArrivals, SimTime firstAt, int entitiesPerArrival) {
+    requireUnique(name);
+    auto c = std::make_unique<CreateNode>(
+        name, entityType,
+        ExpressionPtr(std::make_unique<ScheduledGapExpression>(scheduleName, std::move(schedule))),
+        maxArrivals, firstAt, entitiesPerArrival);
+    CreateNode* raw = c.get();
+    m_nodes.push_back(std::move(c));
+    m_sources.push_back(raw);
+    return *this;
+}
+
 Model& Model::perArrival(const std::string& createName, const std::string& text) {
     nodeAs<CreateNode>(createName).setPerArrival(ex(text));
     return *this;

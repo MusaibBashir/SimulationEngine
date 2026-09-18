@@ -147,10 +147,31 @@ std::vector<ModuleSchema> buildSchemas() {
                               "so changing a service time does not shift the "
                               "arrival pattern. Needed for common random "
                               "numbers."),
+                      enumeration("Time Units", {"Seconds", "Minutes", "Hours", "Days"},
+                                  "Minutes",
+                                  "What one unit of time in this model is -- "
+                                  "Arena's Base Time Units. Only a Schedule reads "
+                                  "it, to convert its own units."),
                       boolean("Antithetic", "false",
                               "Run each replication twice, the second time with "
                               "every random draw mirrored, and average the "
                               "pair. Lower variance for the same compute.")}));
+
+    s.push_back(make("Schedule", ModuleKind::Data,
+                     "Arrival rates that change over time. Arena's Schedule data "
+                     "module, Type Arrival. The rows are ScheduleRow records, in "
+                     "order; after the last one it starts again. A Create uses it "
+                     "by naming it in its Schedule column.",
+                     {ident("Name", "What a Create's Schedule column names."),
+                      text("Type",
+                           "Arrival: each row's Value is arrivals per Time Unit. "
+                           "The only type in this version; Capacity schedules "
+                           "come later.", false, "Arrival"),
+                      enumeration("Time Units", {"Seconds", "Minutes", "Hours", "Days"},
+                                  "Hours",
+                                  "The unit of every row's Duration, and the "
+                                  "\"per\" in its Value: 90 with Hours is 90 "
+                                  "arrivals an hour.")}));
 
     // Read-only, and the reason is worth stating where somebody will read it:
     // this engine has no queue object apart from its Process. A discipline is
@@ -182,7 +203,11 @@ std::vector<ModuleSchema> buildSchemas() {
                           "per type."),
                       expression("Interarrival",
                                  "Time between arrivals, for example EXPO(1.0). "
-                                 "A mean of 1.0 is one arrival per time unit."),
+                                 "A mean of 1.0 is one arrival per time unit. "
+                                 "Leave blank when Schedule is set.", false),
+                      ref("Schedule", "Schedule",
+                          "Arrive by a Schedule instead -- a rate that changes "
+                          "over the day. Leave Interarrival blank."),
                       integer("Max Arrivals", "-1",
                               "Stop after this many arrivals. Each arrival "
                               "brings Per Arrival entities. -1 means never "
@@ -422,6 +447,19 @@ std::vector<ModuleSchema> buildSchemas() {
                           "Where this lane's matched entity goes. Blank means "
                           "it leaves the system.")},
                      /*readOnly=*/false, /*parent=*/"Match"));
+
+    s.push_back(make("ScheduleRow", ModuleKind::Child,
+                     "One period of a Schedule: a rate and how long it lasts. "
+                     "ROW ORDER IS TIME ORDER.",
+                     {ref("Schedule", "Schedule", "Which Schedule this row belongs to.",
+                          true),
+                      real("Value", "",
+                           "Arrivals per the Schedule's Time Unit during this "
+                           "period. 0 means none.", true),
+                      real("Duration", "",
+                           "How long this period lasts, in the Schedule's Time "
+                           "Units.", true)},
+                     /*readOnly=*/false, /*parent=*/"Schedule"));
 
     s.push_back(make("AssignField", ModuleKind::Child,
                      "One field an Assign sets. Arena puts these in a grid "

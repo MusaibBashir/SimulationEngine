@@ -21,6 +21,7 @@
 #include "Create.hpp"
 #include "Transfer.hpp"
 #include "Match.hpp"
+#include "Schedule.hpp"
 #include "Station.hpp"
 #include "Distribution.hpp"
 #include "ModelError.hpp"
@@ -112,6 +113,12 @@ public:
     // v16: Per Arrival as an expression, worked out at each arrival -- so a
     // fleet size can live in a Variable.
     Model& perArrival(const std::string& createName, const std::string& text);
+    // v16: a Create whose arrivals follow a schedule (a non-stationary Poisson
+    // stream) instead of an interarrival expression.
+    Model& scheduledSource(const std::string& name, const std::string& entityType,
+                           const std::string& scheduleName, ArrivalSchedule schedule,
+                           long long maxArrivals = -1, SimTime firstAt = 0.0,
+                           int entitiesPerArrival = 1);
     Model& allowOverload(bool on = true);
     bool overloadAllowed() const { return m_allowOverload; }
     void setInterarrival(std::unique_ptr<IDistribution> d) { arrivals(std::move(d)); }

@@ -437,4 +437,57 @@ void runV16Tests() {
         Model m;
         check(compileInto(readDocument(loop).document, m, d), "cars circulating through a Match lane compile");
     }
+
+    section("A schedule changes the arrival rate over time");
+    {
+        ArrivalSchedule s({{0.0, 60.0}, {2.0, 60.0}});
+        check(s.rateAt(30) == 0.0 && s.rateAt(90) == 2.0, "the rate follows the rows");
+        check(s.rateAt(150) == 0.0, "and repeats after the last one");
+        check(s.peak() == 2.0 && s.cycle() == 120.0, "peak and cycle");
+        check(unitsPer(TimeUnit::Hours, TimeUnit::Minutes) == 60.0, "an hour is 60 minutes");
+        bool threw = false;
+        try { ArrivalSchedule none({{0.0, 1.0}}); } catch (const ModelError&) { threw = true; }
+        check(threw, "a schedule of nothing but zeros is refused");
+
+        // Nothing in the first hour, 600 an hour in the second: every arrival
+        // lands in minutes 60..120, and there are about 600 of them.
+        const std::string text =
+            "version = 1\n[Run]\nName = R\nLength = 120\nTime Units = Minutes\n"
+            "[Schedule]\nName = S\nType = Arrival\nTime Units = Hours\n"
+            "[ScheduleRow]\nSchedule = S\nValue = 0\nDuration = 1\n"
+            "[ScheduleRow]\nSchedule = S\nValue = 600\nDuration = 1\n"
+            "[Create]\nName = C\nSchedule = S\nNext = Stamp\n"
+            "[Assign]\nName = Stamp\nNext = Early\n"
+            "[AssignField]\nAssign = Stamp\nTarget = Attribute\nName = at\nValue = TNOW\n"
+            "[Record]\nName = Early\nWhat = Expression\nValue = at < 60\n";
+        std::vector<Diagnostic> d;
+        SimulationSystem sim(7);
+        check(compileInto(readDocument(text).document, sim.model(), d), "it compiles");
+        check(sim.model().nodeAs<CreateNode>("C").scheduled(), "and the Create follows the schedule");
+        sim.stopAt(119.999).execute();
+        const auto& early = sim.model().nodeAs<RecordNode>("Early");
+        check(early.count() > 520 && early.count() < 680,
+              "about 600 arrivals (got " + std::to_string(early.count()) + ")");
+        check(early.total() == 0.0, "and none of them in the first hour");
+    }
+    {
+        std::vector<Diagnostic> d;
+        Model m;
+        compileInto(readDocument("version = 1\n[Schedule]\nName = S\n"
+                                 "[ScheduleRow]\nSchedule = S\nValue = 1\nDuration = 1\n"
+                                 "[Create]\nName = C\nSchedule = S\nInterarrival = 1\n").document, m, d);
+        check(hasErrors(d), "a Create cannot have both a schedule and an interarrival");
+        d.clear();
+        Model neither;
+        compileInto(readDocument("version = 1\n[Create]\nName = C\nNext = O\n[Dispose]\nName = O\n").document,
+                    neither, d);
+        check(hasErrors(d), "nor neither");
+        d.clear();
+        Model zero;
+        compileInto(readDocument("version = 1\n[Schedule]\nName = S\n"
+                                 "[ScheduleRow]\nSchedule = S\nValue = 0\nDuration = 1\n"
+                                 "[Create]\nName = C\nSchedule = S\nNext = O\n[Dispose]\nName = O\n").document,
+                    zero, d);
+        check(hasErrors(d), "a schedule where nothing ever arrives is an error");
+    }
 }

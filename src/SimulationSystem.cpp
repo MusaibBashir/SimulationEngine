@@ -108,6 +108,8 @@ void SimulationSystem::assignStreams() {
                              "decide:" + dec->name() + ":" + std::to_string(b));
                 }
             }
+        } else if (auto* rt = dynamic_cast<RouteNode*>(&n)) {
+            giveExpr(&rt->timeExpression(), "route:" + rt->name());
         } else if (auto* a = dynamic_cast<AssignNode*>(&n)) {
             for (std::size_t r = 0; r < a->rules().size(); ++r) {
                 giveExpr(a->rules()[r].value.get(),

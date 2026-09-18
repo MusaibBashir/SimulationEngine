@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "Create.hpp"
+#include "Schedule.hpp"
 #include "Entity.hpp"
 #include "RandomStream.hpp"
 #include "Trace.hpp"
@@ -40,6 +41,7 @@ CreateNode::CreateNode(std::string name, std::string entityType,
     if (!m_interarrival) throw ModelError("create '" + m_name + "': null interarrival");
     if (m_perArrival < 1) throw ModelError("create '" + m_name + "': entities per arrival >= 1");
     if (m_firstAt < 0.0)  throw ModelError("create '" + m_name + "': first arrival cannot be negative");
+    m_scheduled = dynamic_cast<const ScheduledGapExpression*>(m_interarrival.get()) != nullptr;
 }
 
 void CreateNode::enter(NodeContext&, Entity*) {
@@ -62,6 +64,7 @@ void CreateNode::onScheduledEvent(NodeContext& ctx, Entity* /*unused*/) {
         ctx.scheduleNextArrival(next, this);
     }
 
+    if (m_scheduled && !m_started) { m_started = true; return; }
     if (exhausted()) return;
     ++m_arrivals;
     long long count = m_perArrival;
@@ -93,6 +96,7 @@ void CreateNode::onScheduledEvent(NodeContext& ctx, Entity* /*unused*/) {
 void CreateNode::reset() {
     m_created = 0;
     m_arrivals = 0;
+    m_started = false;
     m_interarrival->reset();
     if (m_perArrivalExpr) m_perArrivalExpr->reset();
 }

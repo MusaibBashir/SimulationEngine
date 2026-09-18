@@ -35,6 +35,11 @@ private:
     int       m_perArrival{1};        // entities per arrival event (Arena's
                                       // "Entities per Arrival")
     ExpressionPtr m_perArrivalExpr;   // v16: when set, evaluated at each arrival
+    // v16: following an arrival schedule. The event at First At then only
+    // STARTS the stream -- an arrival exactly at the start of every
+    // replication would be one more than the schedule says.
+    bool      m_scheduled{false};
+    bool      m_started{false};
 
 public:
     CreateNode(std::string name, std::string entityType,
@@ -67,6 +72,7 @@ public:
     // v16: Max Arrivals counts arrival EVENTS, as Arena's does. Per Arrival =
     // 20 with Max Arrivals = 1 is twenty entities at once -- how a fleet is
     // put into the world -- where counting entities made it one.
+    bool scheduled() const { return m_scheduled; }
     bool exhausted() const { return m_maxArrivals >= 0 && m_arrivals >= m_maxArrivals; }
 };
 

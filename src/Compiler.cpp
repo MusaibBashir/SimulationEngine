@@ -211,6 +211,67 @@ void checkMatches(const ModelDocument& doc, std::vector<Diagnostic>& out) {
     }
 }
 
+void checkSchedules(const ModelDocument& doc, std::vector<Diagnostic>& out) {
+    for (std::size_t r = 0; r < doc.rowCount("Create"); ++r) {
+        const bool gap = !doc.cell("Create", r, "Interarrival").empty();
+        const bool sched = !doc.cell("Create", r, "Schedule").empty();
+        if (gap && sched)
+            report(out, Severity::Error, "Create", r, "Schedule",
+                   "a Create arrives by an Interarrival OR a Schedule -- clear one of them");
+        else if (!gap && !sched)
+            report(out, Severity::Error, "Create", r, "Interarrival",
+                   "Create needs an Interarrival, or a Schedule to follow");
+    }
+    for (std::size_t r = 1; r < doc.rowCount("Run"); ++r)
+        if (doc.cellOrDefault("Run", r, "Time Units") != doc.cellOrDefault("Run", 0, "Time Units"))
+            report(out, Severity::Error, "Run", r, "Time Units",
+                   "every [Run] must use the same Time Units -- the model has one clock");
+
+    for (std::size_t s = 0; s < doc.rowCount("Schedule"); ++s) {
+        const std::string name = doc.cell("Schedule", s, "Name");
+        const std::string type = doc.cellOrDefault("Schedule", s, "Type");
+        if (type != "Arrival")
+            report(out, Severity::Error, "Schedule", s, "Type",
+                   type == "Capacity"
+                       ? "Capacity schedules are not supported yet -- only Arrival"
+                       : "'" + type + "' is not a schedule type; this version has Arrival");
+        double total = 0.0, peak = 0.0;
+        std::size_t rows = 0;
+        for (std::size_t r = 0; r < doc.rowCount("ScheduleRow"); ++r) {
+            if (doc.cell("ScheduleRow", r, "Schedule") != name) continue;
+            ++rows;
+            const std::string v = doc.cell("ScheduleRow", r, "Value");
+            const std::string d = doc.cell("ScheduleRow", r, "Duration");
+            if (looksLikeReal(v) && std::strtod(v.c_str(), nullptr) < 0.0)
+                report(out, Severity::Error, "ScheduleRow", r, "Value", "a rate cannot be negative");
+            if (looksLikeReal(d) && std::strtod(d.c_str(), nullptr) < 0.0)
+                report(out, Severity::Error, "ScheduleRow", r, "Duration",
+                       "a duration cannot be negative");
+            if (looksLikeReal(d) && looksLikeReal(v)) {
+                const double dv = std::strtod(d.c_str(), nullptr);
+                total += dv;
+                if (dv > 0.0) peak = std::max(peak, std::strtod(v.c_str(), nullptr));
+            }
+        }
+        if (rows == 0)
+            report(out, Severity::Error, "Schedule", s, "Name",
+                   "schedule '" + name + "' has no ScheduleRow rows");
+        else if (total <= 0.0)
+            report(out, Severity::Error, "Schedule", s, "Name",
+                   "schedule '" + name + "': the durations add up to zero");
+        else if (peak <= 0.0)
+            report(out, Severity::Error, "Schedule", s, "Name",
+                   "schedule '" + name + "': every rate is zero, so nothing would arrive");
+
+        bool used = false;
+        for (std::size_t c = 0; c < doc.rowCount("Create"); ++c)
+            used |= doc.cell("Create", c, "Schedule") == name;
+        if (!used)
+            report(out, Severity::Warning, "Schedule", s, "Name",
+                   "no Create follows schedule '" + name + "'");
+    }
+}
+
 // --- pass 2: references ----------------------------------------------------
 // "Block" is the pseudo-type meaning "any flowchart block", which is what an
 // exit column points at. Everything else names one real module type.
@@ -316,6 +377,29 @@ double asReal(const std::string& s, double fallback) {
     return std::strtod(s.c_str(), nullptr);
 }
 
+// v16: the base unit, from the [Run] rows. checkSchedules has already made
+// sure they agree, so the first one says it.
+TimeUnit baseUnitOf(const ModelDocument& doc) {
+    TimeUnit u = TimeUnit::Minutes;
+    if (doc.rowCount("Run") > 0) timeUnitFrom(doc.cellOrDefault("Run", 0, "Time Units"), u);
+    return u;
+}
+
+ArrivalSchedule scheduleOf(const ModelDocument& doc, const std::string& name) {
+    TimeUnit unit = TimeUnit::Hours;
+    for (std::size_t r = 0; r < doc.rowCount("Schedule"); ++r)
+        if (doc.cell("Schedule", r, "Name") == name)
+            timeUnitFrom(doc.cellOrDefault("Schedule", r, "Time Units"), unit);
+    const double toBase = unitsPer(unit, baseUnitOf(doc));   // one schedule unit, in base units
+    std::vector<ScheduleSlot> slots;
+    for (std::size_t r = 0; r < doc.rowCount("ScheduleRow"); ++r) {
+        if (doc.cell("ScheduleRow", r, "Schedule") != name) continue;
+        slots.push_back(ScheduleSlot{asReal(doc.cell("ScheduleRow", r, "Value"), 0.0) / toBase,
+                                     asReal(doc.cell("ScheduleRow", r, "Duration"), 0.0) * toBase});
+    }
+    return ArrivalSchedule(std::move(slots));
+}
+
 void buildBlocks(const ModelDocument& doc, Model& model) {
     const ModuleRegistry& reg = ModuleRegistry::instance();
 
@@ -355,7 +439,17 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
                 return doc.cellOrDefault(type, r, c);
             };
 
-            if (type == "Create") {
+            if (type == "Create" && !cell("Schedule").empty()) {
+                const std::string perArrival = cell("Per Arrival");
+                const bool fixed = perArrival.empty() || looksLikeInteger(perArrival);
+                const std::string entityType = cell("Entity Type");
+                model.scheduledSource(name, entityType.empty() ? "Entity" : entityType,
+                                      cell("Schedule"), scheduleOf(doc, cell("Schedule")),
+                                      asInteger(cell("Max Arrivals"), -1),
+                                      asReal(cell("First At"), 0.0),
+                                      fixed ? static_cast<int>(asInteger(perArrival, 1)) : 1);
+                if (!fixed) model.perArrival(name, perArrival);
+            } else if (type == "Create") {
                 const std::string entityType = cell("Entity Type");
                 // A whole number keeps the fixed path, so a model that says
                 // Per Arrival = 3 describes and checks exactly as before.
@@ -556,6 +650,7 @@ bool compileInto(const ModelDocument& doc, Model& model,
     checkVariables(doc, diagnostics);
     checkStations(doc, diagnostics);
     checkMatches(doc, diagnostics);
+    checkSchedules(doc, diagnostics);
     // The build cannot run with broken references or unparseable expressions,
     // so it is skipped and structureChecked stays false. Reporting a model as
     // checked when it was not is the failure this project keeps refusing.

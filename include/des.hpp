@@ -56,6 +56,7 @@
 #include "Create.hpp"
 #include "Transfer.hpp"
 #include "Match.hpp"
+#include "Schedule.hpp"
 #include "Station.hpp"
 #include "Model.hpp"
 #include "SimulationSystem.hpp"
