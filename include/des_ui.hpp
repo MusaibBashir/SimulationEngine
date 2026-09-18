@@ -13,6 +13,7 @@
 #include "Key.hpp"
 #include "Screen.hpp"
 #include "TextBuffer.hpp"
+#include "TableStore.hpp"
 #include "TuiState.hpp"
 #include "TuiRender.hpp"
 #include "TuiInput.hpp"

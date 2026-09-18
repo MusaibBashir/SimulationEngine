@@ -697,8 +697,11 @@ void runTuiTests() {
         const int W = 90, H = 26;
         const Layout L = layoutFor(s, W, H);
 
-        handleKey(s, Key::mouse(MouseButton::Left, L.tabStart[1] + 1, L.barRow), W, H);
+        handleKey(s, Key::mouse(MouseButton::Left, L.tabStart[2] + 1, L.barRow), W, H);
         check(s.view() == View::Flow, "clicking a tab opens it");
+        handleKey(s, Key::mouse(MouseButton::Left, L.tabStart[1] + 1, L.barRow), W, H);
+        check(s.view() == View::Tables, "the second tab is Tables");
+        handleKey(s, Key::mouse(MouseButton::Left, L.tabStart[2] + 1, L.barRow), W, H);
         handleKey(s, Key::mouse(MouseButton::Left, L.tabStart[0] + 1, L.barRow), W, H);
         check(s.view() == View::Model, "and clicking another comes back");
 

@@ -49,6 +49,9 @@ bool handleConfirm(TuiState& state, Key key) {
             return true;
         case ConfirmFor::NewFile:
         case ConfirmFor::OpenExisting:
+        case ConfirmFor::ResizeTable:
+        case ConfirmFor::DeleteTable:
+        case ConfirmFor::RenameTable:
             state.answerConfirm(key.ch);
             return true;
     }
@@ -235,6 +238,85 @@ bool handleResults(TuiState& state, Key key) {
     return true;
 }
 
+// v16.1: the Tables tab. Tab moves between the three panels whenever no cell
+// is being edited; while one is, Tab and Enter keep it and move on, which is
+// what a block pasted into the terminal from Excel arrives as.
+bool handleTables(TuiState& state, Key key) {
+    const auto nextPanel = [&state](int by) {
+        const TablesFocus order[3] = {TablesFocus::Kinds, TablesFocus::Editor, TablesFocus::List};
+        int at = 0;
+        for (int i = 0; i < 3; ++i) if (order[i] == state.tablesFocus()) at = i;
+        state.setTablesFocus(order[(at + by + 3) % 3]);
+    };
+    switch (state.tablesFocus()) {
+        case TablesFocus::Kinds:
+            switch (key.kind) {
+                case KeyKind::Up:     state.stepKind(-1); break;
+                case KeyKind::Down:   state.stepKind(1); break;
+                case KeyKind::Enter:  state.createTable(); break;
+                case KeyKind::Tab:    nextPanel(1); break;
+                case KeyKind::BackTab: nextPanel(-1); break;
+                case KeyKind::Escape: state.setView(View::Model); break;
+                case KeyKind::Char:
+                    if (key.ch == '?' || key.ch == 'h') state.showTableHelp();
+                    break;
+                default: break;
+            }
+            return true;
+        case TablesFocus::List:
+            switch (key.kind) {
+                case KeyKind::Up:     state.stepTable(-1); break;
+                case KeyKind::Down:   state.stepTable(1); break;
+                case KeyKind::Enter:
+                case KeyKind::Left:   state.setTablesFocus(TablesFocus::Editor); break;
+                case KeyKind::Delete: state.requestDeleteTable(); break;
+                case KeyKind::Tab:    nextPanel(1); break;
+                case KeyKind::BackTab: nextPanel(-1); break;
+                case KeyKind::Escape: state.setView(View::Model); break;
+                default: break;
+            }
+            return true;
+        case TablesFocus::Editor:
+            break;
+    }
+
+    if (state.editingTable()) {
+        switch (key.kind) {
+            case KeyKind::Char:      state.typeTable(key.ch); break;
+            case KeyKind::Backspace: state.backspaceTable(); break;
+            case KeyKind::Enter:     state.tableEnter(); break;
+            case KeyKind::Tab:       state.tableTab(); break;
+            case KeyKind::Escape:    state.cancelTableEdit(); break;
+            case KeyKind::Up:        state.moveTableCursor(-1, 0); break;
+            case KeyKind::Down:      state.moveTableCursor(1, 0); break;
+            case KeyKind::Left:      state.moveTableCursor(0, -1); break;
+            case KeyKind::Right:     state.moveTableCursor(0, 1); break;
+            default: break;
+        }
+        return true;
+    }
+    switch (key.kind) {
+        case KeyKind::Up:        state.moveTableCursor(-1, 0); break;
+        case KeyKind::Down:      state.moveTableCursor(1, 0); break;
+        case KeyKind::Left:      state.moveTableCursor(0, -1); break;
+        case KeyKind::Right:     state.moveTableCursor(0, 1); break;
+        case KeyKind::PageUp:    state.moveTableCursor(-15, 0); break;
+        case KeyKind::PageDown:  state.moveTableCursor(15, 0); break;
+        case KeyKind::Enter:     state.tableEnter(); break;
+        case KeyKind::Backspace: state.backspaceTable(); break;
+        case KeyKind::Delete:    state.deleteTableRow(); break;
+        case KeyKind::Tab:       nextPanel(1); break;
+        case KeyKind::BackTab:   nextPanel(-1); break;
+        case KeyKind::Escape:    state.setTablesFocus(TablesFocus::List); break;
+        case KeyKind::Char:
+            if (key.ch == '?') { state.showTableHelp(); break; }
+            state.typeTable(key.ch);
+            break;
+        default: break;
+    }
+    return true;
+}
+
 // --- the mouse --------------------------------------------------------------
 
 // A click is turned back into "the third palette entry" by the SAME arithmetic
@@ -252,17 +334,70 @@ bool handleMouse(TuiState& state, Key key, int width, int height) {
             case View::Flow:    state.stepFlow(by); break;
             case View::Runs:    state.stepRun(by); break;
             case View::Results: state.scrollResults(by); break;
+            case View::Tables:
+                if (key.x >= L.tablesListX) state.stepTable(by);
+                else if (key.x < L.tablesEditorX - 2) state.stepKind(by);
+                else state.moveTableCursor(by, 0);
+                break;
         }
         return true;
     }
 
     if (key.y == L.barRow) {
-        const View views[4] = {View::Model, View::Flow, View::Runs, View::Results};
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < TAB_COUNT; ++i)
             if (key.x >= L.tabStart[i] && key.x < L.tabEnd[i]) {
-                state.setView(views[i]);
+                state.setView(tabView(i));
                 return true;
             }
+        return true;
+    }
+
+    if (state.view() == View::Tables) {
+        if (key.x < L.tablesEditorX - 2) {
+            const int row = key.y - (L.bodyTop + 2);
+            if (row >= 0 && row < 4) {
+                const bool again = state.tablesFocus() == TablesFocus::Kinds &&
+                                   state.kindIndex() == static_cast<std::size_t>(row);
+                state.setTablesFocus(TablesFocus::Kinds);
+                state.setKindIndex(static_cast<std::size_t>(row));
+                if (again || key.button == MouseButton::Left) state.createTable();
+            }
+            return true;
+        }
+        if (key.x >= L.tablesListX) {
+            const int row = key.y - (L.bodyTop + 2);
+            if (row >= 0) {
+                state.setTablesFocus(TablesFocus::List);
+                state.selectTable(static_cast<std::size_t>(row));
+            }
+            return true;
+        }
+        // The middle: a header field, or a cell. A second click edits.
+        const TableGrid g = tableGridFor(state, L);
+        const Table* t = state.currentTable();
+        if (t == nullptr) return true;
+        const std::size_t fields = state.headerFields().size();
+        const int f = key.y - g.fieldTop;
+        if (f >= 0 && f < static_cast<int>(fields)) {
+            const bool again = state.tablesFocus() == TablesFocus::Editor && !state.onGrid() &&
+                               state.tableField() == static_cast<std::size_t>(f);
+            state.setTablesFocus(TablesFocus::Editor);
+            state.setTableCursor(static_cast<std::size_t>(f), 0, 0);
+            if (again) state.beginTableEdit(true);
+            return true;
+        }
+        const int r = key.y - g.gridTop;
+        const int c = (key.x - L.tablesEditorX - g.labelWidth) / g.cellWidth;
+        if (r >= 0 && r < g.visibleRows && key.x >= L.tablesEditorX + g.labelWidth && c >= 0) {
+            const std::size_t row = g.firstRow + static_cast<std::size_t>(r);
+            const std::size_t col = g.firstColumn + static_cast<std::size_t>(c);
+            if (row >= t->rows || col >= t->columns) return true;
+            const bool again = state.tablesFocus() == TablesFocus::Editor && state.onGrid() &&
+                               state.cellRow() == row && state.cellColumn() == col;
+            state.setTablesFocus(TablesFocus::Editor);
+            state.setTableCursor(fields, row, col);
+            if (again) state.beginTableEdit(true);
+        }
         return true;
     }
 
@@ -351,6 +486,10 @@ bool handleKey(TuiState& state, Key key, int width, int height) {
             case 'F': state.setView(View::Flow);    return true;
             case 'U': state.setView(View::Runs);    return true;
             case 'E': state.setView(View::Results); return true;
+            case 'D': state.setView(View::Tables);  return true;
+            case 'O':
+                if (state.view() == View::Tables) state.insertTableRow();
+                return true;
 
             case 'S': state.save();          return true;
             case 'Q': state.requestQuit();   return !state.wantsQuit();
@@ -384,11 +523,19 @@ bool handleKey(TuiState& state, Key key, int width, int height) {
                 if (state.view() == View::Model && state.focus() == Pane::Editor)
                     state.openPicker();
                 return true;
-            case 'Z': state.undo(); return true;
-            case 'Y': state.redo(); return true;
+            // Each tab undoes its own edits: the tables have their own history.
+            case 'Z':
+                if (state.view() == View::Tables) state.undoTables(); else state.undo();
+                return true;
+            case 'Y':
+                if (state.view() == View::Tables) state.redoTables(); else state.redo();
+                return true;
             case 'X': state.cut();  return true;
             case 'C': state.copy(); return true;
-            case 'V': state.paste(); return true;
+            case 'V':
+                if (state.view() == View::Tables) state.pasteIntoTable(state.clipboard());
+                else state.paste();
+                return true;
             case 'A': state.buffer().selectAll(); return true;
             default:  return true;
         }
@@ -398,6 +545,7 @@ bool handleKey(TuiState& state, Key key, int width, int height) {
         case View::Flow:    return handleFlow(state, key);
         case View::Runs:    return handleRuns(state, key);
         case View::Results: return handleResults(state, key);
+        case View::Tables:  return handleTables(state, key);
         case View::Model:   break;
     }
     if (state.focus() == Pane::Palette) return handlePalette(state, key);

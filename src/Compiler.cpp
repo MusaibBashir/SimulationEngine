@@ -666,6 +666,17 @@ bool compileInto(const ModelDocument& doc, Model& model,
     }
 
     for (const Diagnostic& d : model.checkStructure()) diagnostics.push_back(d);
+    // v16.1: names inside expressions -- a Variable, an array, an attribute --
+    // were checked only when a run started. With tables on their own tab,
+    // deleting one that a Create still reads must say so where it is edited,
+    // not at ^R.
+    // Their span is an offset WITHIN an expression, and with no cell lineOf()
+    // would read that as a file line, so it is dropped: "cannot say where"
+    // rather than a marker on the wrong line.
+    for (Diagnostic d : model.checkExpressions()) {
+        d.span = SourceSpan{};
+        diagnostics.push_back(std::move(d));
+    }
     if (structureChecked != nullptr) *structureChecked = true;
     return !hasErrors(diagnostics);
 }

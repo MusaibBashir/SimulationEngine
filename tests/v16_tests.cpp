@@ -564,9 +564,13 @@ void runV16Tests() {
 
         TuiState s = TuiState::fromText("version = 1\n", "t.des");
         bool paletteHas = true;
-        for (const char* type : {"Match", "MatchLane", "Route", "Station", "Schedule", "ScheduleRow"})
+        for (const char* type : {"Match", "MatchLane", "Route", "Station"})
             paletteHas &= std::find(s.palette().begin(), s.palette().end(), type) != s.palette().end();
-        check(paletteHas, "every new module is in the palette");
+        check(paletteHas, "every new flowchart module is in the palette");
+        bool tablesElsewhere = true;
+        for (const char* type : {"Variable", "Schedule", "ScheduleRow"})
+            tablesElsewhere &= std::find(s.palette().begin(), s.palette().end(), type) == s.palette().end();
+        check(tablesElsewhere, "and tables are made on the Tables tab instead");
     }
 
     section("The Group 9 model builds, conserves its entities and shows the imbalance");

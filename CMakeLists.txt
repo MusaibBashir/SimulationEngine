@@ -96,6 +96,8 @@ add_library(des_ui STATIC
     src/TuiState.cpp
     src/TuiRender.cpp
     src/TuiInput.cpp
+    src/TableStore.cpp
+    src/TuiTables.cpp
 )
 target_link_libraries(des_ui PUBLIC des_engine)
 target_compile_options(des_ui PRIVATE ${DES_WARNINGS})
@@ -132,7 +134,7 @@ if(WIN32)
     target_link_libraries(des_tui PRIVATE shell32 ole32 uuid)
 endif()
 
-add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp tests/v16_tests.cpp)
+add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp tests/v16_tests.cpp tests/tables_tests.cpp)
 target_link_libraries(des_tests PRIVATE des_ui)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
 

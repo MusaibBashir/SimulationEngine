@@ -21,6 +21,7 @@
 #include "ModelDocument.hpp"
 #include "ModuleSchema.hpp"
 #include "RunController.hpp"
+#include "TableStore.hpp"
 #include "TextBuffer.hpp"
 
 namespace des {
@@ -28,7 +29,7 @@ namespace des {
 // What fills the body of the window. Each is reachable from the bar across the
 // top and from one control key, because a bar you can only reach with a mouse
 // is a bar half the people using it cannot reach at all.
-enum class View { Model, Flow, Runs, Results };
+enum class View { Model, Tables, Flow, Runs, Results };
 
 // Which half of the Model view has the keyboard.
 enum class Pane { Palette, Editor };
@@ -40,7 +41,8 @@ enum class Overlay { None, Help, Picker, Confirm, Running, Prompt };
 
 // One Confirm overlay asks several questions; this says which, so a 'd' that
 // means "discard and quit" can never be read as "discard and open a new file".
-enum class ConfirmFor { Quit, NewFile, DeleteRun, OpenExisting };
+enum class ConfirmFor { Quit, NewFile, DeleteRun, OpenExisting,
+                        ResizeTable, DeleteTable, RenameTable };
 
 // What the one-line Prompt is asking for.
 enum class PromptFor { None, NewFile, SaveAs };
@@ -50,7 +52,18 @@ enum class RunsFocus { List, Form };
 
 // Which field a Picker writes into: the editor's current line, or the Runs
 // form's selected field.
-enum class PickerFor { Editor, RunField };
+enum class PickerFor { Editor, RunField, TableUnits };
+
+// v16.1: which of the Tables tab's three panels has the keyboard.
+enum class TablesFocus { Kinds, Editor, List };
+
+// A compiler diagnostic that landed in the tables section, put on the table
+// (and, where it can say, the grid row) it is about.
+struct TableIssue {
+    std::size_t table{0};
+    Severity    severity{Severity::Error};
+    std::string message;
+};
 
 // v16: a typed model name becomes a path. A bare name goes in `defaultDir`, a
 // name with a folder in it is used as given, and ".des" is added when there is
@@ -242,6 +255,56 @@ public:
     void stepFlow(long long delta);
     void gotoFlowBlock();           // jumps the text cursor to that record
 
+    // --- the Tables tab (v16.1) ---------------------------------------------
+    // Variables, arrays, matrices and schedules, edited as tables. They are
+    // saved in the same file but are not in buffer(): the model that compiles
+    // and runs is joinedText().
+    const std::vector<Table>& tables() const { return m_tables; }
+    std::string joinedText() const;
+    const std::vector<TableIssue>& tableIssues() const { return m_tableIssues; }
+    std::size_t tableErrorCount() const;
+
+    TablesFocus tablesFocus() const { return m_tablesFocus; }
+    void setTablesFocus(TablesFocus f);
+    std::size_t kindIndex() const { return m_kindIndex; }
+    void stepKind(long long delta);
+    void setKindIndex(std::size_t i);
+    void createTable();                       // of the selected kind
+    std::size_t tableIndex() const { return m_tableIndex; }
+    void stepTable(long long delta);
+    void selectTable(std::size_t i);
+    const Table* currentTable() const;
+
+    // The editor's cursor: a header field (0 .. headerFields().size() - 1) or
+    // the grid (field == headerFields().size(), at cellRow/cellColumn).
+    std::vector<std::string> headerFields() const;   // of the current table
+    std::string headerValue(std::size_t field) const;
+    std::size_t tableField() const { return m_tableField; }
+    bool onGrid() const;
+    std::size_t cellRow() const { return m_cellRow; }
+    std::size_t cellColumn() const { return m_cellColumn; }
+    void moveTableCursor(long long rows, long long columns);
+    void setTableCursor(std::size_t field, std::size_t row, std::size_t column);
+    bool editingTable() const { return m_editingTable; }
+    const std::string& tableDraft() const { return m_tableDraft; }
+    void beginTableEdit(bool keepValue);
+    void typeTable(char c);
+    void backspaceTable();
+    bool commitTableEdit();
+    void cancelTableEdit();
+    // Keeps the edit, then moves -- how a block pasted into the terminal
+    // (cells separated by Tab, rows by Enter) lands as it looked in Excel.
+    void tableTab();
+    void tableEnter();
+    void insertTableRow();                    // after the cursor
+    void deleteTableRow();
+    void pasteIntoTable(const std::string& block);
+    void requestDeleteTable();
+    void undoTables();
+    void redoTables();
+    void showTableHelp();
+    std::vector<std::string> tableUsers() const;     // of the current table
+
     // --- quitting ------------------------------------------------------------
     bool wantsQuit() const { return m_quit; }
     void requestQuit();
@@ -300,6 +363,29 @@ private:
     std::size_t m_resultsScroll{0};
 
     std::size_t m_flowCursor{0};
+
+    std::vector<Table>              m_tables;
+    std::vector<TableIssue>         m_tableIssues;
+    std::vector<std::vector<Table>> m_tableUndo;
+    std::vector<std::vector<Table>> m_tableRedo;
+    TablesFocus m_tablesFocus{TablesFocus::List};
+    std::size_t m_kindIndex{0};
+    std::size_t m_tableIndex{0};
+    std::size_t m_tableField{0};
+    std::size_t m_cellRow{0};
+    std::size_t m_cellColumn{0};
+    std::size_t m_entryColumn{0};     // where Enter returns to, after Tabs
+    bool        m_editingTable{false};
+    std::string m_tableDraft;
+    // What a Confirm about a table is waiting to do.
+    std::size_t m_pendingRows{0}, m_pendingColumns{0};
+    std::string m_pendingName;
+
+    void tablesChanging();            // snapshot for ^Z, before a change
+    void tablesChanged();             // dirty, and re-read the joined model
+    bool setHeaderField(std::size_t field, const std::string& value);
+    void applyRename(const std::string& to, bool references);
+    void clampTableCursor();
 };
 
 }  // namespace des

@@ -29,6 +29,7 @@ void runDocumentTests();     // tests/document_tests.cpp
 void runRuntimeTests();      // tests/runtime_tests.cpp
 void runTuiTests();          // tests/tui_tests.cpp
 void runV16Tests();          // tests/v16_tests.cpp
+void runTablesTests();       // tests/tables_tests.cpp
 
 namespace {
 
@@ -1712,6 +1713,7 @@ int main() {
     runRuntimeTests();
     runTuiTests();
     runV16Tests();
+    runTablesTests();
 
     std::cout << "\n" << (des_test::g_checks - des_test::g_failures)
               << " / " << des_test::g_checks << " checks passed\n";

@@ -212,7 +212,11 @@ ModelDocument starterModel() {
 
 TuiState TuiState::fromText(const std::string& text, std::string path) {
     TuiState s;
-    s.m_buffer.setText(text);
+    // v16.1: the tables come out of the text and onto the Tables tab. What is
+    // left is what the Model tab edits.
+    SplitResult split = splitTables(text);
+    s.m_buffer.setText(split.tables.empty() ? text : split.modelText);
+    s.m_tables = std::move(split.tables);
     s.m_path = std::move(path);
     s.rebuildPalette();
     s.reparse();
@@ -247,6 +251,9 @@ void TuiState::rebuildPalette() {
         // row, and a [Queue] record in a file would be a second place to say
         // the same thing.
         if (schema.readOnly) continue;
+        // v16.1: these are made on the Tables tab.
+        if (schema.typeName == "Variable" || schema.typeName == "Schedule" ||
+            schema.typeName == "ScheduleRow") continue;
         m_palette.push_back(schema.typeName);
     }
     m_runFields.clear();
@@ -255,7 +262,7 @@ void TuiState::rebuildPalette() {
 }
 
 void TuiState::reparse() {
-    ReadResult read = readDocument(m_buffer.text());
+    ReadResult read = readDocument(joinedText());
     m_document    = std::move(read.document);
     m_diagnostics = std::move(read.diagnostics);
 
@@ -265,6 +272,16 @@ void TuiState::reparse() {
     // one message about a stray bracket.
     CompileResult compiled = compile(m_document);
     for (Diagnostic& d : compiled.diagnostics) m_diagnostics.push_back(std::move(d));
+
+    // A diagnostic past the model text is about a table.
+    m_tableIssues.clear();
+    const auto ranges = tableLineRanges(m_buffer.text(), m_tables);
+    for (const Diagnostic& d : m_diagnostics) {
+        const std::size_t line = lineOf(m_document, d);
+        for (std::size_t i = 0; i < ranges.size(); ++i)
+            if (line >= ranges[i].first && line < ranges[i].second)
+                m_tableIssues.push_back(TableIssue{i, d.severity, d.message});
+    }
 
     m_runs = runNames(m_document);
     if (m_runIndex >= m_runs.size()) m_runIndex = m_runs.empty() ? 0 : m_runs.size() - 1;
@@ -415,6 +432,37 @@ void TuiState::answerConfirm(char c) {
         if (c == 'c') { m_overlay = Overlay::None; setStatus(""); }
         return;
     }
+    if (m_confirmFor == ConfirmFor::ResizeTable) {
+        m_overlay = Overlay::None;
+        if (c == 'y' && m_tableIndex < m_tables.size()) {
+            tablesChanging();
+            m_tables[m_tableIndex].resize(m_pendingRows, m_pendingColumns);
+            tablesChanged();
+            setStatus("resized");
+        } else {
+            setStatus("left as it was");
+        }
+        return;
+    }
+    if (m_confirmFor == ConfirmFor::DeleteTable) {
+        m_overlay = Overlay::None;
+        if (c == 'y' && m_tableIndex < m_tables.size()) {
+            const std::string name = m_tables[m_tableIndex].name;
+            tablesChanging();
+            m_tables.erase(m_tables.begin() + static_cast<long>(m_tableIndex));
+            tablesChanged();
+            setStatus("deleted " + name + " -- ^Z brings it back");
+        } else {
+            setStatus("");
+        }
+        return;
+    }
+    if (m_confirmFor == ConfirmFor::RenameTable) {
+        m_overlay = Overlay::None;
+        if ((c == 'y' || c == 'n') && m_tableIndex < m_tables.size())
+            applyRename(m_pendingName, c == 'y');
+        return;
+    }
     if (m_confirmFor == ConfirmFor::OpenExisting) {
         if (c == 'y') {
             const std::string path = m_pendingPath;
@@ -452,7 +500,7 @@ bool TuiState::save(const std::string& toPath) {
     }
     std::ofstream out(toPath, std::ios::binary);
     if (!out.is_open()) { setStatus(toPath + ": could not write"); return false; }
-    const std::string text = m_buffer.text();
+    const std::string text = joinedText();
     out.write(text.data(), static_cast<std::streamsize>(text.size()));
     // A trailing newline, because every text tool expects one and its absence
     // is the sort of thing that shows up as a diff nobody made.
@@ -491,6 +539,20 @@ std::size_t TuiState::firstErrorLine() const {
 
 void TuiState::goToFirstError() {
     const std::size_t line = firstErrorLine();
+    // In the tables section: the Tables tab, on that table.
+    const auto ranges = tableLineRanges(m_buffer.text(), m_tables);
+    for (std::size_t i = 0; line > 0 && i < ranges.size(); ++i) {
+        if (line < ranges[i].first || line >= ranges[i].second) continue;
+        setView(View::Tables);
+        m_tablesFocus = TablesFocus::Editor;
+        selectTable(i);
+        for (const TableIssue& issue : m_tableIssues)
+            if (issue.table == i && issue.severity == Severity::Error) {
+                setStatus(m_tables[i].name + ": " + issue.message);
+                break;
+            }
+        return;
+    }
     if (line == 0) {
         setStatus(hasErrors(m_diagnostics)
                       ? "there is an error, but nothing in the file to point at"
@@ -667,6 +729,14 @@ void TuiState::stepPicker(long long delta) {
 
 void TuiState::commitPicker() {
     if (m_choice >= m_choices.size()) { cancelPicker(); return; }
+    if (m_pickerFor == PickerFor::TableUnits) {
+        const std::string value = m_choices[m_choice];
+        m_choices.clear();
+        m_overlay = Overlay::None;
+        m_pickerFor = PickerFor::Editor;
+        if (m_tableIndex < m_tables.size()) setHeaderField(m_tableField, value);
+        return;
+    }
     if (m_pickerFor == PickerFor::RunField) {
         const std::string value = m_choices[m_choice];
         m_choices.clear();
