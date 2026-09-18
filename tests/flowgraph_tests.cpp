@@ -18,6 +18,7 @@ using namespace des;
 using des_test::check;
 using des_test::modelPath;
 using des_test::section;
+using des_test::skip;
 
 namespace {
 
@@ -123,7 +124,9 @@ void runFlowGraphTests() {
     {
         const std::string dot = findDot();
         if (dot.empty()) {
-            check(true, "Graphviz is not installed here; the round trip is skipped");
+            // Nine: the same number the branch below runs, so every leg of the
+            // gate accounts for the same suite.
+            skip(9, "Graphviz is not installed here, so dot is not run");
         } else {
             const ModelDocument doc = readDocument(fileText(modelPath("decide.des"))).document;
             const std::string out =

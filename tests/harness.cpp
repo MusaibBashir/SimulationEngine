@@ -57,6 +57,12 @@ namespace des_test {
 
 int g_checks = 0;
 int g_failures = 0;
+int g_skipped = 0;
+
+void skip(int n, const std::string& why) {
+    g_skipped += n;
+    std::cout << "  SKIP: " << n << " check(s) -- " << why << "\n";
+}
 
 void check(bool condition, const std::string& what) {
     ++g_checks;

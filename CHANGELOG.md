@@ -5,6 +5,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [16.2.0] — 2026-09-19 — "The flow as a graph"
+
+### Added
+
+- **The Flow tab draws the model as a graph**, laid out by Graphviz and drawn in
+  characters: boxes where Graphviz placed them, edges along its routes with
+  arrowheads, Decide branches labelled, a Route's trip to its Station dotted,
+  sources on the left. Up/Down walks the blocks and the view follows the chosen
+  one; Enter still opens it in the text; `L` switches to the list.
+- **`P` saves the graph as a PNG** in an `images` folder beside the model
+  (`images/<model>-flow.png`) and opens it in the default image viewer.
+- **The installer offers to install Graphviz** with winget when it is not
+  already there. Without Graphviz the Flow tab shows the list, and says why.
+- **Skipped checks are counted, not hidden.** The test harness has
+  `skip(n, why)`; the suite prints skipped checks apart from passed ones, and
+  `verify.sh` requires every leg to account for the same number (ran + skipped)
+  -- so the WSL leg, which has no Graphviz, says it skipped the nine checks
+  that run dot instead of quietly running a shorter suite.
+
+---
+
 ## [16.1.0] — 2026-09-18 — "The Tables tab"
 
 ### Added

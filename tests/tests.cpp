@@ -1719,6 +1719,8 @@ int main() {
 
     std::cout << "\n" << (des_test::g_checks - des_test::g_failures)
               << " / " << des_test::g_checks << " checks passed\n";
+    if (des_test::g_skipped > 0)
+        std::cout << des_test::g_skipped << " checks skipped\n";
     if (des_test::g_failures > 0) std::cout << des_test::g_failures << " FAILURES\n";
     return des_test::g_failures == 0 ? 0 : 1;
 }

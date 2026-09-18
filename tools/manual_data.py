@@ -7,7 +7,7 @@ the call-flow chapters. Prose is passed to reportlab as markup, so use &amp;,
 &lt; and &gt; rather than the bare characters.
 """
 
-VERSION_LINE = "v16.1 — the Tables tab · 1696 checks · 141 types"
+VERSION_LINE = "v16.2 — the flow as a graph · 1732 checks · 145 types"
 
 FRONT_MATTER = (
     "A discrete-event simulation engine in the spirit of Arena's Basic Process "
@@ -62,6 +62,10 @@ TYPE_DOC = {
     "PromptFor": "What the one-line Prompt is for: naming a new model, or naming an unnamed one on its first save.",
     "RunsFocus": "Which half of the Runs tab has the keyboard: the list of runs, or the chosen run's form.",
     "PickerFor": "Which field a Picker writes into: the editor's current line, the Runs form's selected field, or a table's Time Units.",
+    "PlainNode": "One node as Graphviz's plain output gives it: name, label, shape, centre and size in inches, y upwards.",
+    "PlainEdge": "One edge from the plain output: its ends, the B-spline control points of its route, its style, and its label with the label's position.",
+    "PlainLayout": "Everything `dot -Tplain` said about a graph: its size and every node and edge. ok() is false for an empty or unreadable one.",
+    "AsciiGraph": "The layout drawn in characters, one string per row, and where each node's box landed, so the Flow tab can highlight the chosen block and scroll to it.",
     "TableKind": "Variable, Array, Matrix or Schedule -- the four things the Tables tab makes.",
     "Table": "One table: its kind, name, note (the comment above it in the file), shape, and its cells as the TEXT that was typed, so 0.60 is written back as 0.60. A schedule is rows of (Value, Duration) with its Time Units.",
     "SplitResult": "A file taken apart: the model text the Model tab edits, and the tables the Tables tab edits.",
@@ -782,6 +786,14 @@ CHAPTERS = [
             "moves right, which is what a block pasted into the terminal from Excel arrives "
             "as."),
    ("types", ["TableKind", "Table", "SplitResult", "TablesFocus", "TableIssue", "TableGrid"]),
+   ("h3", "The flow as a graph (v16.2)"),
+   ("text", "Graphviz lays the model out and the Flow tab draws that layout in characters. "
+            "dotFor() writes the DOT; dot runs once per change of the model, on a hidden "
+            "console of its own, and returns its plain layout; parsePlain() reads it and "
+            "drawAscii() draws boxes where dot put them and edges along its splines. Only "
+            "findDot() and runDot() touch the machine, so the rest is tested without "
+            "Graphviz. P renders a PNG into an images folder beside the model."),
+   ("types", ["PlainNode", "PlainEdge", "PlainLayout", "AsciiGraph"]),
   ]),
 
  (10, "The Flowchart",
@@ -1014,6 +1026,13 @@ CHAPTERS = [
               ["usersOf(doc, name)", "Every record that names a table -- what a rename or "
                "delete affects."],
               ["isNumberCell / isTableName", "What a cell and a table name may hold."],
+              ["dotFor(doc)", "The model as Graphviz DOT, left to right, shaped and "
+               "labelled by block type."],
+              ["parsePlain(text) / drawAscii(layout)", "dot's plain layout read, and drawn "
+               "in characters."],
+              ["findDot() / runDot(...)", "Where Graphviz is, and running it to a file in "
+               "any format it supports."],
+              ["flowImagePath(model)", "<model's folder>/images/<model>-flow.png."],
               ["tabView / tabLabel", "The tabs in order, and each one's label with any "
                "error count."],
               ["tableGridFor(state, layout)", "The current table's grid geometry, shared by "
@@ -1082,6 +1101,7 @@ MEMBER_DOC.update({
     "Model::routeTo": "Where a Route delivers. Refuses anything that is not a Station.",
     "TimeLimit::stopTime": "Its own limit. Known before the run starts, so the engine puts it on the event list and the clock stops exactly on it rather than on the first event after it.",
     "AnyOf::stopTime": "The earliest deadline any child knows -- the composite is met when its FIRST child is, so the first knowable time is the one the clock must stop on. A child that cannot say may still end the run sooner.",
+    "TuiState::saveFlowPicture": "P on the Flow tab: dot renders the PNG into images/ beside the model, and the opener the terminal layer installed shows it. Says why when Graphviz is missing or fails.",
     "Table::at": "One cell, by row and column, counting from 0.",
     "Table::resize": "A new shape. New cells are 0; cells that no longer fit are dropped -- which is why the tab asks resizeLoses() first.",
     "Table::resizeLoses": "Whether a new shape would drop a cell that is not zero.",

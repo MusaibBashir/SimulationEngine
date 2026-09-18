@@ -166,3 +166,32 @@ where the table and its user are on different screens that silence is worse
 than before, so the compiler now reports unknown names too. Their position is
 an offset inside an expression, not a file line, so they carry none rather
 than a marker on the wrong line. No baseline or regression output changed.
+
+## v16.2 — the flow as a graph
+
+The Flow tab had been a list of blocks and their exits -- accurate, and no
+help at all in seeing a model's shape. Graphviz now lays the model out and
+the tab draws the result in characters.
+
+**Graphviz cannot draw ASCII, so it does not.** `dot -Tplain` gives every
+node's centre and size and every edge's B-spline control points, in inches.
+drawAscii() maps an inch to 12 columns and 6 rows -- which is what the DOT asks
+a 10-point Courier to take, so a block's name fits the box dot sized for it --
+draws each edge by sampling its spline, then the edge labels, then the boxes
+over both, so no line runs through a name. Two things only looking found: a
+slope stepped one cell at a time read as noise (`|--/--`), so direction is
+judged over five cells; and a 45-degree line crosses two columns a row, so only
+the first cell of each row gets the slash. And the fleet's loop back into the
+Match lane pulled every Create into the middle of the picture until
+`newrank=true` let `rank=source` hold them on the left.
+
+**Running it.** dot runs once per change of the model, not per frame. On
+Windows it runs through CreateProcess on a hidden console of its own: going
+through cmd.exe on the program's own console -- which std::system does -- can
+reset the raw keyboard mode the terminal UI depends on.
+
+**Getting it installed.** Graphviz is not on the laptops this is sent to. The
+installer offers to install it with winget when it is missing; Graphviz's own
+installer then asks for administrator permission. If that is refused, or the
+laptop is offline, or the zip was used instead, the Flow tab shows the list and
+says why, and the README gives the one command to run by hand.

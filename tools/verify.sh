@@ -288,13 +288,24 @@ asan() {
     ' > "$full" 2>&1
     rc=$?
     tail -6 "$full"
-    CHECKS="$(grep -o '[0-9]* / [0-9]* checks passed' "$full" | tail -1 | awk '{print $3}')"
+    CHECKS="$(accounted "$(cat "$full")")"
     if [ "$rc" -ne 0 ]; then
         printf 'ASan: FAILED\n'; FAILED=1
     else
         printf 'ASan: clean\n'
         RAN=$((RAN + 1))
     fi
+}
+
+# Checks a suite ACCOUNTED for: those it ran plus those it skipped and said
+# so. A leg without Graphviz skips the checks that run dot; it must still
+# account for the same suite as a leg that has it, or it ran less of it.
+accounted() {
+    local ran skipped
+    ran="$(printf '%s' "$1" | grep -o '[0-9]* / [0-9]* checks passed' | tail -1 | awk '{print $3}')"
+    skipped="$(printf '%s' "$1" | grep -o '^[0-9]* checks skipped' | tail -1 | awk '{print $1}')"
+    [ -z "$ran" ] && return
+    printf '%s' "$((ran + ${skipped:-0}))"
 }
 
 # --- WSL ASan + UBSan --------------------------------------------------------
@@ -324,7 +335,7 @@ sanitisers() {
            | MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu -e bash -s -- "$wslroot" "$JOBS" "$SUITE_TIMEOUT" 2>&1 \
            | tr -d '\000')"
     printf '%s\n' "$out"
-    CHECKS="$(printf '%s' "$out" | grep -o '[0-9]* / [0-9]* checks passed' | tail -1 | awk '{print $3}')"
+    CHECKS="$(accounted "$out")"
     if printf '%s' "$out" | grep -qE 'runtime error|ERROR: |FAIL'; then
         printf 'Sanitisers: FAILED\n'; FAILED=1
     elif printf '%s' "$out" | grep -q 'checks passed'; then
@@ -392,7 +403,7 @@ run_legs() {
         local first="${counts[0]#*=}" x
         for x in "${counts[@]}"; do
             if [ "${x#*=}" != "$first" ]; then
-                printf '\nThe legs ran different numbers of checks: %s\n' "${counts[*]}"
+                printf '\nThe legs accounted for different numbers of checks (ran + skipped): %s\n' "${counts[*]}"
                 FAILED=1
                 break
             fi

@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1696/1696 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1732/1732 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -415,6 +415,25 @@ every change rewrites one line of that run's `[Run]` block, is refused if the
 compiler would reject it, and is one `^Z`. `A` adds a run and `Del` deletes
 one, after asking — with the comment above it.
 
+**The Flow tab is a graph.** Graphviz lays the model out and the tab draws it
+in characters -- the chosen block highlighted, the view following it as
+Up/Down walks the blocks:
+
+```
+ +---------------------+     +-------------------+
+ ( Create_Pax_Downtown )     |Stamp_Pax_Downtown |
+ |                     |---> |                   |
+ +---------------------+     +-------------------+
+                                             \---
+                                               \--->  +--------------+
+                                                      |Riders_Waiting|
+```
+
+`L` switches to the list. `P` saves it as a PNG in an `images` folder beside
+the model and opens it. Graphviz is needed for the graph; the installer offers
+to install it (`winget install Graphviz.Graphviz` by hand), and without it the
+tab shows the list.
+
 **Tables have their own tab.** Variables, arrays, matrices and schedules are
 edited as grids on the Tables tab (`^D`), and the Model tab's text keeps only
 the rest of the model, which uses a table by its name:
@@ -628,7 +647,7 @@ sim/
 ├── cli/             the des command: check, run and regress
 ├── tui/             des_tui: the terminal UI, and the only platform code
 ├── examples/models/ hand-written .des models
-├── tests/           1696 unit checks
+├── tests/           1732 unit checks
 ├── include/         50 headers
 └── src/             42 sources
 ```
