@@ -567,4 +567,59 @@ void runV16Tests() {
             paletteHas &= std::find(s.palette().begin(), s.palette().end(), type) != s.palette().end();
         check(paletteHas, "every new module is in the palette");
     }
+
+    section("The Group 9 model builds, conserves its entities and shows the imbalance");
+    {
+        std::ifstream in(modelPath("ride_hailing.des"), std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        const ReadResult read = readDocument(text);
+        const CompileResult compiled = compile(read.document);
+        check(compiled.model != nullptr, "the ride-hailing model compiles");
+        bool clean = !hasErrors(read.diagnostics);
+        for (const Diagnostic& d : compiled.diagnostics) clean &= d.severity != Severity::Error;
+        check(clean, "with no errors");
+
+        // One replication, held open to count where every entity is.
+        SimulationSystem sim(12345);
+        std::vector<Diagnostic> d;
+        compileInto(read.document, sim.model(), d);
+        sim.stopAt(480).execute();
+        Model& m = sim.model();
+        const long long cars = static_cast<long long>(m.nodeAs<CreateNode>("Create_CV_Fleet").created() +
+                                                      m.nodeAs<CreateNode>("Create_FV_Fleet").created());
+        check(cars == 50, "10 contract and 40 freelance cars, all at time 0");
+        long long held = 0;
+        for (std::size_t i = 0; i < m.nodeCount(); ++i) {
+            const INode& n = m.nodeAt(i);
+            if (const auto* l = dynamic_cast<const MatchLaneNode*>(&n)) held += static_cast<long long>(l->waiting());
+            if (const auto* r = dynamic_cast<const RouteNode*>(&n)) held += r->inTransit();
+            if (const auto* y = dynamic_cast<const DelayNode*>(&n)) held += y->inTransit();
+        }
+        check(static_cast<long long>(sim.liveEntityCount()) == held,
+              "every entity still alive is waiting in a lane, on a route or in a delay");
+        check(m.nodeAs<DisposeNode>("CV_LoggedOff").count() <= 10,
+              "no more contract cars log off than exist");
+
+        // 20 replications, not the file's 100: the conclusion does not need
+        // them, and this suite also runs under two sanitisers. des regress
+        // runs all 100.
+        std::string shorter = text;
+        shorter.replace(shorter.find("Replications = 100"), 18, "Replications = 20");
+        auto run = RunController::fromDocument(readDocument(shorter).document, d);
+        run->runToCompletion();
+        const auto& reps = run->namedStatistics();
+        const auto meanOf = [&reps](const std::string& label) {
+            double sum = 0.0;
+            for (const auto& rep : reps)
+                for (const NamedStatistic& n : rep)
+                    if (n.label == label) sum += n.value;
+            return reps.empty() ? 0.0 : sum / static_cast<double>(reps.size());
+        };
+        check(reps.size() == 20, "one list per replication");
+        check(meanOf("Wait_Suburb (tally)") > 10.0 * (meanOf("Wait_Downtown (tally)") + 1.0),
+              "Suburb riders wait far longer than Downtown riders");
+        const double sla = meanOf("ServiceLevel (tally)");
+        check(sla > 0.8 && sla < 0.95, "most riders are still picked up within 5 minutes");
+    }
 }

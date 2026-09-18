@@ -5,3 +5,4 @@ examples/models/teller.des
 examples/models/decide.des
 examples/models/variables.des
 examples/models/shared.des
+examples/models/ride_hailing.des
