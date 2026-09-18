@@ -64,4 +64,8 @@ std::string defaultModelPath();
 // program exits, taking any message printed on the way out with it.
 bool launchedOnOwnConsole();
 
+// v16.2: opens a file with whatever the system opens it with -- a PNG in the
+// Photos app. False when nothing could be started.
+bool openWithDefaultApp(const std::string& path);
+
 }  // namespace des

@@ -1096,6 +1096,55 @@ void TuiState::gotoFlowBlock() {
     setStatus(b.name.empty() ? b.type : b.name);
 }
 
+const AsciiGraph* TuiState::flowGraph() const {
+    const std::string dot = dotFor(m_document);
+    if (dot != m_flowDot) {
+        m_flowDot = dot;
+        m_flowReady = false;
+        m_flowError.clear();
+        const std::string dotExe = findDot();
+        std::error_code ec;
+        const std::string out =
+            (std::filesystem::temp_directory_path(ec) / "des_flow_view.plain").string();
+        std::string why;
+        if (dotExe.empty()) {
+            m_flowError = "Graphviz is not installed -- showing the list. "
+                          "(winget install Graphviz.Graphviz)";
+        } else if (!runDot(dotExe, dot, "plain", out, why)) {
+            m_flowError = "Graphviz could not draw this: " + why;
+        } else {
+            std::ifstream in(out, std::ios::binary);
+            const std::string plain((std::istreambuf_iterator<char>(in)),
+                                    std::istreambuf_iterator<char>());
+            m_flowGraph = drawAscii(parsePlain(plain));
+            m_flowReady = !m_flowGraph.lines.empty();
+            if (!m_flowReady) m_flowError = "Graphviz returned an empty layout";
+            std::filesystem::remove(out, ec);
+        }
+    }
+    return m_flowReady ? &m_flowGraph : nullptr;
+}
+
+bool TuiState::saveFlowPicture() {
+    const std::string dotExe = findDot();
+    if (dotExe.empty()) {
+        setStatus("Graphviz is not installed, so there is no picture to save -- "
+                  "winget install Graphviz.Graphviz");
+        return false;
+    }
+    const std::string path = flowImagePath(m_path);
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
+    std::string why;
+    if (!runDot(dotExe, dotFor(m_document), "png", path, why)) {
+        setStatus("could not draw the picture: " + why);
+        return false;
+    }
+    const bool opened = m_opener && m_opener(path);
+    setStatus(path + (opened ? ": saved and opened" : ": saved"));
+    return true;
+}
+
 void TuiState::requestQuit() {
     if (!m_dirty) { m_quit = true; return; }
     // Unsaved work is asked about, never discarded on one keystroke. The whole

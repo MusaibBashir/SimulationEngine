@@ -14,6 +14,7 @@
 #include "Screen.hpp"
 #include "TextBuffer.hpp"
 #include "TableStore.hpp"
+#include "FlowGraph.hpp"
 #include "TuiState.hpp"
 #include "TuiRender.hpp"
 #include "TuiInput.hpp"

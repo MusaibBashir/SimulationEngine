@@ -5,6 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <shlobj.h>
+#include <shellapi.h>
 
 namespace des {
 namespace {
@@ -260,6 +261,14 @@ std::string defaultModelPath() {
     }
     CoTaskMemFree(wide);
     return result;
+}
+
+bool openWithDefaultApp(const std::string& path) {
+    // ShellExecute's result is an INT_PTR where anything above 32 is success,
+    // a Win16 convention nobody has been allowed to change.
+    const INT_PTR r = reinterpret_cast<INT_PTR>(
+        ShellExecuteA(nullptr, "open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+    return r > 32;
 }
 
 bool launchedOnOwnConsole() {

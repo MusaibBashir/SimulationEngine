@@ -13,11 +13,13 @@
 // had to work to keep comments alive. Here what is saved is what was typed.
 
 #pragma once
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 #include "Compiler.hpp"
 #include "Diagnostic.hpp"
+#include "FlowGraph.hpp"
 #include "ModelDocument.hpp"
 #include "ModuleSchema.hpp"
 #include "RunController.hpp"
@@ -255,6 +257,20 @@ public:
     void stepFlow(long long delta);
     void gotoFlowBlock();           // jumps the text cursor to that record
 
+    // v16.2: the flow as a graph, laid out by Graphviz and drawn in ASCII.
+    // Built on demand and kept until the model changes, so dot runs once per
+    // change rather than once per frame. Null when dot is missing or failed;
+    // flowGraphError() then says why and the tab shows the list instead.
+    const AsciiGraph* flowGraph() const;
+    const std::string& flowGraphError() const { return m_flowError; }
+    bool flowAsList() const { return m_flowAsList; }
+    void setFlowAsList(bool on) { m_flowAsList = on; }
+    // P: <model's folder>/images/<model>-flow.png, then opened.
+    bool saveFlowPicture();
+    // How a file is opened with its default program. The terminal layer
+    // installs it; tests install one that records the path.
+    void setOpener(std::function<bool(const std::string&)> open) { m_opener = std::move(open); }
+
     // --- the Tables tab (v16.1) ---------------------------------------------
     // Variables, arrays, matrices and schedules, edited as tables. They are
     // saved in the same file but are not in buffer(): the model that compiles
@@ -363,6 +379,14 @@ private:
     std::size_t m_resultsScroll{0};
 
     std::size_t m_flowCursor{0};
+    bool        m_flowAsList{false};
+    // The layout is a CACHE of the document, so filling it from a const
+    // renderer is not a change anybody can see.
+    mutable std::string m_flowDot;
+    mutable AsciiGraph  m_flowGraph;
+    mutable bool        m_flowReady{false};
+    mutable std::string m_flowError;
+    std::function<bool(const std::string&)> m_opener;
 
     std::vector<Table>              m_tables;
     std::vector<TableIssue>         m_tableIssues;

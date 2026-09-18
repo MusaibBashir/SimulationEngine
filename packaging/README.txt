@@ -76,6 +76,16 @@ KEYS
 The tabs along the top -- Model, Tables, Flow, Runs, Results -- can be
 clicked, or reached with Ctrl+B, Ctrl+D, Ctrl+F, Ctrl+U and Ctrl+E.
 
+The Flow tab draws the model as a graph using Graphviz. The installer offers
+to install Graphviz for you; if you skipped that, or used the zip, install it
+once with this command in a terminal, then restart the program:
+
+    winget install Graphviz.Graphviz
+
+Without it the Flow tab shows the same wiring as a list. On the Flow tab, L
+switches between the graph and the list, and P saves the graph as a picture
+in an "images" folder next to the model and opens it.
+
 On the Tables tab, numbers such as a fleet size, a travel-time table or an
 hourly arrival schedule are edited as a grid. Pick a kind on the left and
 press Enter to make one; the model uses it by its name. A block copied from

@@ -57,6 +57,7 @@ int main(int argc, char** argv) {
     TuiState state = TuiState::open(path);
     const std::string folder = std::filesystem::path(defaultModelPath()).parent_path().string();
     state.setDefaultDirectory(folder.empty() ? std::string(".") : folder);
+    state.setOpener([](const std::string& file) { return openWithDefaultApp(file); });
     if (!chosen) {
         // A scratch model that was never saved has no name yet. Its first ^S
         // asks for one, rather than every new model becoming untitled.des.

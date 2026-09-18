@@ -313,6 +313,48 @@ void renderModel(const TuiState& state, Screen& screen, const Layout& L) {
     }
 }
 
+// v16.2: the graph. The view follows the chosen block, so Up/Down walks the
+// picture the way it walks the list.
+bool renderFlowGraph(const TuiState& state, Screen& screen, const Layout& L,
+                     const std::vector<FlowBlock>& blocks) {
+    if (state.flowAsList()) return false;
+    const AsciiGraph* g = state.flowGraph();
+    if (g == nullptr) return false;
+    const int top = L.bodyTop + 1;
+    const int rows = L.bodyBottom - top;
+    const int cols = L.width - 2;
+    int ox = 0, oy = 0;
+    const CellRect* chosen = nullptr;
+    if (state.flowCursor() < blocks.size()) {
+        const auto it = g->boxes.find(blocks[state.flowCursor()].name);
+        if (it != g->boxes.end()) chosen = &it->second;
+    }
+    if (chosen != nullptr) {
+        ox = std::max(0, (chosen->left + chosen->right) / 2 - cols / 2);
+        oy = std::max(0, (chosen->top + chosen->bottom) / 2 - rows / 2);
+    }
+    for (int r = 0; r < rows; ++r) {
+        const std::size_t line = static_cast<std::size_t>(oy + r);
+        if (line >= g->lines.size()) break;
+        const std::string& l = g->lines[line];
+        if (static_cast<std::size_t>(ox) < l.size())
+            screen.text(1, top + r, fit(l.substr(static_cast<std::size_t>(ox)), cols));
+    }
+    if (chosen != nullptr) {
+        for (int r = chosen->top; r <= chosen->bottom; ++r)
+            for (int c = chosen->left; c <= chosen->right; ++c) {
+                const int sx = 1 + c - ox, sy = top + r - oy;
+                if (sx < 1 || sx > cols || sy < top || sy >= top + rows) continue;
+                const std::string& l = g->lines[static_cast<std::size_t>(r)];
+                const char ch = static_cast<std::size_t>(c) < l.size()
+                                    ? l[static_cast<std::size_t>(c)] : ' ';
+                screen.put(sx, sy, ch, Attr::Reverse);
+            }
+    }
+    screen.text(3, L.bodyBottom, " L list   P save picture ", Attr::Dim);
+    return true;
+}
+
 void renderFlow(const TuiState& state, Screen& screen, const Layout& L) {
     const std::vector<FlowBlock> blocks = flowOf(state.document());
     frame(screen, 0, L.bodyTop, L.width, L.bodyBottom - L.bodyTop + 1, "flow");
@@ -325,6 +367,10 @@ void renderFlow(const TuiState& state, Screen& screen, const Layout& L) {
         screen.text(3, L.bodyTop + 3, "the palette in the Model view.", Attr::Dim);
         return;
     }
+    if (renderFlowGraph(state, screen, L, blocks)) return;
+    if (!state.flowAsList() && !state.flowGraphError().empty())
+        screen.text(3, L.bodyBottom, fit(" " + state.flowGraphError() + " ", right - 4),
+                    Attr::Dim);
 
     const int rows = L.bodyBottom - L.bodyTop - 2;
     std::size_t first = 0;
@@ -776,7 +822,7 @@ const char* hintFor(const TuiState& state) {
                                : "Arrows move  type to edit  ^V paste  ^O add row  Del row  Tab panel  ? help";
             }
             break;
-        case View::Flow:    return "Up/Down move   Enter opens that block in the text   F1 keys";
+        case View::Flow:    return "Up/Down block   Enter opens it in the text   L graph/list   P save picture   F1 keys";
         case View::Runs:
             if (state.runsFocus() == RunsFocus::Form)
                 return state.editingRunField() ? "Enter keeps it   Esc leaves it"

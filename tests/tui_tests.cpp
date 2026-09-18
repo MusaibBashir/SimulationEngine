@@ -630,6 +630,7 @@ void runTuiTests() {
     section("^F shows the wiring, including the wiring that is wrong");
     {
         TuiState t = TuiState::open(modelPath("teller.des"));
+        t.setFlowAsList(true);
         handleKey(t, Key::control('f'));
         check(t.view() == View::Flow, "^F opens the flow");
 
@@ -656,6 +657,7 @@ void runTuiTests() {
             // Listed first it read as the default tried first, which is
             // backwards -- and this view exists to catch that kind of thing.
             TuiState d = TuiState::open(modelPath("decide.des"));
+            d.setFlowAsList(true);
             handleKey(d, Key::control('f'));
             Screen screen(90, 26);
             render(d, screen);
@@ -676,6 +678,7 @@ void runTuiTests() {
                 "Next = Typo\n\n[Process]\nName = Serve\nService = 1\n",
                 "broken.des");
             check(hasErrors(b.diagnostics()), "the model does not compile");
+            b.setFlowAsList(true);
             handleKey(b, Key::control('f'));
             check(b.view() == View::Flow, "and ^F opens anyway");
             Screen screen(90, 26);
@@ -917,6 +920,7 @@ void runTuiTests() {
         handleKey(s, Key::special(KeyKind::Escape));
 
         // The flow agrees with what was typed.
+        s.setFlowAsList(true);
         handleKey(s, Key::control('f'));
         Screen flow(90, 26);
         render(s, flow);

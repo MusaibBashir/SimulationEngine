@@ -170,6 +170,10 @@ bool handleFlow(TuiState& state, Key key) {
         // place to look rather than a way of getting around.
         case KeyKind::Enter:    state.gotoFlowBlock(); break;
         case KeyKind::Escape:   state.setView(View::Model); break;
+        case KeyKind::Char:
+            if (key.ch == 'l' || key.ch == 'L') state.setFlowAsList(!state.flowAsList());
+            if (key.ch == 'p' || key.ch == 'P') state.saveFlowPicture();
+            break;
         default: break;
     }
     return true;
