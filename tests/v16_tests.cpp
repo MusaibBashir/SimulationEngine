@@ -4,6 +4,7 @@
 // variables, richer Records, and the statistics that report them.
 // ============================================================================
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -535,5 +536,35 @@ void runV16Tests() {
         const std::vector<NamedStatistic> named = sim.namedStatistics();
         check(named.size() == 1 && named[0].label == "X (tally)" && named[0].value == 2.5,
               "one tally, the mean of all six values");
+    }
+
+    section("The flow view shows Match lanes and Route destinations");
+    {
+        const std::vector<FlowBlock> f = flowOf(readDocument(
+            "version = 1\n[Create]\nName = C\nInterarrival = 1\nNext = Go\n"
+            "[Route]\nName = Go\nRoute Time = 1\nDestination = S\n"
+            "[Station]\nName = S\nNext = A\n[Match]\nName = M\n"
+            "[MatchLane]\nMatch = M\nName = A\n[MatchLane]\nMatch = M\nName = B\n").document);
+        bool routeDrawn = false, laneA = false, bUnreached = false, stationReached = false;
+        bool matchQuiet = false;
+        for (const FlowBlock& b : f) {
+            if (b.name == "Go")
+                for (const std::string& e : b.exits) routeDrawn |= e == "to -> S";
+            if (b.name == "A") laneA = b.type == "MatchLane" && !b.unreached;
+            if (b.name == "B") bUnreached = b.unreached;
+            if (b.name == "S") stationReached = !b.unreached && !b.dangling;
+            if (b.name == "M") matchQuiet = !b.unreached && b.exits.size() == 2;
+        }
+        check(routeDrawn, "a Route shows where it goes");
+        check(stationReached, "which counts as reaching the Station");
+        check(laneA, "lanes are blocks of their own, reached by what routes to them");
+        check(bUnreached, "and a lane nothing routes to says so");
+        check(matchQuiet, "the Match lists its lanes, and is not itself 'unreached'");
+
+        TuiState s = TuiState::fromText("version = 1\n", "t.des");
+        bool paletteHas = true;
+        for (const char* type : {"Match", "MatchLane", "Route", "Station", "Schedule", "ScheduleRow"})
+            paletteHas &= std::find(s.palette().begin(), s.palette().end(), type) != s.palette().end();
+        check(paletteHas, "every new module is in the palette");
     }
 }

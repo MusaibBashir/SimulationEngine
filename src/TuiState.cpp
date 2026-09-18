@@ -88,7 +88,38 @@ std::vector<FlowBlock> flowOf(const ModelDocument& doc) {
                 else
                     b.exits.push_back(c.id + " -> " + target);
             }
+            // v16: a Route's Destination is where it goes, though no line
+            // is drawn; the flow view is where that should be visible.
+            if (schema.typeName == "Route") {
+                const std::string to = doc.cell("Route", r, "Destination");
+                if (!to.empty()) b.exits.push_back("to -> " + to);
+            }
+            const bool isMatch = schema.typeName == "Match";
+            if (isMatch) {
+                // Listed, not arrows: a Match is entered through its lanes,
+                // so naming them must not count as reaching them.
+                for (std::size_t l = 0; l < doc.rowCount("MatchLane"); ++l)
+                    if (doc.cell("MatchLane", l, "Match") == b.name)
+                        b.exits.push_back("lane " + doc.cell("MatchLane", l, "Name"));
+            }
+            const std::string matchName = b.name;
             blocks.push_back(std::move(b));
+
+            // Each lane straight after its Match, as a block of its own --
+            // it is what other blocks route to, and it has its own exit.
+            if (isMatch) {
+                for (std::size_t l = 0; l < doc.rowCount("MatchLane"); ++l) {
+                    if (doc.cell("MatchLane", l, "Match") != matchName) continue;
+                    FlowBlock lane;
+                    lane.name = doc.cell("MatchLane", l, "Name");
+                    lane.type = "MatchLane";
+                    lane.row  = l;
+                    lane.line = doc.rows("MatchLane")[l].headerLine;
+                    const std::string next = doc.cell("MatchLane", l, "Next");
+                    if (!next.empty()) lane.exits.push_back("Next -> " + next);
+                    blocks.push_back(std::move(lane));
+                }
+            }
         }
     }
 
@@ -123,15 +154,20 @@ std::vector<FlowBlock> flowOf(const ModelDocument& doc) {
             const std::size_t at = e.rfind(" -> ");
             if (at != std::string::npos) targets.push_back(e.substr(at + 4));
         }
+    const std::vector<std::string> stations = referenceCandidates(doc, "Station");
     for (FlowBlock& b : blocks) {
         for (const std::string& e : b.exits) {
             const std::size_t at = e.rfind(" -> ");
-            if (at != std::string::npos && !exists(e.substr(at + 4)))
-                b.dangling = true;
+            if (at == std::string::npos) continue;
+            const std::string to = e.substr(at + 4);
+            const bool known = e.compare(0, 6, "to -> ") == 0
+                                   ? std::find(stations.begin(), stations.end(), to) != stations.end()
+                                   : exists(to);
+            if (!known) b.dangling = true;
         }
         // A Create is where entities come FROM, so nothing pointing at it is
         // the normal case rather than something to flag.
-        b.unreached = b.type != "Create" && !b.name.empty() &&
+        b.unreached = b.type != "Create" && b.type != "Match" && !b.name.empty() &&
                       std::find(targets.begin(), targets.end(), b.name) == targets.end();
     }
     return blocks;
