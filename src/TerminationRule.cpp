@@ -69,6 +69,21 @@ std::optional<double> AnyOf::progress(const SimulationSystem& sim) const {
     return best;
 }
 
+std::optional<SimTime> AnyOf::stopTime() const {
+    // The EARLIEST time any child knows, which is the mirror image of
+    // progress() taking the largest fraction and the same argument: this
+    // composite is met when the FIRST child is met, so the first knowable
+    // deadline is the one the clock must stop on. A child that cannot say
+    // (EntityLimit, Drained) may still end the run sooner -- canStep() is
+    // what notices that -- but it cannot move the deadline.
+    std::optional<SimTime> earliest;
+    for (const auto& r : m_rules) {
+        const std::optional<SimTime> t = r->stopTime();
+        if (t && (!earliest || *t < *earliest)) earliest = t;
+    }
+    return earliest;
+}
+
 bool AnyOf::isMet(const SimulationSystem& sim) const {
     for (const auto& r : m_rules) {
         if (r->isMet(sim)) return true;

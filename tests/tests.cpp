@@ -292,13 +292,86 @@ void testTerminationRules() {
     sim2.setTermination(timeLimit(20.0));
     sim2.initialise();
     sim2.run();
-    check(sim2.clock().now() >= 20.0, "TimeLimit stops at the time limit");
+    // WAS `>= 20.0`, and that is how the overshoot survived to v16. The rule
+    // says stop AT 20, so the clock reads 20 -- not "20 or wherever the next
+    // event happened to be". An assertion loose enough to pass either way
+    // measures nothing.
+    checkClose(sim2.clock().now(), 20.0, 1e-9, "TimeLimit stops AT the time limit");
 
     auto any = std::make_unique<AnyOf>();
     check(any->empty(), "an empty AnyOf reports empty");
     any->add(timeLimit(1000.0));
     any->add(entityLimit(5));
     check(!any->empty(), "AnyOf holds its children");
+
+    // stopTime() is what puts the deadline on the event list, so the composite
+    // must report the EARLIEST deadline it holds, and nothing when it holds
+    // none. Get this wrong and the clock stops in the wrong place.
+    check(timeLimit(45.0)->stopTime().has_value(), "TimeLimit knows its stop time");
+    check(!entityLimit(5)->stopTime().has_value(), "EntityLimit cannot know one");
+    check(!whenDrained()->stopTime().has_value(), "Drained cannot know one");
+    auto two = std::make_unique<AnyOf>();
+    two->add(timeLimit(90.0));
+    two->add(entityLimit(5));
+    two->add(timeLimit(45.0));
+    check(two->stopTime() && std::abs(*two->stopTime() - 45.0) < 1e-9,
+          "AnyOf takes the earliest deadline it knows");
+    check(!std::make_unique<AnyOf>()->stopTime().has_value(),
+          "an empty AnyOf has no deadline");
+}
+
+void testTimeLimitDoesNotOvershoot() {
+    section("A time limit stops the clock ON the limit (v16)");
+    // The reported case, with the arithmetic done on paper. Two sources,
+    // interarrival 10 and 20, both first at t=0:
+    //   A arrives at  0, 10, 20, 30, 40, 50
+    //   B arrives at  0, 20, 40, 60
+    // Under stopAt(45) the run covers [0, 45): eight arrivals, and the clock
+    // stops at 45.
+    //
+    // Before v16 the termination rule was only asked BETWEEN events, so at
+    // t=40 the run was not yet over, the next event (A at t=50) was processed,
+    // and the run ended with now() == 50 and NINE arrivals -- ten minutes and
+    // one entity past the Length the model asked for. Every time average then
+    // divided by 50 instead of 45.
+    SimulationSystem sim(1u);
+    Model& m = sim.model();
+    m.source("A", "TypeA", "10");
+    m.source("B", "TypeB", "20");
+    m.dispose("Out");
+    m.route("A", "Out").route("B", "Out");
+    sim.stopAt(45.0).execute();
+
+    checkClose(sim.now(), 45.0, 1e-9, "the clock stops at 45, not at the next event");
+    checkClose(sim.measuredTime(), 45.0, 1e-9, "the measured period is the configured Length");
+    check(sim.statistics().numberArrived() == 8, "the arrival at t=50 is not counted");
+
+    // An event dated EXACTLY on the limit does not happen: the run covers
+    // [0, limit), which is what `now >= maxTime` has always said. Source C's
+    // arrivals land on 0, 15, 30, 45 -- the last one is outside.
+    SimulationSystem edge(1u);
+    Model& me = edge.model();
+    me.source("C", "TypeC", "15");
+    me.dispose("Out");
+    me.route("C", "Out");
+    edge.stopAt(45.0).execute();
+    checkClose(edge.now(), 45.0, 1e-9, "the clock still stops at 45");
+    check(edge.statistics().numberArrived() == 3, "an arrival dated ON the limit is outside the run");
+
+    // A model that runs out of events BEFORE the limit still ends where the
+    // work ended. The deadline is the engine's own bookkeeping, not a pending
+    // event, so it cannot stretch a drained run out to the full Length.
+    SimulationSystem early(1u);
+    Model& mz = early.model();
+    mz.source("A", "TypeA", "10", /*maxArrivals=*/3);
+    mz.dispose("Out");
+    mz.route("A", "Out");
+    early.stopAt(1000.0).execute();
+    // Arrivals at 0, 10 and 20, then the source wakes once more at t=30, finds
+    // its cap reached and schedules nothing: t=30 is the last event, and that
+    // is where the run ends. Not 1000.
+    checkClose(early.now(), 30.0, 1e-9, "a drained model ends at its last event, not at the limit");
+    check(early.statistics().numberArrived() == 3, "the capped source produced exactly 3");
 }
 
 void testDeterministicEndToEnd() {
@@ -1601,6 +1674,7 @@ int main() {
     testSummary();
     testDistributions();
     testTerminationRules();
+    testTimeLimitDoesNotOvershoot();
     testDeterministicEndToEnd();
     testChainRouting();
     testReproducibility();
