@@ -79,8 +79,17 @@ std::vector<ModuleSchema> buildSchemas() {
                      "cannot.",
                      {ident("Name", "What expressions call it, for example "
                                     "Rejected in \"Rejected + 1\"."),
-                      real("Initial Value", "0",
-                           "Its value at the start of every replication.")}));
+                      text("Initial Value",
+                           "Its value at the start of every replication. For an "
+                           "array, every cell row by row, separated by commas "
+                           "-- or one value for all of them.", false, "0"),
+                      integer("Rows", "",
+                              "Make it an array with this many rows, read as "
+                              "Name(row) or Name(row, column). Blank means one "
+                              "number."),
+                      integer("Columns", "",
+                              "With Rows, a table: Name(row, column). Blank "
+                              "means one column.")}));
 
     s.push_back(make("Entity", ModuleKind::Data,
                      "A named kind of entity, so results can be reported per "
@@ -175,12 +184,15 @@ std::vector<ModuleSchema> buildSchemas() {
                                  "Time between arrivals, for example EXPO(1.0). "
                                  "A mean of 1.0 is one arrival per time unit."),
                       integer("Max Arrivals", "-1",
-                              "Stop after this many arrivals. -1 means never "
+                              "Stop after this many arrivals. Each arrival "
+                              "brings Per Arrival entities. -1 means never "
                               "stop."),
                       real("First At", "0",
                            "When the first arrival happens."),
-                      integer("Per Arrival", "1",
-                              "How many entities arrive together each time."),
+                      expression("Per Arrival",
+                                 "How many entities arrive together each time. "
+                                 "May name a Variable, so a fleet size can be "
+                                 "changed in one place.", false, "1"),
                       ref("Next", "Block",
                           "Where entities go from here. THIS IS THE "
                           "CONNECTION: Arena draws a line, this engine names "

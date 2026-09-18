@@ -108,6 +108,70 @@ void checkSchema(const ModelDocument& doc, std::vector<Diagnostic>& out) {
     }
 }
 
+// v16: "4, 14, 22" -> {4, 14, 22}. False when any item is not a number.
+bool numberList(const std::string& text, std::vector<double>& out) {
+    out.clear();
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const std::size_t comma = text.find(',', start);
+        std::string item = text.substr(start, comma == std::string::npos ? std::string::npos
+                                                                         : comma - start);
+        const std::size_t b = item.find_first_not_of(" 	");
+        const std::size_t e = item.find_last_not_of(" 	");
+        item = b == std::string::npos ? std::string() : item.substr(b, e - b + 1);
+        if (!looksLikeReal(item)) return false;
+        out.push_back(std::strtod(item.c_str(), nullptr));
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    return !out.empty();
+}
+
+// v16: a Variable is one number or, with Rows, a table. Checked here because
+// the Initial Value column is text now -- a list, for an array.
+void checkVariables(const ModelDocument& doc, std::vector<Diagnostic>& out) {
+    for (std::size_t r = 0; r < doc.rowCount("Variable"); ++r) {
+        const std::string init = doc.cell("Variable", r, "Initial Value");
+        const std::string rows = doc.cell("Variable", r, "Rows");
+        const std::string cols = doc.cell("Variable", r, "Columns");
+        if (rows.empty() && !cols.empty())
+            report(out, Severity::Error, "Variable", r, "Columns",
+                   "Columns needs Rows too -- a one-row table is Rows = 1");
+        std::vector<double> values;
+        if (init.empty()) continue;
+        if (!numberList(init, values)) {
+            report(out, Severity::Error, "Variable", r, "Initial Value",
+                   rows.empty() ? "Initial Value must be a number, not '" + init + "'"
+                                : "Initial Value must be numbers separated by commas");
+            continue;
+        }
+        if (rows.empty()) {
+            if (values.size() != 1)
+                report(out, Severity::Error, "Variable", r, "Initial Value",
+                       "several values need Rows (and Columns) to say the table's shape");
+            continue;
+        }
+        if (!looksLikeInteger(rows) || (!cols.empty() && !looksLikeInteger(cols))) continue;
+        const long long cells = std::strtoll(rows.c_str(), nullptr, 10) *
+                                (cols.empty() ? 1 : std::strtoll(cols.c_str(), nullptr, 10));
+        if (cells < 1)
+            report(out, Severity::Error, "Variable", r, "Rows", "an array needs at least one cell");
+        else if (values.size() != 1 && static_cast<long long>(values.size()) != cells)
+            report(out, Severity::Error, "Variable", r, "Initial Value",
+                   "the table has " + std::to_string(cells) + " cells but " +
+                   std::to_string(values.size()) + " values were given -- give one "
+                   "per cell, row by row, or one for all");
+    }
+}
+
+std::vector<std::string> arrayNamesOf(const ModelDocument& doc) {
+    std::vector<std::string> names;
+    for (std::size_t r = 0; r < doc.rowCount("Variable"); ++r)
+        if (!doc.cell("Variable", r, "Rows").empty())
+            names.push_back(doc.cell("Variable", r, "Name"));
+    return names;
+}
+
 // --- pass 2: references ----------------------------------------------------
 // "Block" is the pseudo-type meaning "any flowchart block", which is what an
 // exit column points at. Everything else names one real module type.
@@ -151,6 +215,7 @@ void checkReferences(const ModelDocument& doc, std::vector<Diagnostic>& out) {
 // --- pass 3: expressions ---------------------------------------------------
 void checkExpressionCells(const ModelDocument& doc, std::vector<Diagnostic>& out) {
     const ModuleRegistry& reg = ModuleRegistry::instance();
+    const std::vector<std::string> arrays = arrayNamesOf(doc);
 
     for (const std::string& type : doc.types()) {
         const ModuleSchema* schema = reg.find(type);
@@ -163,7 +228,7 @@ void checkExpressionCells(const ModelDocument& doc, std::vector<Diagnostic>& out
                 const std::string text = doc.cell(type, r, c.id);
                 if (text.empty()) continue;    // required-and-empty is pass 1's
 
-                ParseResult parsed = parseExpression(text);
+                ParseResult parsed = parseExpression(text, arrays);
                 for (Diagnostic& d : parsed.diagnostics) {
                     // The span is left exactly as v10 measured it -- an offset
                     // WITHIN the cell -- and the cell is wrapped around it. Both
@@ -206,8 +271,18 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
 
     // 1. Variables, before anything can reference them.
     for (std::size_t r = 0; r < doc.rowCount("Variable"); ++r) {
-        model.variable(doc.cell("Variable", r, "Name"),
-                       asReal(doc.cellOrDefault("Variable", r, "Initial Value"), 0.0));
+        const std::string name = doc.cell("Variable", r, "Name");
+        const std::string rows = doc.cell("Variable", r, "Rows");
+        if (rows.empty()) {
+            model.variable(name, asReal(doc.cellOrDefault("Variable", r, "Initial Value"), 0.0));
+            continue;
+        }
+        std::vector<double> values;
+        if (!numberList(doc.cellOrDefault("Variable", r, "Initial Value"), values))
+            values = {0.0};
+        model.variableArray(name, static_cast<int>(asInteger(rows, 1)),
+                            static_cast<int>(asInteger(doc.cell("Variable", r, "Columns"), 1)),
+                            values);
     }
 
     // 2. Entity rows are declarative: a type name is carried by a Create, and
@@ -232,11 +307,16 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
 
             if (type == "Create") {
                 const std::string entityType = cell("Entity Type");
+                // A whole number keeps the fixed path, so a model that says
+                // Per Arrival = 3 describes and checks exactly as before.
+                const std::string perArrival = cell("Per Arrival");
+                const bool fixed = perArrival.empty() || looksLikeInteger(perArrival);
                 model.source(name, entityType.empty() ? "Entity" : entityType,
                              cell("Interarrival"),
                              asInteger(cell("Max Arrivals"), -1),
                              asReal(cell("First At"), 0.0),
-                             static_cast<int>(asInteger(cell("Per Arrival"), 1)));
+                             fixed ? static_cast<int>(asInteger(perArrival, 1)) : 1);
+                if (!fixed) model.perArrival(name, perArrival);
             } else if (type == "Process") {
                 const std::string resourceName = cell("Resource");
                 const QueueDiscipline rule = disciplineFrom(cell("Discipline"));
@@ -398,6 +478,7 @@ bool compileInto(const ModelDocument& doc, Model& model,
     checkSchema(doc, diagnostics);
     checkReferences(doc, diagnostics);
     checkExpressionCells(doc, diagnostics);
+    checkVariables(doc, diagnostics);
     // The build cannot run with broken references or unparseable expressions,
     // so it is skipped and structureChecked stays false. Reporting a model as
     // checked when it was not is the failure this project keeps refusing.

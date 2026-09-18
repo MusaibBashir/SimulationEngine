@@ -1,4 +1,5 @@
 #include "Expression.hpp"
+#include "ModelError.hpp"
 #include <cmath>
 #include "Entity.hpp"
 #include "RandomStream.hpp"
@@ -62,6 +63,12 @@ void NameExpression::validate(const ValidationContext& vc, std::vector<Diagnosti
         return;
     }
 
+    if (vc.variables != nullptr && vc.variables->isArray(m_name)) {
+        out.push_back(Diagnostic{Severity::Error, m_span,
+            "'" + m_name + "' is an array -- read one cell of it, as " + m_name +
+            (vc.variables->columnsOf(m_name) > 1 ? "(row, column)" : "(index)")});
+        return;
+    }
     if (vc.isVariable(m_name)) return;
 
     if (vc.isAttribute(m_name)) {
@@ -74,6 +81,52 @@ void NameExpression::validate(const ValidationContext& vc, std::vector<Diagnosti
 
     out.push_back(Diagnostic{Severity::Error, m_span,
         "unknown name '" + m_name + "' -- not a declared variable or attribute"});
+}
+
+Value ArrayReadExpression::evaluate(EvalContext& ctx) const {
+    if (ctx.variables() == nullptr) throw ModelError("no variables to read " + m_name + " from");
+    const double row = asNumber(m_indices[0]->evaluate(ctx));
+    const double column = m_indices.size() > 1 ? asNumber(m_indices[1]->evaluate(ctx)) : 1.0;
+    return ctx.variables()->element(m_name, row, column);
+}
+
+void ArrayReadExpression::validate(const ValidationContext& vc,
+                                   std::vector<Diagnostic>& out) const {
+    for (const ExpressionPtr& i : m_indices) i->validate(vc, out);
+    if (vc.variables == nullptr || !vc.variables->isArray(m_name)) {
+        out.push_back(Diagnostic{Severity::Error, m_span, "no array named '" + m_name + "'"});
+        return;
+    }
+    const std::size_t wanted = vc.variables->columnsOf(m_name) > 1 ? 2 : 1;
+    if (m_indices.size() != wanted)
+        out.push_back(Diagnostic{Severity::Error, m_span,
+            m_name + " is " + std::to_string(vc.variables->rowsOf(m_name)) + " x " +
+            std::to_string(vc.variables->columnsOf(m_name)) + ", so it takes " +
+            (wanted == 2 ? "two indices, (row, column)" : "one index") + ", not " +
+            std::to_string(m_indices.size())});
+}
+
+std::string ArrayReadExpression::describe() const {
+    std::string s = m_name + "(";
+    for (std::size_t i = 0; i < m_indices.size(); ++i) {
+        if (i) s += ", ";
+        s += m_indices[i]->describe();
+    }
+    return s + ")";
+}
+
+ExpressionPtr ArrayReadExpression::clone() const {
+    std::vector<ExpressionPtr> copies;
+    for (const ExpressionPtr& i : m_indices) copies.push_back(i->clone());
+    return std::make_unique<ArrayReadExpression>(m_name, std::move(copies), m_span);
+}
+
+void ArrayReadExpression::useStream(RandomStream* s) {
+    for (const ExpressionPtr& i : m_indices) i->useStream(s);
+}
+
+void ArrayReadExpression::reset() {
+    for (const ExpressionPtr& i : m_indices) i->reset();
 }
 
 ExpressionPtr NameExpression::clone() const {

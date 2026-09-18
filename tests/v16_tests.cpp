@@ -191,4 +191,86 @@ void runV16Tests() {
               "yes opens the existing file");
         std::filesystem::remove_all(dir);
     }
+
+    section("Per Arrival may be a variable, and Max Arrivals counts arrivals");
+    {
+        const std::string text =
+            "version = 1\n[Run]\nName = R\nLength = 10\n"
+            "[Variable]\nName = Fleet\nInitial Value = 20\n"
+            "[Create]\nName = Cars\nInterarrival = 1\nPer Arrival = Fleet\n"
+            "Max Arrivals = 1\nNext = Out\n[Dispose]\nName = Out\n";
+        check(compile(readDocument(text).document).model != nullptr, "it compiles");
+        SimulationSystem sim(1);
+        std::vector<Diagnostic> d;
+        check(compileInto(readDocument(text).document, sim.model(), d), "into a system too");
+        sim.stopAt(10).execute();
+        check(sim.results().arrived == 20, "one arrival of Fleet = 20 entities");
+
+        SimulationSystem fixed(1);
+        std::string twenty = text;
+        twenty.replace(twenty.find("Per Arrival = Fleet"), 19, "Per Arrival = 20");
+        compileInto(readDocument(twenty).document, fixed.model(), d);
+        fixed.stopAt(10).execute();
+        check(fixed.results().arrived == 20, "a plain 20 with Max Arrivals 1 is 20 too");
+
+        SimulationSystem bad(1);
+        std::string negative = text;
+        negative.replace(negative.find("Initial Value = 20"), 18, "Initial Value = -2");
+        compileInto(readDocument(negative).document, bad.model(), d);
+        bool threw = false;
+        try { bad.stopAt(10).execute(); } catch (const ModelError&) { threw = true; }
+        check(threw, "a negative Per Arrival stops the run with a message");
+    }
+
+    section("An array variable is read by index");
+    {
+        const std::string text =
+            "version = 1\n[Run]\nName = R\nLength = 5\n"
+            "[Variable]\nName = T\nRows = 2\nColumns = 2\nInitial Value = 1, 2, 3, 4\n"
+            "[Create]\nName = C\nInterarrival = 1\nMax Arrivals = 1\nNext = A\n"
+            "[Assign]\nName = A\nNext = Out\n"
+            "[AssignField]\nAssign = A\nTarget = Attribute\nName = got\nValue = T(2, 1)\n"
+            "[Record]\nName = Out\nWhat = Attribute\nAttribute = got\n";
+        SimulationSystem sim(1);
+        std::vector<Diagnostic> d;
+        check(compileInto(readDocument(text).document, sim.model(), d), "it compiles");
+        sim.stopAt(5).execute();
+        check(sim.model().nodeAs<RecordNode>("Out").average() == 3.0, "T(2,1) is 3, row by row");
+    }
+    {
+        std::vector<Diagnostic> d;
+        Model m;
+        compileInto(readDocument("version = 1\n[Variable]\nName = T\nRows = 2\nColumns = 2\n"
+                                 "Initial Value = 1, 2, 3\n").document, m, d);
+        check(hasErrors(d), "three values for four cells is an error");
+        d.clear();
+        Model one;
+        compileInto(readDocument("version = 1\n[Variable]\nName = T\nRows = 3\nColumns = 3\n"
+                                 "Initial Value = 7\n[Create]\nName = C\nInterarrival = T(1,1)\n"
+                                 "Next = O\n[Dispose]\nName = O\n").document, one, d);
+        check(!hasErrors(d), "one value fills every cell");
+        d.clear();
+        Model scalar;
+        compileInto(readDocument("version = 1\n[Variable]\nName = V\nInitial Value = x\n").document,
+                    scalar, d);
+        check(hasErrors(d), "a plain variable still needs a number");
+        const ParseResult p = parseExpression("Nope(1)");
+        check(hasErrors(p.diagnostics), "an unknown function is still an unknown function");
+    }
+    {
+        VariableStore v;
+        v.declareArray("T", 3, 3, {0});
+        bool threw = false;
+        try { v.element("T", 4, 1); } catch (const ModelError& e) {
+            threw = std::string(e.what()).find("3 x 3") != std::string::npos;
+        }
+        check(threw, "an index outside the array stops the run, naming the table's size");
+        check(v.element("T", 2.4, 3) == 0.0, "indices are rounded");
+        check(v.names().empty(), "arrays are not in the time-averaged variable list");
+        Model m;
+        m.variableArray("T", 2, 2, {1, 2, 3, 4});
+        bool refused = false;
+        try { m.assignVariable("A", "T", "1"); } catch (const ModelError&) { refused = true; }
+        check(refused, "assigning to an array is refused, for now");
+    }
 }

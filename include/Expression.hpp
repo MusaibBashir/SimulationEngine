@@ -98,6 +98,23 @@ public:
     ExpressionPtr clone() const override;
 };
 
+// v16: Name(i) or Name(i, j) on an array Variable. The parser builds one only
+// for a name it was told is an array, so a mistyped function is still an
+// unknown function rather than a silent array read.
+class ArrayReadExpression : public IExpression {
+    std::string                m_name;
+    std::vector<ExpressionPtr> m_indices;
+public:
+    ArrayReadExpression(std::string name, std::vector<ExpressionPtr> indices, SourceSpan span)
+        : IExpression(span), m_name(std::move(name)), m_indices(std::move(indices)) {}
+    Value evaluate(EvalContext& ctx) const override;
+    void validate(const ValidationContext& vc, std::vector<Diagnostic>& out) const override;
+    std::string describe() const override;
+    ExpressionPtr clone() const override;
+    void useStream(RandomStream* s) override;
+    void reset() override;
+};
+
 class UnaryExpression : public IExpression {
     UnaryOp       m_op;
     ExpressionPtr m_operand;

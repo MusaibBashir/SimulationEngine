@@ -62,7 +62,20 @@ void CreateNode::onScheduledEvent(NodeContext& ctx, Entity* /*unused*/) {
         ctx.scheduleNextArrival(next, this);
     }
 
-    for (int i = 0; i < m_perArrival && !exhausted(); ++i) {
+    if (exhausted()) return;
+    ++m_arrivals;
+    long long count = m_perArrival;
+    if (m_perArrivalExpr) {
+        EvalContext ectx = ctx.evaluationContext(nullptr);
+        const double v = asNumber(m_perArrivalExpr->evaluate(ectx));
+        if (v < 0.0) {
+            std::ostringstream os;
+            os << "create '" << m_name << "': Per Arrival came out negative (" << v << ")";
+            throw ModelError(os.str());
+        }
+        count = static_cast<long long>(v);
+    }
+    for (long long i = 0; i < count; ++i) {
         Entity* e = ctx.createEntity();
         e->setType(m_entityType);
         e->setAttribute("waitTime", 0.0);
@@ -79,7 +92,9 @@ void CreateNode::onScheduledEvent(NodeContext& ctx, Entity* /*unused*/) {
 
 void CreateNode::reset() {
     m_created = 0;
+    m_arrivals = 0;
     m_interarrival->reset();
+    if (m_perArrivalExpr) m_perArrivalExpr->reset();
 }
 
 void CreateNode::resetStatistics(SimTime) {
@@ -94,7 +109,8 @@ std::string CreateNode::describe() const {
        << " ~ " << m_interarrival->describe();
     if (m_maxArrivals >= 0) os << ", max " << m_maxArrivals;
     if (m_firstAt > 0.0)    os << ", first at " << m_firstAt;
-    if (m_perArrival > 1)   os << ", " << m_perArrival << " per arrival";
+    if (m_perArrivalExpr)   os << ", " << m_perArrivalExpr->describe() << " per arrival";
+    else if (m_perArrival > 1) os << ", " << m_perArrival << " per arrival";
     os << ", next=" << (m_next ? m_next->name() : std::string("exit")) << "]";
     return os.str();
 }

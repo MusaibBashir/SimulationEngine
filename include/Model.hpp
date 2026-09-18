@@ -68,6 +68,9 @@ private:
 
     INode* add(std::unique_ptr<INode> node);
     AssignNode& assignBlock(const std::string& name);
+    // Every expression a Model builds is parsed knowing its array variables,
+    // which is why arrays must be declared before the blocks that read them.
+    ExpressionPtr ex(const std::string& text) const;
     void requireUnique(const std::string& name) const;
 
 public:
@@ -104,6 +107,9 @@ public:
     //
     // Turning this on says you know. The report then says so too, so the numbers
     // are never quietly presented as steady-state results.
+    // v16: Per Arrival as an expression, worked out at each arrival -- so a
+    // fleet size can live in a Variable.
+    Model& perArrival(const std::string& createName, const std::string& text);
     Model& allowOverload(bool on = true);
     bool overloadAllowed() const { return m_allowOverload; }
     void setInterarrival(std::unique_ptr<IDistribution> d) { arrivals(std::move(d)); }
@@ -111,6 +117,9 @@ public:
     // block -- the thing an attribute cannot say, because an attribute travels
     // with one entity and this belongs to the system.
     Model& variable(const std::string& name, double initialValue = 0.0);
+    // v16: rows x columns numbers under one name, read as Name(i, j).
+    Model& variableArray(const std::string& name, int rows, int columns,
+                         const std::vector<double>& initial);
     VariableStore&       variables()       { return m_variables; }
     const VariableStore& variables() const { return m_variables; }
 
