@@ -9,8 +9,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 Group 9's mid-semester Arena model — multi-zone ride-hailing dispatch — can be
 built in this engine, and is: `examples/models/ride_hailing.des`. Over 100
-replications it reproduces the report's findings (Suburb wait 33.6 ± 4.9 min
-against Arena's 36.74 ± 6.03; Downtown 0; service level 0.866 against 0.875).
+replications it reproduces the report's findings (Suburb wait 33.3 ± 4.9 min
+against Arena's 36.74 ± 6.03; Downtown 0; service level 0.867 against 0.875).
 Narrative in `V16_READLOG.md`.
 
 ### Added
@@ -47,6 +47,13 @@ Narrative in `V16_READLOG.md`.
 
 ### Fixed
 
+- **A time limit stops the clock ON the limit.** A run of Length 480 used to
+  process the first event past 480 before stopping, so every time average was
+  divided by a run length nobody configured and an arrival after the horizon
+  was counted. The deadline is now an `EndSimulation` event, scheduled from
+  the rule's new `stopTime()`. Twelve example baselines, `teller.expected` and
+  `ride_hailing.expected` were re-captured for it, each moving only by that
+  sliver. A model that runs out of work early still ends where the work ends.
 - A study of a model with no Process read the first Process's utilisation
   from an empty list. It reports 0 there now.
 

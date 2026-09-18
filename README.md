@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1617/1617 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1630/1630 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -57,7 +57,7 @@ ride-hailing model — riders and cars as moving entities, paired by a **Match**
 on their zone, cars carried by **Routes** to the **Stations** their trips end
 at, riders arriving by hourly **Schedules** with an 8–9am spike — is
 `examples/models/ride_hailing.des`. Over 100 replications it reproduces the
-report's findings: Suburb riders wait 33.6 ± 4.9 min (Arena: 36.74 ± 6.03),
+report's findings: Suburb riders wait 33.3 ± 4.9 min (Arena: 36.74 ± 6.03),
 Downtown riders none, 87% served within 5 minutes. Array Variables
 (`TravelTime(myZone, 2)`), Records into named counters and tallies, and a
 statistics table with half-widths came with it. The Runs tab is a form now,
@@ -606,7 +606,7 @@ sim/
 ├── cli/             the des command: check, run and regress
 ├── tui/             des_tui: the terminal UI, and the only platform code
 ├── examples/models/ hand-written .des models
-├── tests/           1617 unit checks
+├── tests/           1630 unit checks
 ├── include/         50 headers
 └── src/             42 sources
 ```

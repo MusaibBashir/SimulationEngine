@@ -7,7 +7,7 @@ the call-flow chapters. Prose is passed to reportlab as markup, so use &amp;,
 &lt; and &gt; rather than the bare characters.
 """
 
-VERSION_LINE = "v16 — the ride-hailing model · 1617 checks · 135 types"
+VERSION_LINE = "v16 — the ride-hailing model · 1630 checks · 135 types"
 
 FRONT_MATTER = (
     "A discrete-event simulation engine in the spirit of Arena's Basic Process "
@@ -1046,6 +1046,8 @@ MEMBER_DOC.update({
     "Model::stationBlock": "A Station, named for the Routes that send entities to it.",
     "Model::routeBlock": "A Route with its route time. Its Destination is set by routeTo(), once the Station exists.",
     "Model::routeTo": "Where a Route delivers. Refuses anything that is not a Station.",
+    "TimeLimit::stopTime": "Its own limit. Known before the run starts, so the engine puts it on the event list and the clock stops exactly on it rather than on the first event after it.",
+    "AnyOf::stopTime": "The earliest deadline any child knows -- the composite is met when its FIRST child is, so the first knowable time is the one the clock must stop on. A child that cannot say may still end the run sooner.",
     "Model::match": "A Match; an empty attribute means Any. Kept out of the default entry, since nothing enters a Match by its own name.",
     "Model::matchLane": "Adds a lane to a Match, in lane order. The lane is a block other blocks route to by name.",
     "MatchNode::addLane": "Registers a lane, in order. Model::matchLane is the way to call it.",

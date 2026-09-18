@@ -78,15 +78,15 @@ scale (10 contract and 40 freelance cars), next to the report's Arena numbers:
 
 | | this engine | Arena (report) |
 |---|---|---|
-| Wait, Suburb (min) | 33.57 ± 4.94 | 36.74 ± 6.03 |
+| Wait, Suburb (min) | 33.31 ± 4.93 | 36.74 ± 6.03 |
 | Wait, Downtown (min) | 0.00 | 0.00 |
-| Wait, Airport (min) | 1.59 ± 0.61 | 1.05 ± 0.60 |
-| Service level | 0.866 ± 0.012 | 0.875 ± 0.014 |
-| Trips per shift | 143.3 ± 2.8 | 140.4 ± 3.3 |
+| Wait, Airport (min) | 1.54 ± 0.58 | 1.05 ± 0.60 |
+| Service level | 0.867 ± 0.012 | 0.875 ± 0.014 |
+| Trips per shift | 143.1 ± 2.8 | 140.4 ± 3.3 |
 | Riders never served | 18.5 ± 2.3 | 17.8 ± 2.4 |
 | Idle vehicles | 44.3 ± 0.13 | 44.8 ± 0.13 |
-| Rider queue wait (min) | 11.4 ± 1.5 | 12.2 ± 1.9 |
-| Vehicle queue wait (min) | 101.6 ± 2.2 | 106.6 ± 2.5 |
+| Rider queue wait (min) | 11.3 ± 1.5 | 12.2 ± 1.9 |
+| Vehicle queue wait (min) | 101.4 ± 2.2 | 106.6 ± 2.5 |
 
 Every interval overlaps the report's. The two engines draw different random
 numbers, so agreement to the decimal was never on offer. What should
@@ -99,11 +99,22 @@ about five seconds.
 - **A study of a model with no Process read past the end of a list.** The
   summary's utilisation column came from `stationAt(0)`, and the ride-hailing
   model has no Process. It reports 0 there now.
-- **A time limit stops one event late.** `stopAt(45)` finished with the clock
-  at 50, because the arrival at 50 was processed before the rule was checked.
-  This predates v16, and fixing it would move every captured baseline, so it
-  is recorded here and left for its own change. The Match test states the
-  current behaviour.
+- **A time limit stopped one event late.** `stopAt(45)` finished with the
+  clock at 50, because the arrival at 50 was processed before the rule was
+  checked -- a run of Length 480 measured 480 plus however long it was to
+  the next event. This predated v16. It was fixed on its own branch
+  (`claude/pensive-volta-usgu5f`), which put the deadline on the event list
+  as `EndSimulation` -- scheduled for the first time since v1 -- and checked
+  the result against a model worked by hand rather than against a baseline.
+  It was merged into v16 and the gates re-captured deliberately: twelve
+  examples, `teller.expected` and `ride_hailing.expected` changed, each by a
+  run length of Length + epsilon becoming Length, and nothing else. The table
+  above is after the fix; before it, each replication of this model ran up to
+  a few minutes past 480 and the Suburb wait read 33.57.
+
+  A model that runs out of work before its Length still ends where the work
+  ended, as before. Arena would run on to the Length and divide every time
+  average by it; that is a different change, and still open.
 - **An enum with one value is refused by the registry's own test.** Schedule's
   Type offers only Arrival in this version, so it is a text field that the
   compiler checks. `Capacity` gets its own message saying it is not supported
@@ -111,6 +122,8 @@ about five seconds.
 
 ## Still open
 
+- Whether a model that runs out of work early should run on to its Length,
+  as Arena's does.
 - Capacity schedules, with Ignore, Wait and Preempt.
 - Arena Sets (resource, entity type, counter, tally, queue).
 - Writing to array elements.
