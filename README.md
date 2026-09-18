@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1630/1630 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1696/1696 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -343,6 +343,7 @@ spacing and ordering survive because nothing rewrites them.
 | `^T` | write a working model into an empty file |
 | `^R` | run it; on the Runs tab `A` adds a `[Run]` and `Del` deletes one |
 | `^N` | a new model — it asks for the name |
+| `^D` | the Tables tab: variables, arrays, matrices and schedules |
 | `^W` | save the results |
 | `^S` `^Z` `^Y` `^X` `^C` `^V` `^A` | save, undo, redo, cut, copy, paste, select all |
 | `^Q` | quit — and it **asks** if there is unsaved work |
@@ -413,6 +414,27 @@ Up/Down field   Enter change   ? explain   Tab list   F1 keys
 every change rewrites one line of that run's `[Run]` block, is refused if the
 compiler would reject it, and is one `^Z`. `A` adds a run and `Del` deletes
 one, after asking — with the comment above it.
+
+**Tables have their own tab.** Variables, arrays, matrices and schedules are
+edited as grids on the Tables tab (`^D`), and the Model tab's text keeps only
+the rest of the model, which uses a table by its name:
+
+```
++- new ----+- Sched_Suburb  (Schedule) --------------+- tables ------------+
+| Variable | Name        Sched_Suburb                | Num_CV        var   |
+| Array    | Rows        8                           | TravelTime    3x3   |
+| Matrix   | Time Units  Hours                       | Sched_Suburb  sched |
+| Schedule |            Value   Duration             |                     |
+|          | 1              4          1             |                     |
+|          | 3             23          1             |                     |
+|          | used by: Create Create_Pax_Suburb       |                     |
++----------+-----------------------------------------+---------------------+
+```
+
+A cell takes a number; Enter keeps it and moves down, Tab keeps it and moves
+right, so a block copied from Excel and pasted into the window lands as it
+looked there. Typing past the last row of a schedule adds one. They are still
+saved in the one `.des` file, in a marked section at the end.
 
 **New models have names.** `^N` asks for one (a bare name goes in
 `Documents\DES Models` and gets `.des`), asking first about unsaved work, and
@@ -606,7 +628,7 @@ sim/
 ├── cli/             the des command: check, run and regress
 ├── tui/             des_tui: the terminal UI, and the only platform code
 ├── examples/models/ hand-written .des models
-├── tests/           1630 unit checks
+├── tests/           1696 unit checks
 ├── include/         50 headers
 └── src/             42 sources
 ```

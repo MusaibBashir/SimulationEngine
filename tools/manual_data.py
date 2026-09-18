@@ -7,7 +7,7 @@ the call-flow chapters. Prose is passed to reportlab as markup, so use &amp;,
 &lt; and &gt; rather than the bare characters.
 """
 
-VERSION_LINE = "v16 — the ride-hailing model · 1630 checks · 135 types"
+VERSION_LINE = "v16.1 — the Tables tab · 1696 checks · 141 types"
 
 FRONT_MATTER = (
     "A discrete-event simulation engine in the spirit of Arena's Basic Process "
@@ -61,7 +61,13 @@ TYPE_DOC = {
     "ConfirmFor": "Which question the one Confirm overlay is asking -- quit, new file, delete a run, open an existing file -- so a 'd' meaning discard-and-quit can never be read as discard-and-open.",
     "PromptFor": "What the one-line Prompt is for: naming a new model, or naming an unnamed one on its first save.",
     "RunsFocus": "Which half of the Runs tab has the keyboard: the list of runs, or the chosen run's form.",
-    "PickerFor": "Which field a Picker writes into: the editor's current line, or the Runs form's selected field.",
+    "PickerFor": "Which field a Picker writes into: the editor's current line, the Runs form's selected field, or a table's Time Units.",
+    "TableKind": "Variable, Array, Matrix or Schedule -- the four things the Tables tab makes.",
+    "Table": "One table: its kind, name, note (the comment above it in the file), shape, and its cells as the TEXT that was typed, so 0.60 is written back as 0.60. A schedule is rows of (Value, Duration) with its Time Units.",
+    "SplitResult": "A file taken apart: the model text the Model tab edits, and the tables the Tables tab edits.",
+    "TablesFocus": "Which of the Tables tab's three panels has the keyboard: the kinds, the editor, or the list.",
+    "TableIssue": "A compiler diagnostic that landed in the tables section, put on the table it is about -- so the list can mark it, the editor can show it, and the tab can count it.",
+    "TableGrid": "Where the current table's grid is on screen: its top row, how many rows and columns are in view, and the first of each. Worked out once, so a click is turned back into a cell by the arithmetic that drew it.",
 
     # -- runtime control (v12)
     "RunState": "Where a run has got to: Ready, Running, Paused, Finished, Cancelled or Failed. Finished and Cancelled are terminal, and advance() on either returns 0 rather than throwing -- a front end that polls past the end is normal, not wrong.",
@@ -765,6 +771,17 @@ CHAPTERS = [
             "ConfirmFor and PromptFor."),
    ("types", ["TextBuffer", "Caret", "View", "Pane", "Overlay", "Layout",
               "ConfirmFor", "PromptFor", "RunsFocus", "PickerFor"]),
+   ("h3", "Tables on their own tab (v16.1)"),
+   ("text", "Variables, arrays, matrices and schedules are edited as grids on the Tables "
+            "tab, and the Model tab's text holds the rest. They are still saved in the one "
+            ".des file: opening takes every [Variable], [Schedule] and [ScheduleRow] out of "
+            "the text (splitTables), and saving writes the text and then a marked section "
+            "in one fixed layout (joinTables), so saving twice writes the same bytes and the "
+            "engine reads the format it always has. What compiles is TuiState::joinedText(). "
+            "A cell takes numbers only; Enter keeps it and moves down and Tab keeps it and "
+            "moves right, which is what a block pasted into the terminal from Excel arrives "
+            "as."),
+   ("types", ["TableKind", "Table", "SplitResult", "TablesFocus", "TableIssue", "TableGrid"]),
   ]),
 
  (10, "The Flowchart",
@@ -984,6 +1001,23 @@ CHAPTERS = [
                "key of a key = value line."],
               ["starterModelText()", "A working single-server model, as text, with its "
                "comments."],
+              ["splitTables(text)", "A file's tables out of its text, with the comment "
+               "above each as its note."],
+              ["joinTables(text, tables)", "The file again: the text, then the marked "
+               "tables section. No tables: the text exactly as it was."],
+              ["tableLineRanges(text, tables)", "Where each table sits in the joined file, "
+               "so a diagnostic there is put on its table."],
+              ["parsePastedBlock(text)", "A block from a spreadsheet or CSV, split on tabs, "
+               "else commas or semicolons, else spaces."],
+              ["renameInText(text, from, to)", "Whole-word renames on the value side of "
+               "key = value lines; comments are left alone."],
+              ["usersOf(doc, name)", "Every record that names a table -- what a rename or "
+               "delete affects."],
+              ["isNumberCell / isTableName", "What a cell and a table name may hold."],
+              ["tabView / tabLabel", "The tabs in order, and each one's label with any "
+               "error count."],
+              ["tableGridFor(state, layout)", "The current table's grid geometry, shared by "
+               "the renderer and the mouse."],
               ["resolveModelName(typed, dir)", "What a typed model name means: a bare name "
                "in the models folder, a path as given, .des added when there is no "
                "extension; blank comes back empty."]],
@@ -1048,6 +1082,18 @@ MEMBER_DOC.update({
     "Model::routeTo": "Where a Route delivers. Refuses anything that is not a Station.",
     "TimeLimit::stopTime": "Its own limit. Known before the run starts, so the engine puts it on the event list and the clock stops exactly on it rather than on the first event after it.",
     "AnyOf::stopTime": "The earliest deadline any child knows -- the composite is met when its FIRST child is, so the first knowable time is the one the clock must stop on. A child that cannot say may still end the run sooner.",
+    "Table::at": "One cell, by row and column, counting from 0.",
+    "Table::resize": "A new shape. New cells are 0; cells that no longer fit are dropped -- which is why the tab asks resizeLoses() first.",
+    "Table::resizeLoses": "Whether a new shape would drop a cell that is not zero.",
+    "TuiState::stepKind": "Moves among the four kinds on the left.",
+    "TuiState::stepTable": "Moves among the tables in the list.",
+    "TuiState::selectTable": "Shows a table in the editor, with the cursor on its Name.",
+    "TuiState::headerValue": "A header field's value as the editor shows it: the name, a size, or the Time Units.",
+    "TuiState::moveTableCursor": "Moves through the header fields and on into the grid. Keeps any edit in progress first, and stays put if the edit is refused.",
+    "TuiState::beginTableEdit": "Starts editing the field or cell under the cursor, with its value or empty. Time Units opens a list instead.",
+    "TuiState::typeTable": "One character into the field or cell; typing on a cell that is not being edited starts a fresh edit, as a spreadsheet does.",
+    "TuiState::commitTableEdit": "Keeps the edit. A cell refuses anything but a number and a Name anything but a new identifier, each saying why and leaving the edit open; a rename or a shrink that loses numbers asks first.",
+    "TuiState::pasteIntoTable": "A block from the clipboard, from the cursor on. It grows an array or schedule downwards and a matrix both ways, and refuses a block holding anything but numbers.",
     "Model::match": "A Match; an empty attribute means Any. Kept out of the default entry, since nothing enters a Match by its own name.",
     "Model::matchLane": "Adds a lane to a Match, in lane order. The lane is a block other blocks route to by name.",
     "MatchNode::addLane": "Registers a lane, in order. Model::matchLane is the way to call it.",

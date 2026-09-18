@@ -131,3 +131,38 @@ about five seconds.
   values, compared side by side. The Runs tab is the natural place for it.
 - Derived results such as utilisation = (fleet − idle) / fleet, which the
   report computes by hand.
+
+## v16.1 — the Tables tab
+
+A 3 × 3 table typed as `Initial Value = 4, 14, 22,  14, 5, 28,  22, 28, 3`
+works, but it is not how anyone thinks of a table, and eight schedule rows
+of three lines each made the Model text mostly schedule. Variables, arrays,
+matrices and schedules now have a tab of their own, edited as grids.
+
+**Where they live.** Still in the one `.des` file, so a model stays one file
+to send and the engine, `des check`, `des run` and the regression harness read
+the format they always have. Opening a file takes every `[Variable]`,
+`[Schedule]` and `[ScheduleRow]` out of the text; saving writes the text and
+then a section after `# ---- tables: edited on the Tables tab ----`, in one
+fixed layout. The alternative -- folding the blocks inside the editor -- would
+have left the file in its original order, at the price of hidden lines in
+every piece of caret, selection and line-number code. Splitting keeps the
+Model tab's line numbers the ones in the file, because the tables come after.
+The cost is stated: the first save moves tables to the end, and comments
+inside them are lost, except the one directly above each, which becomes the
+table's note. A file that never had a table is saved byte for byte as typed.
+
+**Pasting from Excel.** Windows Terminal handles Ctrl+V itself and types the
+clipboard into the program: digits, a Tab between cells, an Enter between
+rows. So the grid's keys are the paste format -- Enter keeps a cell and moves
+down to the column the row started in, Tab keeps it and moves right -- and a
+column copied from a spreadsheet lands as it looked there, growing a schedule
+as it goes. `^V` still pastes the program's own clipboard, parsed as a block.
+
+**Found along the way.** Deleting a table that a Create still read produced
+no error until the run, because the compiler checked expressions' syntax and
+never their names -- only `validate()`, at the start of a run, did. On a tab
+where the table and its user are on different screens that silence is worse
+than before, so the compiler now reports unknown names too. Their position is
+an offset inside an expression, not a file line, so they carry none rather
+than a marker on the wrong line. No baseline or regression output changed.

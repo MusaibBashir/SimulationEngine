@@ -65,6 +65,7 @@ KEYS
   Ctrl+T        write a working model into an empty file
   Ctrl+R        run the model
   Ctrl+N        a new model (it asks for the name)
+  Ctrl+D        the Tables tab: variables, arrays, matrices, schedules
   Ctrl+W        save the results to a file beside the model
   Ctrl+S        save the model
   Ctrl+Z Ctrl+Y undo, redo
@@ -72,8 +73,13 @@ KEYS
   Tab           move between the module list and the text
   Ctrl+Q        quit (it asks first if you have unsaved changes)
 
-The tabs along the top -- Model, Flow, Runs, Results -- can be clicked, or
-reached with Ctrl+B, Ctrl+F, Ctrl+U and Ctrl+E.
+The tabs along the top -- Model, Tables, Flow, Runs, Results -- can be
+clicked, or reached with Ctrl+B, Ctrl+D, Ctrl+F, Ctrl+U and Ctrl+E.
+
+On the Tables tab, numbers such as a fleet size, a travel-time table or an
+hourly arrival schedule are edited as a grid. Pick a kind on the left and
+press Enter to make one; the model uses it by its name. A block copied from
+Excel can be pasted straight into the grid.
 
 On the Runs tab: A adds a run, Delete removes one, and Tab moves into the
 chosen run's settings, where Enter changes a setting.

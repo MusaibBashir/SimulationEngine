@@ -5,6 +5,38 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [16.1.0] — 2026-09-18 — "The Tables tab"
+
+### Added
+
+- **A Tables tab (^D)** for Variables, Arrays, Matrices and Schedules: the
+  kinds to make one from on the left, the chosen table's fields and grid in the
+  middle, every table on the right. A model uses a table by its name, as before.
+- The grid takes numbers only. Enter keeps a cell and moves down, Tab keeps it
+  and moves right -- so a block pasted from Excel into the terminal lands as it
+  looked there -- and typing past the last row of an array or schedule adds one.
+  `^V` pastes the program's own clipboard as a block; `^O` adds a row and `Del`
+  removes one.
+- Shrinking a table that would lose numbers, renaming a table something uses
+  (optionally everywhere it is used), and deleting one all ask first. The tab
+  has its own undo.
+- An error in a table is shown on the table, counted on the tab, and reached by
+  `^J`.
+
+### Changed
+
+- **Tables are saved in a marked section at the end of the .des file**, in one
+  fixed layout: opening a file takes them out of the Model text, saving writes
+  them back after it. A file with no tables is saved exactly as typed. The
+  first save of a file that had tables in the middle moves them to the end;
+  comments inside those blocks are not kept, except the one directly above each.
+- The Model palette no longer offers Variable, Schedule or ScheduleRow.
+- **The compiler checks names inside expressions**, which only a run did
+  before: an unknown variable, array or attribute is an error where the model
+  is edited and in `des check`, not at `^R`.
+
+---
+
 ## [16.0.0] — 2026-09-18 — "The ride-hailing model"
 
 Group 9's mid-semester Arena model — multi-zone ride-hailing dispatch — can be
