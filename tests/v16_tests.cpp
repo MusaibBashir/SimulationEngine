@@ -403,9 +403,10 @@ void runV16Tests() {
         sim.stopAt(45).execute();
         check(sim.model().nodeAs<MatchNode>("M").matches() == 3,
               "Any matches whoever is at the head: B's arrivals at 0, 20, 40");
-        // stopAt ends after the first event past the limit, so A's arrival
-        // at 50 happens: A at 30, 40 and 50 are left.
-        check(sim.queueLength("LA") == 3.0, "NQ reads a lane");
+        // The clock stops ON 45, so A's arrival at 50 never happens: A at 30
+        // and 40 are left.
+        check(sim.queueLength("LA") == 2.0, "NQ reads a lane: A at 30 and 40 are left");
+        check(sim.now() == 45.0, "and the run ends on its limit");
     }
     {
         std::vector<Diagnostic> d;

@@ -1,9 +1,9 @@
 === simulation report =====================================
 seed                     : 4242
 termination              : TimeLimit(20000)
-total simulated time     : 20000.1377
+total simulated time     : 20000.0000
 warm-up discarded        : 1000.0000
-measured period          : 19000.1377
+measured period          : 19000.0000
 entities arrived         : 9345
 entities exited          : 2910
 average total wait       : 1.6211
@@ -16,8 +16,8 @@ live entity objects      : 5
 
   station        cap   served    avg wait   time-avg Q    util   maxQ
   -----------------------------------------------------------------
-  Machining       2     9345      0.2401       0.1181  0.3645      9
-  Inspect         1     9344      0.9639       0.4740  0.4972     11
+  Machining       2     9344      0.2401       0.1181  0.3645      9
+  Inspect         1     9344      0.9639       0.4740  0.4973     11
   Packer          1     2144      0.5387       0.0608  0.3405      3
 ===========================================================
 
@@ -58,24 +58,24 @@ whether you built the model you meant to.
 === simulation report =====================================
 seed                     : 7
 termination              : TimeLimit(20000)
-total simulated time     : 20000.7471
+total simulated time     : 20000.0000
 warm-up discarded        : 1000.0000
-measured period          : 19000.7471
+measured period          : 19000.0000
 entities arrived         : 6328
-entities exited          : 6329
-average total wait       : 1.9882
-average time in system   : 11.9645
+entities exited          : 6328
+average total wait       : 1.9885
+average time in system   : 11.9636
 max total wait           : 24.7601
-time-avg in queue (Lq)   : 1.8227
+time-avg in queue (Lq)   : 1.8226
 time-avg in system (L)   : 3.9855
-still waiting at stop    : 0
-live entity objects      : 2
+still waiting at stop    : 1
+live entity objects      : 3
 
   station        cap   served    avg wait   time-avg Q    util   maxQ
   -----------------------------------------------------------------
   Courier         1     2110      1.3387       0.1487  0.4393      4
   Express         1     2144      0.4518       0.0510  0.1118      5
-  Standard        1     4185      2.7753       0.6114  0.4359     10
+  Standard        1     4184      2.7759       0.6114  0.4359     10
 ===========================================================
 
 routed express : 2144   standard : 4186   (priority is Uniform(1,10), so ~30% should be > 7)

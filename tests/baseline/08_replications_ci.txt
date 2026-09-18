@@ -1,19 +1,19 @@
-ONE RUN, no warm-up: Wq = 3.0511
+ONE RUN, no warm-up: Wq = 3.0512
   Four decimal places from a single sample. Every digit after
   the first is decoration.
 
 === experiment: M/M/1, properly ===
 replications             : 20  (seeds 9000..9019)
 warm-up discarded        : 500.0000
-measured period per rep  : 19500.2830
+measured period per rep  : 19500.0000
 
   quantity                    mean      95% half-width      interval
   ---------------------------------------------------------------------
   average wait (Wq)         3.2015  +/-   0.1389   [   3.0626,    3.3404]
   time in system (W)        4.0016  +/-   0.1405   [   3.8611,    4.1421]
-  number in queue (Lq)      3.2060  +/-   0.1462   [   3.0598,    3.3522]
+  number in queue (Lq)      3.2061  +/-   0.1462   [   3.0599,    3.3523]
   number in system (L)      4.0070  +/-   0.1496   [   3.8574,    4.1566]
-  utilisation (rho)         0.8009  +/-   0.0046   [   0.7963,    0.8055]
+  utilisation (rho)         0.8009  +/-   0.0046   [   0.7964,    0.8055]
 =====================================================================
 
 --- the per-replication values --------------------------
@@ -24,19 +24,19 @@ measured period per rep  : 19500.2830
   seed 9004  Wq = 3.0671
   seed 9005  Wq = 3.3442
   seed 9006  Wq = 3.5856
-  seed 9007  Wq = 3.1296
-  seed 9008  Wq = 2.9744
-  seed 9009  Wq = 2.9467
+  seed 9007  Wq = 3.1298
+  seed 9008  Wq = 2.9745
+  seed 9009  Wq = 2.9469
   seed 9010  Wq = 3.8734
   seed 9011  Wq = 3.7139
-  seed 9012  Wq = 3.2295
+  seed 9012  Wq = 3.2297
   seed 9013  Wq = 2.6987
   seed 9014  Wq = 3.2062
   seed 9015  Wq = 3.2365
   seed 9016  Wq = 2.9723
   seed 9017  Wq = 3.2137
   seed 9018  Wq = 2.8208
-  seed 9019  Wq = 3.5086
+  seed 9019  Wq = 3.5087
 
   spread across runs (sample sd): 0.2968
   95% interval for the mean     : [3.0626, 3.3404]

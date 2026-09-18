@@ -4,7 +4,7 @@ Theory values are Erlang-C.
 
   c=1  service 0.8000 |  Wq  2.9457 (theory 3.2000) |  W  3.7433 (theory 4.0000) |  rho 0.7909
   c=2  service 1.6000 |  Wq  2.7097 (theory 2.8444) |  W  4.3030 (theory 4.4444) |  rho 0.7890
-  c=3  service 2.4000 |  Wq  2.4224 (theory 2.5888) |  W  4.8196 (theory 4.9888) |  rho 0.7941
+  c=3  service 2.4000 |  Wq  2.4224 (theory 2.5888) |  W  4.8197 (theory 4.9888) |  rho 0.7941
 
 --- what to notice ------------------------------------------------------
 The two columns disagree, and that is the whole point of this example.

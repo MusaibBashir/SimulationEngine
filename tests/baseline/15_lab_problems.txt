@@ -5,7 +5,7 @@
 ################################################################
 
 ============================================================
-Replication ended at time : 240.2530
+Replication ended at time : 240.0000
 
 TALLY VARIABLES
 Identifier                             Average     Minimum     Maximum  Observations
@@ -17,17 +17,17 @@ Batching Station.Queue.WaitingTime     0.93784     0.00000     4.78791          
 DISCRETE-CHANGE VARIABLES
 Identifier                             Average   Final Value
 ------------------------------------------------------------
-Entity.WIP                             1.89825       3.00000
-Gear Machine.Utilization               0.40841       0.00000
-Gear Machine.Queue.NumberInQueue       0.00459       0.00000
+Entity.WIP                             1.89815       2.00000
+Gear Machine.Utilization               0.40884       0.00000
+Gear Machine.Queue.NumberInQueue       0.00460       0.00000
 
 OUTPUTS
 ------------------------------------------------------------
-Entity.NumberIn                                488.000
+Entity.NumberIn                                487.000
 Entity.NumberOut                               485.000
 Gear Machine Number In                          97.000
 Gear Machine Number Out                         97.000
-Gear Machine.ScheduledUtilization                0.408
+Gear Machine.ScheduledUtilization                0.409
 Batching Station.BatchesFormed                  97.000
 Dispatch.NumberOut                              97.000
 System.NumberOut                                97.000
@@ -38,7 +38,7 @@ Batching station queue, average waiting time : 0.9378 min   (485 plates)
 Gear machine queue, average waiting time     : 0.0114 min   (97 batches)
 Entities leaving the gear machine            : 97 batches
 Entities leaving the system                  : 97
-Gear machine scheduled utilization           : 0.4084
+Gear machine scheduled utilization           : 0.4088
 
 --- reading this ---------------------------------------------------------
 THE BATCHING QUEUE IS WHERE ALL THE WAITING IS. A plate waits for four
@@ -80,7 +80,7 @@ about an overloaded shift. allowOverload() says so out loud, and the report
 carries the caveat.
 
 ============================================================
-Replication ended at time : 4.0182
+Replication ended at time : 4.0000
 *** OVERLOADED MODEL: at least one queue grows without bound.
 *** These are TERMINATING-run results for this horizon only.
 *** They are not steady-state values and will change if the
@@ -89,46 +89,46 @@ Replication ended at time : 4.0182
 TALLY VARIABLES
 Identifier                             Average     Minimum     Maximum  Observations
 ------------------------------------------------------------------------------------
-Entity.TotalTime                       2.07436     0.00000     2.58966             5
+Entity.TotalTime                       1.94553     0.00000     2.16337             4
 Adding Chemicals.Queue.WaitingTime     0.17979     0.00000     0.53937             3
-Sample Process 1.Queue.WaitingTime     0.02933     0.00000     0.05340             3
+Sample Process 1.Queue.WaitingTime     0.02670     0.00000     0.05340             2
 Sample Process 2.Queue.WaitingTime     0.09774     0.00000     0.19548             2
 
 DISCRETE-CHANGE VARIABLES
 Identifier                             Average   Final Value
 ------------------------------------------------------------
-Entity.WIP                             1.93409       1.00000
-Adding Chemicals.Utilization           0.98476       1.00000
-Adding Chemicals.Queue.NumberInQueue     0.90423       2.00000
-Sample Process 1.Utilization           0.68502       0.00000
-Sample Process 1.Queue.NumberInQueue     0.02190       0.00000
-Sample Process 2.Utilization           0.68502       1.00000
-Sample Process 2.Queue.NumberInQueue     0.10108       0.00000
+Entity.WIP                             1.93379       2.00000
+Adding Chemicals.Utilization           0.98469       1.00000
+Adding Chemicals.Queue.NumberInQueue     0.89925       2.00000
+Sample Process 1.Utilization           0.68359       1.00000
+Sample Process 1.Queue.NumberInQueue     0.02200       0.00000
+Sample Process 2.Utilization           0.68359       1.00000
+Sample Process 2.Queue.NumberInQueue     0.10154       0.00000
 
 OUTPUTS
 ------------------------------------------------------------
 Entity.NumberIn                                  6.000
-Entity.NumberOut                                 5.000
+Entity.NumberOut                                 4.000
 Adding Chemicals Number In                       6.000
 Adding Chemicals Number Out                      3.000
 Adding Chemicals.ScheduledUtilization            0.985
 Sample Process 1 Number In                       3.000
-Sample Process 1 Number Out                      3.000
-Sample Process 1.ScheduledUtilization            0.685
+Sample Process 1 Number Out                      2.000
+Sample Process 1.ScheduledUtilization            0.684
 Sample Process 2 Number In                       3.000
 Sample Process 2 Number Out                      2.000
-Sample Process 2.ScheduledUtilization            0.685
-Samples Exit.NumberOut                           5.000
-System.NumberOut                                 5.000
+Sample Process 2.ScheduledUtilization            0.684
+Samples Exit.NumberOut                           4.000
+System.NumberOut                                 4.000
 ============================================================
 
 --- ANSWERS -------------------------------------------------------------
                         queue wait (hr)   scheduled utilization
-  Adding Chemicals           0.17979               0.98476
-  Sample Process 1           0.02933               0.68502
-  Sample Process 2           0.09774               0.68502
+  Adding Chemicals           0.17979               0.98469
+  Sample Process 1           0.02670               0.68359
+  Sample Process 2           0.09774               0.68359
 
-Test results leaving the system : 5
+Test results leaving the system : 4
 
 --- reading this ---------------------------------------------------------
 ADDING CHEMICALS IS PINNED AT UTILIZATION 1.0 and its queue grows all
@@ -154,7 +154,7 @@ that is expected -- there is no steady state to converge to.
 ################################################################
 
 ============================================================
-Replication ended at time : 240.7482
+Replication ended at time : 240.0000
 
 TALLY VARIABLES
 Identifier                             Average     Minimum     Maximum  Observations
@@ -167,9 +167,9 @@ Batching Station.Queue.WaitingTime     3.74388     0.00000    14.81875          
 DISCRETE-CHANGE VARIABLES
 Identifier                             Average   Final Value
 ------------------------------------------------------------
-Baseball.WIP                           4.76330       6.00000
-Basketball.WIP                         0.53805       0.00000
-Football.WIP                           6.20684      10.00000
+Baseball.WIP                           4.75945       6.00000
+Basketball.WIP                         0.53972       0.00000
+Football.WIP                           6.19813       9.00000
 
 OUTPUTS
 ------------------------------------------------------------
@@ -177,7 +177,7 @@ Baseball.NumberIn                              243.000
 Baseball.NumberOut                             237.000
 Basketball.NumberIn                            237.000
 Basketball.NumberOut                           237.000
-Football.NumberIn                              247.000
+Football.NumberIn                              246.000
 Football.NumberOut                             237.000
 Batching Station.BatchesFormed                 237.000
 Dispatched.NumberOut                           237.000
@@ -186,14 +186,14 @@ System.NumberOut                               237.000
 
 --- ANSWERS -------------------------------------------------------------
 Batching station, average waiting time : 3.7439 min
-Batching station, WIP (time-average number in system) : 11.5082
+Batching station, WIP (time-average number in system) : 11.4973
 Batching station, longest queue        : 32
 Sets of three dispatched              : 237
 
   type          entering   leaving
   Baseball           243       237
   Basketball         237       237
-  Football           247       237
+  Football           246       237
 
 --- reading this ---------------------------------------------------------
 ALL THREE TYPES ARRIVE AT THE SAME RATE, so the batching station stays

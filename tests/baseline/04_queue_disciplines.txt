@@ -3,11 +3,11 @@ One machine, jobs every ~10 min, each needing 2-14 min.
 
   rule           mean wait   +/-        Lq
   ------------------------------------------
-  FIFO         17.501 +/-  1.432     1.729
-  LIFO         17.484 +/-  1.489     1.725
-  SPT          12.816 +/-  0.895     1.265
-  EDD          17.671 +/-  1.407     1.746
-  Random       19.892 +/-  1.849     2.000
+  FIFO         17.503 +/-  1.434     1.729
+  LIFO         17.487 +/-  1.491     1.725
+  SPT          12.818 +/-  0.897     1.266
+  EDD          17.674 +/-  1.409     1.746
+  Random       19.891 +/-  1.848     2.001
 
 --- what to notice ------------------------------------------------------
 SPT wins on MEAN wait, and it is not close. Serving the shortest job first
