@@ -17,7 +17,7 @@
 # unchecked things were wrong.
 set -u
 
-VERSION="${1:-15.1.0}"
+VERSION="${1:-16.0.0}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 

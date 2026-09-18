@@ -1,0 +1,120 @@
+# v16 readlog — the ride-hailing model
+
+v16 had a concrete target. Group 9's mid-semester Arena model is a three-zone
+ride-hailing city where riders and cars are both moving entities. Matching
+pairs a rider with a car in the same zone, and cars drive to wherever their
+trip ends. The target: build it in this engine, from the same build guide,
+and get the same answers.
+
+`examples/models/ride_hailing.des` is that model. This file covers what it
+needed, the decisions made along the way, and what the result is worth.
+
+## What the model needed
+
+| The guide uses | Before v16 | Now |
+|---|---|---|
+| Create → Assign, Decide, Delay, Dispose, `TNOW`, `&&`, DISC/TRIA/UNIF/EXPO | yes | — |
+| **Match**, Based on Attribute, two lanes | no | `[Match]` + `[MatchLane]` |
+| **Schedule**, Type Arrival, driving a Create | no | `[Schedule]` + `[ScheduleRow]`, `Create.Schedule` |
+| **Route → Station**, joined by name | no | `[Route]`, `[Station]` |
+| **Variable** `TravelTime`, 3 × 3 | scalars only | `Rows`, `Columns`, `Name(i, j)` |
+| Entities per Arrival = `Num_CV` | a whole number | an expression |
+| Record: Count into a named counter, Time Interval, Expression | Count / Attribute / TimeInSystem, under the block's name | all five, into a `Statistic` several Records share |
+| Tally and counter results with half-widths | only the five system-wide numbers | a statistics table in both reports |
+
+The Process Analyzer (§8.5) was left out on request.
+
+## Decisions
+
+**Match lanes are blocks.** Arena draws a Match with numbered input arrows.
+The text format has no arrows, only names. Each `[MatchLane]` row is
+therefore a block with its own name, which other blocks route to and which
+the report lists. `Next = Riders_Waiting` says more than "input 1". The Match
+itself cannot be routed to, and trying to is refused with the names of its
+lanes.
+
+**Which rider a car takes.** A car arriving when several zones have riders
+matches only its own zone. Within a zone, it takes the rider who has waited
+longest. If several *values* could ever match at once, the value whose
+earliest waiter has waited longest goes first.
+It is written down because it is a modelling decision; nothing in the build
+guide settles it.
+
+**Max Arrivals counts arrivals, not entities.** The fleet is created with
+Per Arrival 80 and Max Arrivals 1. In Arena that is 80 cars. Here it was one,
+because Max Arrivals was compared with the number of *entities* made. It now
+counts arrival events, as Arena's does. No example or regression model used
+more than one entity per arrival, so nothing already captured changed. The
+tests say so rather than hope so.
+
+**A loop into a Match lane is not a routing loop.** The loop check exists for
+entities that can never leave: a Process loop fed by endless arrivals. Cars
+return to the Match lane forever, and that is the model. The check stops at a
+Match lane. A Route has no `Next` (its Destination is where it goes), so the
+check and the visit ratios also stop at a Route instead of following a
+teleport as though it were a wire.
+
+**Schedules use thinning.** The obvious method draws `EXPO(1 / rate(now))`.
+It is wrong exactly where this model needs it right: a gap drawn at 7:59 at
+the quiet rate carries straight over the 8am spike. Thinning draws at the peak
+rate and keeps each candidate with probability `rate(t) / peak`. It is exact
+for any schedule, zero-rate hours included. A scheduled Create's first event
+only *starts* the stream, so no replication gets a free arrival at time zero.
+
+**Units are converted once.** `[Run] Time Units` (default Minutes) is the
+model's clock. A schedule's rows are in its own units and are converted at
+compile time. Models without a schedule never read the new field.
+
+**Named statistics are opt-in by construction.** A Record written in a
+document always has a Statistic (its own name by default). A Record built
+through the C++ API has none. The new report table therefore appears for
+documents with Records, Matches or Routes, and every C++ example prints
+exactly what it did before.
+
+## The result
+
+100 replications of a 480-minute shift with a 60-minute warm-up, quarter
+scale (10 contract and 40 freelance cars), next to the report's Arena numbers:
+
+| | this engine | Arena (report) |
+|---|---|---|
+| Wait, Suburb (min) | 33.57 ± 4.94 | 36.74 ± 6.03 |
+| Wait, Downtown (min) | 0.00 | 0.00 |
+| Wait, Airport (min) | 1.59 ± 0.61 | 1.05 ± 0.60 |
+| Service level | 0.866 ± 0.012 | 0.875 ± 0.014 |
+| Trips per shift | 143.3 ± 2.8 | 140.4 ± 3.3 |
+| Riders never served | 18.5 ± 2.3 | 17.8 ± 2.4 |
+| Idle vehicles | 44.3 ± 0.13 | 44.8 ± 0.13 |
+| Rider queue wait (min) | 11.4 ± 1.5 | 12.2 ± 1.9 |
+| Vehicle queue wait (min) | 101.6 ± 2.2 | 106.6 ± 2.5 |
+
+Every interval overlaps the report's. The two engines draw different random
+numbers, so agreement to the decimal was never on offer. What should
+reproduce is the finding, and it does: the Suburb starves while Downtown
+waits for nothing, and the fleet is idle 89% of the time. The study takes
+about five seconds.
+
+## Found along the way
+
+- **A study of a model with no Process read past the end of a list.** The
+  summary's utilisation column came from `stationAt(0)`, and the ride-hailing
+  model has no Process. It reports 0 there now.
+- **A time limit stops one event late.** `stopAt(45)` finished with the clock
+  at 50, because the arrival at 50 was processed before the rule was checked.
+  This predates v16, and fixing it would move every captured baseline, so it
+  is recorded here and left for its own change. The Match test states the
+  current behaviour.
+- **An enum with one value is refused by the registry's own test.** Schedule's
+  Type offers only Arrival in this version, so it is a text field that the
+  compiler checks. `Capacity` gets its own message saying it is not supported
+  yet.
+
+## Still open
+
+- Capacity schedules, with Ignore, Wait and Preempt.
+- Arena Sets (resource, entity type, counter, tally, queue).
+- Writing to array elements.
+- The Process Analyzer: several runs of one model with different Variable
+  values, compared side by side. The Runs tab is the natural place for it.
+- Derived results such as utilisation = (fleet − idle) / fleet, which the
+  report computes by hand.

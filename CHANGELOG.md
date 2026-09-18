@@ -5,6 +5,51 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [16.0.0] — 2026-09-18 — "The ride-hailing model"
+
+Group 9's mid-semester Arena model — multi-zone ride-hailing dispatch — can be
+built in this engine, and is: `examples/models/ride_hailing.des`. Over 100
+replications it reproduces the report's findings (Suburb wait 33.6 ± 4.9 min
+against Arena's 36.74 ± 6.03; Downtown 0; service level 0.866 against 0.875).
+Narrative in `V16_READLOG.md`.
+
+### Added
+
+- **Match**, with 2–5 named lanes (`[Match]` + `[MatchLane]`). Any, or Based on
+  Attribute; the longest-waiting candidate goes first. Lanes report their
+  length, waits and who is still waiting, and answer `NQ()`.
+- **Route and Station**: a Route holds an entity for its route time and
+  delivers it to the Station its Destination names.
+- **Arrival schedules** (`[Schedule]` + `[ScheduleRow]`, Type Arrival): a
+  Create that names one arrives as a non-stationary Poisson stream, generated
+  by thinning. `[Run]` gains **Time Units** (default Minutes), which a schedule
+  converts its own units to.
+- **Array Variables**: `Rows` and `Columns` on `[Variable]`, read as
+  `TravelTime(myZone, 2)`. Read-only in this version.
+- **Record**: TimeInterval (TNOW minus an attribute) and Expression types, a
+  Value (Count's amount), and a Statistic name several Records can share —
+  Arena's Counter and Tally names.
+- **A statistics table** in both reports: every counter, tally, Match lane and
+  Route, with mean ± 95% half-width across replications.
+- **The Runs tab is a form.** Every field of the chosen run can be changed in
+  place; `A` adds a run and `Del` deletes one, after asking.
+- **New models ask for a name**: `^N`, and the first `^S` on a scratch model.
+
+### Changed
+
+- **Create's Max Arrivals counts arrival events**, as Arena's does: Per Arrival
+  80 with Max Arrivals 1 is 80 entities, not one. No example used more than one
+  per arrival, so every baseline is unchanged.
+- **Per Arrival is an expression**, so it can name a Variable.
+- **A loop back into a Match lane is not a routing loop** — it is a population
+  (cars) waiting for partners.
+- On the Runs tab, adding a run moved from `^N` to `A`; `^N` is a new model.
+
+### Fixed
+
+- A study of a model with no Process read the first Process's utilisation
+  from an empty list. It reports 0 there now.
+
 ## [15.2.0] — 2026-09-14 — "A gate you can wait for"
 
 `tools/verify.sh` took about 25 minutes. On a 4-core laptop it now takes about

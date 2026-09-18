@@ -13,11 +13,12 @@ STARTING IT
 
 Double-click DES-Simulator.exe.
 
-It opens a blank model called untitled.des, kept in
+It opens a blank model. The first time you save it (Ctrl+S) it asks for a
+name, and keeps it in
 
     Documents\DES Models\
 
-and opens that same file again next time, so your work is where you left it.
+Ctrl+N starts another new model, asking for its name first.
 
 To open some other model, drag its .des file onto DES-Simulator.exe. If you
 used the installer, double-clicking a .des file opens it directly.
@@ -49,7 +50,9 @@ blank, for you to fill in. Lines starting with # are comments.
 There is no drawing canvas. A CONNECTION between two modules is the name of
 the next module, typed into a "Next" field.
 
-The examples folder has four finished models to open and take apart.
+The examples folder has finished models to open and take apart, including
+ride_hailing.des: a three-zone ride-hailing city with riders and cars matched
+by zone, hourly arrival schedules, and cars driving to where their trips end.
 
 
 KEYS
@@ -61,6 +64,7 @@ KEYS
   Ctrl+J        jump to the first error; errors are marked E beside the line
   Ctrl+T        write a working model into an empty file
   Ctrl+R        run the model
+  Ctrl+N        a new model (it asks for the name)
   Ctrl+W        save the results to a file beside the model
   Ctrl+S        save the model
   Ctrl+Z Ctrl+Y undo, redo
@@ -70,6 +74,9 @@ KEYS
 
 The tabs along the top -- Model, Flow, Runs, Results -- can be clicked, or
 reached with Ctrl+B, Ctrl+F, Ctrl+U and Ctrl+E.
+
+On the Runs tab: A adds a run, Delete removes one, and Tab moves into the
+chosen run's settings, where Enter changes a setting.
 
 
 IF SOMETHING GOES WRONG
