@@ -36,7 +36,26 @@ enum class Pane { Palette, Editor };
 // Something drawn OVER the view, which takes every key until it closes. Modal
 // on purpose: a list of choices that let you edit underneath it would be
 // answering a question about text that had moved.
-enum class Overlay { None, Help, Picker, Confirm, Running };
+enum class Overlay { None, Help, Picker, Confirm, Running, Prompt };
+
+// One Confirm overlay asks several questions; this says which, so a 'd' that
+// means "discard and quit" can never be read as "discard and open a new file".
+enum class ConfirmFor { Quit, NewFile, DeleteRun, OpenExisting };
+
+// What the one-line Prompt is asking for.
+enum class PromptFor { None, NewFile, SaveAs };
+
+// Which half of the Runs tab has the keyboard.
+enum class RunsFocus { List, Form };
+
+// Which field a Picker writes into: the editor's current line, or the Runs
+// form's selected field.
+enum class PickerFor { Editor, RunField };
+
+// v16: a typed model name becomes a path. A bare name goes in `defaultDir`, a
+// name with a folder in it is used as given, and ".des" is added when there is
+// no extension. Blank comes back empty, which the caller refuses.
+std::string resolveModelName(const std::string& typed, const std::string& defaultDir);
 
 // A working M/M/1: arrivals, one server, an exit, and a Run row. Somebody who
 // has used Arena knows what a model looks like and not what THIS one looks
@@ -166,6 +185,49 @@ public:
     void stopRun();
     const RunController* running() const { return m_run.get(); }
 
+    // v16: the Runs tab's form. Every edit rewrites one `key = value` line of
+    // that run's [Run] block, so the text stays the only copy of the model.
+    RunsFocus runsFocus() const { return m_runsFocus; }
+    void setRunsFocus(RunsFocus f);
+    const std::vector<std::string>& runFields() const { return m_runFields; }
+    std::size_t runField() const { return m_runField; }
+    void stepRunField(long long delta);
+    void setRunField(std::size_t i);
+    bool editingRunField() const { return m_editingRunField; }
+    const std::string& runFieldDraft() const { return m_runDraft; }
+    void beginRunFieldEdit();       // Yes/no and Enum fields open the picker
+    void typeRunField(char c);
+    void backspaceRunField();
+    bool commitRunFieldEdit();      // false, with the reason, when refused
+    void cancelRunFieldEdit();
+    void showRunFieldHelp();
+    // Blank removes the line. Refused -- text untouched -- when the value
+    // would be an error in that cell.
+    bool setRunValue(std::size_t run, const std::string& column, const std::string& value);
+    void requestDeleteRun();        // asks first
+    bool deleteRun(std::size_t run);
+
+    // v16: new files have names. ^N asks for one (after asking about unsaved
+    // work), and a model opened with no file asks on its first ^S rather than
+    // quietly becoming untitled.des.
+    void requestNewFile();
+    void openPrompt(PromptFor why);
+    PromptFor promptFor() const { return m_promptFor; }
+    const std::string& promptText() const { return m_promptText; }
+    void typePrompt(char c) { m_promptText.push_back(c); }
+    void backspacePrompt() { if (!m_promptText.empty()) m_promptText.pop_back(); }
+    void commitPrompt();
+    void cancelPrompt();
+    void answerConfirm(char c);     // NewFile and OpenExisting
+    bool unnamed() const { return m_unnamed; }
+    void setUnnamed(bool on) { m_unnamed = on; }
+    void setDefaultDirectory(std::string dir) { m_defaultDir = std::move(dir); }
+    void newBlankModel(const std::string& path);
+
+    ConfirmFor confirmFor() const { return m_confirmFor; }
+    PickerFor  pickerFor()  const { return m_pickerFor; }
+    const std::string& pickerTitle() const { return m_pickerTitle; }
+
     // --- results -------------------------------------------------------------
     const std::string& results()     const { return m_results; }
     const std::string& resultsOf()   const { return m_resultsOf; }
@@ -212,6 +274,20 @@ private:
 
     std::vector<std::string> m_runs;
     std::size_t              m_runIndex{0};
+    RunsFocus                m_runsFocus{RunsFocus::List};
+    std::vector<std::string> m_runFields;
+    std::size_t              m_runField{0};
+    bool                     m_editingRunField{false};
+    std::string              m_runDraft;
+
+    ConfirmFor  m_confirmFor{ConfirmFor::Quit};
+    PromptFor   m_promptFor{PromptFor::None};
+    std::string m_promptText;
+    std::string m_pendingPath;      // the name OpenExisting is asking about
+    bool        m_unnamed{false};
+    std::string m_defaultDir{"."};
+    PickerFor   m_pickerFor{PickerFor::Editor};
+    std::string m_pickerTitle;
 
     std::string m_clip;
 

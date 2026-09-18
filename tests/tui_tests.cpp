@@ -605,12 +605,13 @@ void runTuiTests() {
         check(saved.find("Long") != std::string::npos,
               "and the file says which run it was, which a bare report does not");
 
-        // ^N writes another [Run] rather than making you remember the fields.
+        // A writes another [Run] rather than making you remember the fields.
         TuiState t = TuiState::fromText(text, "many.des");
         handleKey(t, Key::control('u'));
-        handleKey(t, Key::control('n'));
-        check(t.document().rowCount("Run") == 3, "^N adds a [Run]");
-        check(t.view() == View::Model, "and goes to the text to name it");
+        handleKey(t, Key::character('a'));
+        check(t.document().rowCount("Run") == 3, "A adds a [Run]");
+        check(t.view() == View::Runs && t.runsFocus() == RunsFocus::Form,
+              "and opens its fields in the form");
     }
 
     section("Results are empty until there are any, and say so");

@@ -56,6 +56,7 @@ struct Layout {
 
     // Which file line is drawn on textTop, and which column is drawn at textX.
     std::size_t firstLine{0};
+    int runsFormX{0};      // v16: first column of the Runs tab's form
     std::size_t firstColumn{0};
 };
 

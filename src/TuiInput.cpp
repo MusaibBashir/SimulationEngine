@@ -34,12 +34,25 @@ bool handleConfirm(TuiState& state, Key key) {
         }
         return true;
     }
-    switch (key.ch) {
-        case 's': return !state.save();       // stay open if the save failed
-        case 'd': return false;
-        case 'c': state.setOverlay(Overlay::None); state.setStatus(""); return true;
-        default:  return true;
+    const auto close = [&state] { state.setOverlay(Overlay::None); state.setStatus(""); };
+    switch (state.confirmFor()) {
+        case ConfirmFor::Quit:
+            switch (key.ch) {
+                case 's': return !state.save();       // stay open if the save failed
+                case 'd': return false;
+                case 'c': close(); return true;
+                default:  return true;
+            }
+        case ConfirmFor::DeleteRun:
+            if (key.ch == 'y') { state.setOverlay(Overlay::None); state.deleteRun(state.runIndex()); }
+            else if (key.ch == 'n') close();
+            return true;
+        case ConfirmFor::NewFile:
+        case ConfirmFor::OpenExisting:
+            state.answerConfirm(key.ch);
+            return true;
     }
+    return true;
 }
 
 bool handlePicker(TuiState& state, Key key) {
@@ -61,6 +74,17 @@ bool handlePicker(TuiState& state, Key key) {
             if (key.button == MouseButton::WheelUp)   state.stepPicker(-1);
             if (key.button == MouseButton::WheelDown) state.stepPicker(1);
             break;
+        default: break;
+    }
+    return true;
+}
+
+bool handlePrompt(TuiState& state, Key key) {
+    switch (key.kind) {
+        case KeyKind::Char:      state.typePrompt(key.ch); break;
+        case KeyKind::Backspace: state.backspacePrompt(); break;
+        case KeyKind::Enter:     state.commitPrompt(); break;
+        case KeyKind::Escape:    state.cancelPrompt(); break;
         default: break;
     }
     return true;
@@ -148,12 +172,51 @@ bool handleFlow(TuiState& state, Key key) {
     return true;
 }
 
+bool handleRunForm(TuiState& state, Key key) {
+    if (state.editingRunField()) {
+        switch (key.kind) {
+            case KeyKind::Char:      state.typeRunField(key.ch); break;
+            case KeyKind::Backspace: state.backspaceRunField(); break;
+            case KeyKind::Enter:     state.commitRunFieldEdit(); break;
+            case KeyKind::Escape:    state.cancelRunFieldEdit(); break;
+            default: break;
+        }
+        return true;
+    }
+    switch (key.kind) {
+        case KeyKind::Up:      state.stepRunField(-1); break;
+        case KeyKind::Down:    state.stepRunField(1); break;
+        case KeyKind::Home:    state.setRunField(0); break;
+        case KeyKind::Enter:   state.beginRunFieldEdit(); break;
+        case KeyKind::Tab:
+        case KeyKind::BackTab:
+        case KeyKind::Left:
+        case KeyKind::Escape:  state.setRunsFocus(RunsFocus::List); break;
+        case KeyKind::Char:
+            if (key.ch == '?' || key.ch == 'h') state.showRunFieldHelp();
+            break;
+        default: break;
+    }
+    return true;
+}
+
 bool handleRuns(TuiState& state, Key key) {
+    if (state.runsFocus() == RunsFocus::Form && !state.runs().empty())
+        return handleRunForm(state, key);
     switch (key.kind) {
         case KeyKind::Up:     state.stepRun(-1); break;
         case KeyKind::Down:   state.stepRun(1); break;
         case KeyKind::Enter:  state.startRun(); break;
+        case KeyKind::Delete: state.requestDeleteRun(); break;
+        case KeyKind::Tab:
+        case KeyKind::BackTab:
+        case KeyKind::Right:
+            if (!state.runs().empty()) state.setRunsFocus(RunsFocus::Form);
+            break;
         case KeyKind::Escape: state.setView(View::Model); break;
+        case KeyKind::Char:
+            if (key.ch == 'a' || key.ch == 'A') state.addRunBlock();
+            break;
         default: break;
     }
     return true;
@@ -207,7 +270,22 @@ bool handleMouse(TuiState& state, Key key, int width, int height) {
         const int row = key.y - (L.bodyTop + 2);
         if (row < 0) return true;
         if (state.view() == View::Flow)      state.stepFlow(row - static_cast<long long>(state.flowCursor()));
-        else if (state.view() == View::Runs) state.setRunIndex(static_cast<std::size_t>(row));
+        else if (state.view() == View::Runs) {
+            const std::size_t at = static_cast<std::size_t>(row);
+            if (key.x < L.runsFormX - 2) {
+                state.setRunsFocus(RunsFocus::List);
+                state.setRunIndex(at);
+            } else if (at < state.runFields().size() && !state.runs().empty()) {
+                // A SECOND click on the selected field edits it. The terminal
+                // reports clicks, not double-clicks, so this is the nearest
+                // honest equivalent.
+                const bool again = state.runsFocus() == RunsFocus::Form &&
+                                   state.runField() == at;
+                state.setRunsFocus(RunsFocus::Form);
+                state.setRunField(at);
+                if (again && !state.editingRunField()) state.beginRunFieldEdit();
+            }
+        }
         return true;
     }
 
@@ -262,6 +340,7 @@ bool handleKey(TuiState& state, Key key, int width, int height) {
     if (state.overlay() == Overlay::Confirm) return handleConfirm(state, key);
     if (state.overlay() == Overlay::Picker)  return handlePicker(state, key);
     if (state.overlay() == Overlay::Running) return handleRunning(state, key);
+    if (state.overlay() == Overlay::Prompt)  return handlePrompt(state, key);
 
     if (key.kind == KeyKind::Function && key.ch == 1) { openKeyMap(state); return true; }
 
@@ -280,9 +359,7 @@ bool handleKey(TuiState& state, Key key, int width, int height) {
             case 'R': state.startRun();      return true;
             case 'W': state.saveResults();   return true;
             case 'P': state.setView(View::Model); state.setFocus(Pane::Palette); return true;
-            case 'N':
-                if (state.view() == View::Runs) state.addRunBlock();
-                return true;
+            case 'N': state.requestNewFile(); return true;
             case 'T':
                 if (state.buffer().lineCount() == 1 && state.buffer().lineAt(0).empty()) {
                     // insertText, NOT setText: setText clears the undo stack,

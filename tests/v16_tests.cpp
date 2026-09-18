@@ -1,0 +1,194 @@
+// ============================================================================
+// v16_tests.cpp  --  the Runs form, naming new files, and everything the
+// Group 9 ride-hailing model needs: Match, schedules, Route/Station, array
+// variables, richer Records, and the statistics that report them.
+// ============================================================================
+
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <sstream>
+#include <string>
+#include <vector>
+#include "harness.hpp"
+#include "des.hpp"
+#include "des_ui.hpp"
+
+using namespace des;
+using des_test::check;
+using des_test::modelPath;
+using des_test::section;
+
+namespace {
+
+void typeText(TuiState& s, const std::string& text) {
+    for (const char c : text) handleKey(s, Key::character(c));
+}
+
+}  // namespace
+
+void runV16Tests() {
+    section("replaceLines is one undo step");
+    {
+        TextBuffer b("a\nb\nc");
+        b.replaceLines(1, 1, {"x", "y"});
+        check(b.text() == "a\nx\ny\nc", "the middle line is replaced by two");
+        b.undo();
+        check(b.text() == "a\nb\nc", "and one undo puts it back");
+    }
+
+    section("The Runs form edits the text, and keeps the comments");
+    {
+        TuiState s = TuiState::fromText(
+            "version = 1\n# how long\n[Run]\nName   = Base\nLength = 480\n", "t.des");
+        check(s.setRunValue(0, "Replications", "10"), "a new field is accepted");
+        check(s.buffer().text().find("Replications = 10") != std::string::npos,
+              "and written into the [Run] block");
+        check(s.buffer().text().find("# how long") != std::string::npos, "the comment survives");
+        check(s.setRunValue(0, "Length", "600"), "an existing field is rewritten");
+        check(s.buffer().text().find("Length = 600") != std::string::npos,
+              "keeping the key as it was typed");
+        check(s.document().cell("Run", 0, "Length") == "600", "the document sees it");
+        check(!s.setRunValue(0, "Replications", "ten"), "letters in a whole number are refused");
+        check(s.document().cell("Run", 0, "Replications") == "10", "and the text is not changed");
+        check(s.setRunValue(0, "Length", ""), "blank removes the line");
+        check(s.buffer().text().find("Length") == std::string::npos, "so it is gone");
+        s.undo();
+        check(s.buffer().text().find("Length = 600") != std::string::npos, "one undo restores it");
+    }
+
+    section("Deleting a run removes its block and the comments above it");
+    {
+        TuiState s = TuiState::fromText(
+            "version = 1\n[Run]\nName = A\n\n# the second\n[Run]\nName = B\nLength = 5\n"
+            "\n[Create]\nName = C\n", "t.des");
+        check(s.deleteRun(1), "run B is deleted");
+        check(s.runs().size() == 1 && s.runs()[0] == "A", "only A is left");
+        check(s.buffer().text().find("# the second") == std::string::npos, "its comment went too");
+        check(s.buffer().text().find("[Create]") != std::string::npos, "the next block did not");
+        s.undo();
+        check(s.runs().size() == 2, "one undo brings it back");
+
+        TuiState t = TuiState::fromText("version = 1\n[Run]\nName = A\n\n[Run]\nName = B\n", "t.des");
+        check(t.deleteRun(1), "the last block in the file can be deleted");
+        check(t.buffer().text() == "version = 1\n[Run]\nName = A\n",
+              "without leaving blank lines behind");
+    }
+
+    section("The Runs tab: A adds, Delete asks, Tab reaches the form");
+    {
+        TuiState s = TuiState::fromText("version = 1\n[Run]\nName = A\n", "t.des");
+        handleKey(s, Key::control('u'));
+        handleKey(s, Key::character('a'));
+        check(s.runs().size() == 2, "A adds a run");
+        check(s.view() == View::Runs, "without leaving the Runs tab");
+        check(s.runs()[1] == "Run2", "and gives it a name");
+        handleKey(s, Key::special(KeyKind::Escape));
+        check(s.runsFocus() == RunsFocus::List, "Esc in the form goes back to the list");
+        handleKey(s, Key::special(KeyKind::Delete));
+        check(s.overlay() == Overlay::Confirm && s.confirmFor() == ConfirmFor::DeleteRun,
+              "Delete asks first");
+        handleKey(s, Key::character('n'));
+        check(s.runs().size() == 2 && s.overlay() == Overlay::None, "n keeps it");
+        handleKey(s, Key::special(KeyKind::Delete));
+        handleKey(s, Key::character('y'));
+        check(s.runs().size() == 1, "and y deletes");
+        handleKey(s, Key::special(KeyKind::Tab));
+        check(s.runsFocus() == RunsFocus::Form, "Tab moves into the form");
+        // Field 0 is Name, field 1 Length.
+        handleKey(s, Key::special(KeyKind::Down));
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.editingRunField(), "Enter edits the field");
+        typeText(s, "90");
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.document().cell("Run", 0, "Length") == "90", "and Enter writes it");
+        check(!s.editingRunField(), "ending the edit");
+
+        handleKey(s, Key::special(KeyKind::Enter));
+        typeText(s, "x");
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.editingRunField(), "a refused value keeps the edit open to fix");
+        check(s.document().cell("Run", 0, "Length") == "90", "and the text unchanged");
+        handleKey(s, Key::special(KeyKind::Escape));
+        check(!s.editingRunField(), "Esc abandons it");
+
+        // A yes/no field opens the list rather than taking typing.
+        std::size_t antithetic = 0;
+        for (std::size_t i = 0; i < s.runFields().size(); ++i)
+            if (s.runFields()[i] == "Antithetic") antithetic = i;
+        s.setRunField(antithetic);
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.overlay() == Overlay::Picker, "a yes/no field opens the list");
+        handleKey(s, Key::special(KeyKind::Down));
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.document().cell("Run", 0, "Antithetic") == "true", "and the choice is written");
+
+        Screen screen(100, 30);
+        render(s, screen);
+        check(screen.asText().find("Replications") != std::string::npos,
+              "the form lists every field");
+        check(screen.asText().find("(default)") != std::string::npos,
+              "showing defaults for the ones not set");
+    }
+
+    section("A typed model name becomes a path");
+    {
+        check(resolveModelName("line2", "D") == "D/line2.des", "a bare name goes in the default folder");
+        check(resolveModelName("line2.des", "D") == "D/line2.des", ".des is not doubled");
+        check(resolveModelName("sub/x", "D") == "sub/x.des", "a path is used as given");
+        check(resolveModelName("a.txt", "D") == "D/a.txt", "an extension is kept");
+        check(resolveModelName("  ", "D").empty(), "blank is refused");
+    }
+
+    section("^N asks for a name; an unnamed model asks on first save");
+    {
+        const std::string dir = "v16_newfile_dir";
+        std::filesystem::remove_all(dir);
+        std::filesystem::create_directories(dir);
+        TuiState s = TuiState::fromText("", dir + "/untitled.des");
+        s.setDefaultDirectory(dir);
+        s.setUnnamed(true);
+        typeText(s, "x");
+        handleKey(s, Key::control('s'));
+        check(s.overlay() == Overlay::Prompt && s.promptFor() == PromptFor::SaveAs,
+              "the first save of an unnamed model asks for a name");
+        check(!std::filesystem::exists(dir + "/untitled.des"), "rather than writing untitled.des");
+        typeText(s, "fresh");
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(std::filesystem::exists(dir + "/fresh.des"), "and saves under it");
+        check(!s.unnamed() && !s.dirty(), "after which it is named and clean");
+        check(s.path() == dir + "/fresh.des", "and that is its path");
+
+        handleKey(s, Key::control('n'));
+        check(s.overlay() == Overlay::Prompt && s.promptFor() == PromptFor::NewFile,
+              "^N on a clean model goes straight to the name");
+        typeText(s, "fresh");
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.overlay() == Overlay::Confirm && s.confirmFor() == ConfirmFor::OpenExisting,
+              "an existing name asks before opening it");
+        handleKey(s, Key::character('n'));
+        check(s.overlay() == Overlay::Prompt && s.promptText() == "fresh",
+              "no goes back to the prompt, keeping what was typed");
+        handleKey(s, Key::special(KeyKind::Escape));
+        check(s.overlay() == Overlay::None, "Esc cancels");
+
+        typeText(s, "y");
+        handleKey(s, Key::control('n'));
+        check(s.overlay() == Overlay::Confirm && s.confirmFor() == ConfirmFor::NewFile,
+              "^N with unsaved changes asks first");
+        handleKey(s, Key::character('d'));
+        typeText(s, "other");
+        handleKey(s, Key::special(KeyKind::Enter));
+        check(s.path() == dir + "/other.des", "discard then a name opens the new model there");
+        check(s.buffer().text().empty() && !s.dirty(), "empty and clean");
+
+        handleKey(s, Key::control('n'));
+        typeText(s, "fresh");
+        handleKey(s, Key::special(KeyKind::Enter));
+        handleKey(s, Key::character('y'));
+        check(s.path() == dir + "/fresh.des" && s.buffer().text().find('x') != std::string::npos,
+              "yes opens the existing file");
+        std::filesystem::remove_all(dir);
+    }
+}

@@ -6,6 +6,7 @@
 #include <sstream>
 #include <utility>
 #include "DocumentFormat.hpp"
+#include "RunSetup.hpp"
 
 namespace des {
 
@@ -212,6 +213,9 @@ void TuiState::rebuildPalette() {
         if (schema.readOnly) continue;
         m_palette.push_back(schema.typeName);
     }
+    m_runFields.clear();
+    if (const ModuleSchema* run = ModuleRegistry::instance().find("Run"))
+        for (const Column& c : run->columns) m_runFields.push_back(c.id);
 }
 
 void TuiState::reparse() {
@@ -296,7 +300,108 @@ void TuiState::paste() {
     setStatus("pasted");
 }
 
-bool TuiState::save() { return save(m_path); }
+bool TuiState::save() {
+    if (m_unnamed) { openPrompt(PromptFor::SaveAs); return false; }
+    return save(m_path);
+}
+
+// --- naming ------------------------------------------------------------------
+
+std::string resolveModelName(const std::string& typed, const std::string& defaultDir) {
+    const std::string name = trimmed(typed);
+    if (name.empty()) return std::string();
+    const bool hasFolder = name.find_first_of("/\\") != std::string::npos;
+    std::string path = hasFolder ? name : defaultDir + "/" + name;
+    const std::size_t slash = path.find_last_of("/\\");
+    const std::size_t dot = path.find_last_of('.');
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
+        path += ".des";
+    return path;
+}
+
+void TuiState::requestNewFile() {
+    if (m_dirty) {
+        m_confirmFor = ConfirmFor::NewFile;
+        m_overlay = Overlay::Confirm;
+        setStatus("unsaved changes -- (s)ave first, (d)iscard them, (c)ancel");
+        return;
+    }
+    openPrompt(PromptFor::NewFile);
+}
+
+void TuiState::openPrompt(PromptFor why) {
+    m_promptFor = why;
+    m_promptText.clear();
+    m_overlay = Overlay::Prompt;
+    setStatus(why == PromptFor::SaveAs ? "this model has no name yet -- what should it be called?"
+                                       : "the new model's name, e.g. line2");
+}
+
+void TuiState::cancelPrompt() {
+    m_promptFor = PromptFor::None;
+    m_promptText.clear();
+    m_overlay = Overlay::None;
+    setStatus("");
+}
+
+void TuiState::commitPrompt() {
+    const std::string path = resolveModelName(m_promptText, m_defaultDir);
+    if (path.empty()) { setStatus("type a name first -- Esc cancels"); return; }
+
+    if (m_promptFor == PromptFor::SaveAs) {
+        // save(path) only clears dirty when the path is the model's own, so
+        // the path changes FIRST.
+        const std::string before = m_path;
+        m_path = path;
+        if (!save(path)) { m_path = before; return; }
+        m_unnamed = false;
+        m_promptFor = PromptFor::None;
+        m_overlay = Overlay::None;
+        return;
+    }
+
+    std::error_code ignored;
+    if (std::filesystem::exists(path, ignored)) {
+        m_pendingPath = path;
+        m_confirmFor = ConfirmFor::OpenExisting;
+        m_overlay = Overlay::Confirm;
+        setStatus(path + " exists -- open it instead? (y)es  (n)o");
+        return;
+    }
+    m_promptFor = PromptFor::None;
+    newBlankModel(path);
+}
+
+void TuiState::answerConfirm(char c) {
+    if (m_confirmFor == ConfirmFor::NewFile) {
+        if (c == 's') { if (save() && !m_dirty) openPrompt(PromptFor::NewFile); return; }
+        if (c == 'd') { openPrompt(PromptFor::NewFile); return; }
+        if (c == 'c') { m_overlay = Overlay::None; setStatus(""); }
+        return;
+    }
+    if (m_confirmFor == ConfirmFor::OpenExisting) {
+        if (c == 'y') {
+            const std::string path = m_pendingPath;
+            const std::string dir = m_defaultDir;
+            *this = open(path);
+            m_defaultDir = dir;
+            return;
+        }
+        if (c == 'n') {
+            // Back to the name, with what was typed still there to correct.
+            const std::string typed = m_promptText;
+            openPrompt(PromptFor::NewFile);
+            m_promptText = typed;
+        }
+    }
+}
+
+void TuiState::newBlankModel(const std::string& path) {
+    const std::string dir = m_defaultDir;
+    *this = fromText(std::string(), path);
+    m_defaultDir = dir;
+    setStatus(path + ": a new model -- pick a module on the left, or ^T for a working one");
+}
 
 bool TuiState::save(const std::string& toPath) {
     // CREATE THE FOLDER FIRST. Double-clicking des_tui with no file opens
@@ -511,6 +616,8 @@ bool TuiState::openPicker() {
     m_choice = (it == m_choices.end())
                    ? 0
                    : static_cast<std::size_t>(it - m_choices.begin());
+    m_pickerFor   = PickerFor::Editor;
+    m_pickerTitle = key;
     m_overlay = Overlay::Picker;
     return true;
 }
@@ -524,6 +631,15 @@ void TuiState::stepPicker(long long delta) {
 
 void TuiState::commitPicker() {
     if (m_choice >= m_choices.size()) { cancelPicker(); return; }
+    if (m_pickerFor == PickerFor::RunField) {
+        const std::string value = m_choices[m_choice];
+        m_choices.clear();
+        m_overlay = Overlay::None;
+        m_pickerFor = PickerFor::Editor;
+        if (m_runField < m_runFields.size())
+            setRunValue(m_runIndex, m_runFields[m_runField], value);
+        return;
+    }
     const Caret at = m_buffer.caret();
     const std::string line = m_buffer.lineAt(at.line);
     const std::size_t eq = line.find('=');
@@ -546,6 +662,7 @@ void TuiState::commitPicker() {
 void TuiState::cancelPicker() {
     m_choices.clear();
     m_overlay = Overlay::None;
+    m_pickerFor = PickerFor::Editor;
 }
 
 // --- runs -------------------------------------------------------------------
@@ -560,15 +677,24 @@ void TuiState::stepRun(long long delta) {
 }
 
 void TuiState::addRunBlock() {
-    const ModuleSchema* schema = ModuleRegistry::instance().find("Run");
-    if (schema == nullptr) return;
-    m_buffer.moveToEnd();
-    if (!m_buffer.lineAt(m_buffer.caret().line).empty()) m_buffer.newline();
-    m_buffer.insertLines(templateFor(*schema));
+    const std::size_t before = m_document.rowCount("Run");
+    // A header and a Name, and nothing else: the form shows every other field
+    // with its default, and an unset field is one the file does not mention.
+    std::vector<std::string> block;
+    if (m_buffer.lineCount() > 0 && !trimmed(m_buffer.lines().back()).empty())
+        block.push_back(std::string());
+    block.push_back("[Run]");
+    block.push_back("Name = Run" + std::to_string(before + 1));
+    const Caret keep = m_buffer.caret();
+    std::size_t at = m_buffer.lineCount();
+    if (at > 0 && m_buffer.lines().back().empty()) --at;   // before the final newline
+    m_buffer.replaceLines(at, 0, block);
+    m_buffer.moveTo(keep);
     edited();
     m_runIndex = m_runs.empty() ? 0 : m_runs.size() - 1;
-    setView(View::Model);
-    setStatus("a new [Run] -- give it a Name so you can tell it apart");
+    m_runsFocus = RunsFocus::Form;
+    m_runField = 0;
+    setStatus("a new run -- Enter on a field changes it");
 }
 
 void TuiState::startRun() {
@@ -619,6 +745,203 @@ void TuiState::stopRun() {
     m_run.reset();
     m_overlay = Overlay::None;
     setStatus("run stopped");
+}
+
+// --- the Runs form -----------------------------------------------------------
+
+namespace {
+
+bool isCommentLine(const std::string& line) {
+    const std::string t = trimmed(line);
+    return !t.empty() && (t[0] == '#' || t[0] == ';');
+}
+
+bool isHeaderLine(const std::string& line) {
+    const std::string t = trimmed(line);
+    return !t.empty() && t[0] == '[';
+}
+
+// The 0-based header line of a [Run] and the first line of whatever follows
+// it: the next header, or the comments that introduce the next header.
+struct BlockLines { std::size_t header{0}; std::size_t end{0}; };
+
+bool runBlockLines(const ModelDocument& doc, const TextBuffer& buffer,
+                   std::size_t run, BlockLines& out) {
+    if (run >= doc.rowCount("Run")) return false;
+    const std::size_t line = doc.rows("Run")[run].headerLine;
+    if (line == 0 || line > buffer.lineCount()) return false;
+    out.header = line - 1;
+    std::size_t next = out.header + 1;
+    while (next < buffer.lineCount() && !isHeaderLine(buffer.lineAt(next))) ++next;
+    while (next > out.header + 1 && isCommentLine(buffer.lineAt(next - 1))) --next;
+    out.end = next;
+    return true;
+}
+
+}  // namespace
+
+void TuiState::setRunsFocus(RunsFocus f) {
+    m_runsFocus = f;
+    if (f == RunsFocus::List) m_editingRunField = false;
+}
+
+void TuiState::setRunField(std::size_t i) {
+    if (i < m_runFields.size()) m_runField = i;
+}
+
+void TuiState::stepRunField(long long delta) {
+    if (m_runFields.empty()) return;
+    long long i = static_cast<long long>(m_runField) + delta;
+    i = std::max<long long>(0, std::min(i, static_cast<long long>(m_runFields.size()) - 1));
+    m_runField = static_cast<std::size_t>(i);
+}
+
+void TuiState::beginRunFieldEdit() {
+    if (m_runs.empty() || m_runField >= m_runFields.size()) return;
+    const ModuleSchema* schema = ModuleRegistry::instance().find("Run");
+    const Column* col = schema ? schema->column(m_runFields[m_runField]) : nullptr;
+    if (col == nullptr) return;
+    const std::string now = m_document.cell("Run", m_runIndex, col->id);
+
+    if (col->type == ColumnType::Boolean || col->type == ColumnType::Enum) {
+        // The same list the editor offers, blank first: blank is "not set",
+        // which is how a field goes back to its default.
+        m_choices = col->type == ColumnType::Boolean
+                        ? std::vector<std::string>{"true", "false"}
+                        : col->enumValues;
+        m_choices.insert(m_choices.begin(), std::string());
+        const auto it = std::find(m_choices.begin(), m_choices.end(), now);
+        m_choice = it == m_choices.end() ? 0 : static_cast<std::size_t>(it - m_choices.begin());
+        m_pickerFor   = PickerFor::RunField;
+        m_pickerTitle = col->id;
+        m_overlay     = Overlay::Picker;
+        return;
+    }
+    m_runDraft = now;
+    m_editingRunField = true;
+    setStatus("editing " + col->id + " -- Enter keeps it, Esc leaves it as it was");
+}
+
+void TuiState::typeRunField(char c) { if (m_editingRunField) m_runDraft.push_back(c); }
+
+void TuiState::backspaceRunField() {
+    if (m_editingRunField && !m_runDraft.empty()) m_runDraft.pop_back();
+}
+
+bool TuiState::commitRunFieldEdit() {
+    if (!m_editingRunField || m_runField >= m_runFields.size()) return false;
+    if (!setRunValue(m_runIndex, m_runFields[m_runField], trimmed(m_runDraft)))
+        return false;          // still editing, so the person can fix it
+    m_editingRunField = false;
+    return true;
+}
+
+void TuiState::cancelRunFieldEdit() {
+    m_editingRunField = false;
+    m_runDraft.clear();
+    setStatus("");
+}
+
+void TuiState::showRunFieldHelp() {
+    const ModuleSchema* schema = ModuleRegistry::instance().find("Run");
+    if (schema == nullptr || m_runField >= m_runFields.size()) return;
+    const Column* col = schema->column(m_runFields[m_runField]);
+    if (col == nullptr) return;
+    m_helpTitle = "Run." + col->id;
+    m_helpBody  = {col->help};
+    if (!col->defaultValue.empty()) {
+        m_helpBody.push_back(std::string());
+        m_helpBody.push_back("Default: " + col->defaultValue);
+    }
+    m_overlay = Overlay::Help;
+}
+
+bool TuiState::setRunValue(std::size_t run, const std::string& column,
+                           const std::string& value) {
+    BlockLines block;
+    if (!runBlockLines(m_document, m_buffer, run, block)) return false;
+
+    // The line to rewrite, or where a new one goes: after the last line of
+    // the block that says something, so a trailing blank line stays trailing.
+    std::size_t found = block.end, last = block.header;
+    for (std::size_t i = block.header + 1; i < block.end; ++i) {
+        const std::string k = keyOfLine(m_buffer.lineAt(i));
+        if (!k.empty()) last = i;
+        if (k == column) found = i;
+    }
+    std::vector<std::string> with;
+    std::size_t first = found, count = 1;
+    if (found == block.end) {
+        if (value.empty()) return true;          // unset, and it already was
+        first = last + 1;
+        count = 0;
+        with.push_back(column + " = " + value);
+    } else if (!value.empty()) {
+        // The key exactly as it was typed, alignment included.
+        const std::string& line = m_buffer.lineAt(found);
+        std::string key = line.substr(0, line.find('='));
+        while (!key.empty() && key.back() == ' ') key.pop_back();
+        const std::string gap = line.substr(key.size(), line.find('=') - key.size());
+        with.push_back(key + gap + "= " + value);
+    }
+
+    // TRIED ON A COPY FIRST. Refusing after the fact would mean an undo, and
+    // that would leave a redo able to put the bad value back.
+    TextBuffer trial = m_buffer;
+    trial.replaceLines(first, count, with);
+    ReadResult read = readDocument(trial.text());
+    CompileResult compiled = compile(read.document);
+    std::vector<Diagnostic> all = std::move(read.diagnostics);
+    for (Diagnostic& d : compiled.diagnostics) all.push_back(std::move(d));
+    std::vector<Diagnostic> setup;
+    readRunSetup(read.document, setup, run);
+    for (Diagnostic& d : setup) all.push_back(std::move(d));
+    for (const Diagnostic& d : all) {
+        if (d.severity != Severity::Error || !d.cell) continue;
+        if (d.cell->moduleType == "Run" && d.cell->row == run && d.cell->column == column) {
+            setStatus(column + ": " + d.message);
+            return false;
+        }
+    }
+
+    const Caret keep = m_buffer.caret();
+    m_buffer.replaceLines(first, count, with);
+    m_buffer.moveTo(keep);
+    edited();
+    setStatus(value.empty() ? column + " cleared -- back to its default"
+                            : column + " = " + value);
+    return true;
+}
+
+void TuiState::requestDeleteRun() {
+    if (m_runs.empty()) { setStatus("there is no run to delete"); return; }
+    m_confirmFor = ConfirmFor::DeleteRun;
+    m_overlay = Overlay::Confirm;
+    setStatus("delete run " + m_runs[m_runIndex] + "? (y)es  (n)o");
+}
+
+bool TuiState::deleteRun(std::size_t run) {
+    BlockLines block;
+    if (!runBlockLines(m_document, m_buffer, run, block)) return false;
+    std::size_t start = block.header;
+    // The comment directly above a block is about that block.
+    while (start > 0 && isCommentLine(m_buffer.lineAt(start - 1))) --start;
+    std::size_t end = block.end;
+    // The file's final newline is the file's, not the block's.
+    if (end == m_buffer.lineCount() && end > block.header + 1 &&
+        m_buffer.lineAt(end - 1).empty())
+        --end;
+    // The LAST block takes the blank lines that separated it with it, or the
+    // file would end in them.
+    if (end >= m_buffer.lineCount() - 1)
+        while (start > 0 && trimmed(m_buffer.lineAt(start - 1)).empty()) --start;
+    const std::string name = run < m_runs.size() ? m_runs[run] : std::string("run");
+    const Caret keep = m_buffer.caret();
+    m_buffer.replaceLines(start, end - start, {});
+    m_buffer.moveTo(keep);
+    edited();
+    setStatus("deleted run " + name + " -- ^Z brings it back");
+    return true;
 }
 
 // --- results ----------------------------------------------------------------
@@ -672,6 +995,7 @@ void TuiState::requestQuit() {
     // Unsaved work is asked about, never discarded on one keystroke. The whole
     // point of a UI over a file format is that a person trusts it with work
     // that exists nowhere else.
+    m_confirmFor = ConfirmFor::Quit;
     m_overlay = Overlay::Confirm;
     setStatus("unsaved changes -- (s)ave and quit, (d)iscard and quit, (c)ancel");
 }

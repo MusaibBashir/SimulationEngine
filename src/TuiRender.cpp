@@ -94,6 +94,7 @@ Layout layoutFor(const TuiState& state, int width, int height) {
     L.hintRow    = height - 1;
     L.statusRow  = height - 2;
     L.bodyBottom = height - 3;
+    L.runsFormX  = 34;
 
     int x = 1;
     for (int i = 0; i < 4; ++i) {
@@ -344,51 +345,74 @@ void renderRuns(const TuiState& state, Screen& screen, const Layout& L) {
         screen.text(3, L.bodyTop + 3,
                     "empties -- but a [Run] says how long, how many times, and "
                     "with which seed.", Attr::Dim);
-        screen.text(3, L.bodyTop + 5, "^N adds one.", Attr::Bold);
+        screen.text(3, L.bodyTop + 5, "A adds one.", Attr::Bold);
         return;
     }
 
-    // Built from the SAME widths as the rows below. Written out by hand it
-    // was two columns adrift, which is the kind of thing that makes a reader
-    // distrust every number under it.
-    const std::size_t COLS[5] = {18, 9, 10, 7, 8};
-    const char* const HEADS[5] = {"name", "length", "warm-up", "reps", "seed"};
-    std::string header;
-    for (int i = 0; i < 5; ++i) {
-        std::string h = HEADS[i];
-        h.resize(COLS[i], ' ');
-        header += h;
-    }
-    screen.text(3, L.bodyTop + 1, fit(header, right - 3), Attr::Bold);
+    // LEFT: the runs. RIGHT: the chosen one's every field, so changing a run
+    // does not mean finding its block in the text.
+    const bool listFocus = state.runsFocus() == RunsFocus::List;
+    const int listWidth = L.runsFormX - 4;
+    screen.text(3, L.bodyTop + 1, fit("run           length  reps", listWidth), Attr::Bold);
     int y = L.bodyTop + 2;
-    for (std::size_t i = 0; i < state.runs().size(); ++i) {
-        if (y >= L.bodyBottom) break;
+    for (std::size_t i = 0; i < state.runs().size() && y < L.bodyBottom; ++i, ++y) {
         const bool here = (i == state.runIndex());
         if (here) screen.put(1, y, '>', Attr::Bold);
-        const auto cell = [&](const char* column) {
-            return state.document().cellOrDefault("Run", i, column);
-        };
-        const auto pad = [](std::string s, std::size_t w) {
-            if (s.empty()) s = "-";
-            s.resize(w, ' ');
-            return s;
-        };
-        std::string line = pad(state.runs()[i], COLS[0]);
-        line += pad(cell("Length"), COLS[1]);
-        line += pad(cell("Warm-up"), COLS[2]);
-        line += pad(cell("Replications"), COLS[3]);
-        line += pad(cell("Base Seed"), COLS[4]);
-        screen.text(3, y, fit(line, right - 3), here ? Attr::Reverse : Attr::Normal);
-        ++y;
+        std::string name = state.runs()[i];
+        name.resize(14, ' ');
+        std::string length = state.document().cell("Run", i, "Length");
+        if (length.empty()) length = "-";
+        length.resize(8, ' ');
+        std::string reps = state.document().cell("Run", i, "Replications");
+        if (reps.empty()) reps = "1";
+        screen.text(3, y, fit(name + length + reps, listWidth),
+                    here ? (listFocus ? Attr::Reverse : Attr::Bold) : Attr::Normal);
     }
+    for (int row = L.bodyTop + 1; row < L.bodyBottom; ++row)
+        screen.put(L.runsFormX - 2, row, '|', Attr::Dim);
 
+    const ModuleSchema* schema = ModuleRegistry::instance().find("Run");
+    const int fx = L.runsFormX;
+    screen.text(fx, L.bodyTop + 1,
+                fit("run " + state.runs()[state.runIndex()], right - fx), Attr::Bold);
+    y = L.bodyTop + 2;
+    for (std::size_t f = 0; f < state.runFields().size() && y < L.bodyBottom; ++f, ++y) {
+        const std::string& id = state.runFields()[f];
+        const Column* col = schema ? schema->column(id) : nullptr;
+        const bool here = !listFocus && f == state.runField();
+        std::string label = id;
+        label.resize(18, ' ');
+        std::string value = state.document().cell("Run", state.runIndex(), id);
+        Attr attr = here ? Attr::Reverse : Attr::Normal;
+        if (here && state.editingRunField()) {
+            value = state.runFieldDraft() + "_";
+        } else if (value.empty()) {
+            value = (col && !col->defaultValue.empty()) ? col->defaultValue + "  (default)"
+                                                        : "(not set)";
+            if (!here) attr = Attr::Dim;
+        }
+        if (here) screen.put(fx - 1, y, '>', Attr::Bold);
+        screen.text(fx, y, fit(label + value, right - fx), attr);
+    }
     if (y + 1 < L.bodyBottom)
-        screen.text(3, y + 1,
-                    "Enter runs the one you are on. ^N adds another. Enter on "
-                    "its name in", Attr::Dim);
-    if (y + 2 < L.bodyBottom)
-        screen.text(3, y + 2, "the Model view edits it like any other field.",
-                    Attr::Dim);
+        screen.text(fx, y + 1, fit(listFocus ? "Tab: edit this run's fields"
+                                             : "Enter changes a field   ? explains it",
+                                   right - fx), Attr::Dim);
+}
+
+void renderPrompt(const TuiState& state, Screen& screen, const Layout& L) {
+    const int w = std::min(L.width - 10, 64);
+    const int h = 5;
+    const int x = (L.width - w) / 2;
+    const int y = (L.height - h) / 2;
+    clearFor(screen, x, y, w, h);
+    frame(screen, x, y, w, h,
+          state.promptFor() == PromptFor::SaveAs ? "save as" : "new model");
+    screen.text(x + 2, y + 1, "Name:", Attr::Bold);
+    screen.text(x + 8, y + 1, fitTail(state.promptText() + "_", w - 10));
+    screen.text(x + 2, y + 3,
+                fit("a bare name goes in the models folder; .des is added", w - 4),
+                Attr::Dim);
 }
 
 void renderResults(const TuiState& state, Screen& screen, const Layout& L) {
@@ -454,8 +478,7 @@ void renderPicker(const TuiState& state, Screen& screen, const Layout& L) {
     const int y = (L.height - h) / 2;
     clearFor(screen, x, y, w, h);
 
-    const std::string key = keyOfLine(state.buffer().lineAt(state.buffer().caret().line));
-    frame(screen, x, y, w, h, key);
+    frame(screen, x, y, w, h, state.pickerTitle());
 
     const int rows = h - 2;
     std::size_t first = 0;
@@ -514,7 +537,7 @@ void renderRunning(const TuiState& state, Screen& screen, const Layout& L) {
 
 void renderKeyMap(Screen& screen, const Layout& L) {
     const int w = std::min(L.width - 6, 72);
-    const int h = std::min(L.height - 4, 21);
+    const int h = std::min(L.height - 4, 22);
     const int x = (L.width - w) / 2;
     const int y = (L.height - h) / 2;
     clearFor(screen, x, y, w, h);
@@ -528,7 +551,8 @@ void renderKeyMap(Screen& screen, const Layout& L) {
         {"^L",           "list the values a field allows"},
         {"^J",           "jump to the first error"},
         {"^T",           "write a working model into an empty file"},
-        {"^R",           "run; ^N on the Runs tab adds another [Run]"},
+        {"^R",           "run; on the Runs tab A adds a run, Del deletes one"},
+        {"^N",           "a new model, asking for its name"},
         {"^W",           "save the results to a file"},
         {"^S",           "save the model"},
         {"^X ^C ^V",     "cut, copy, paste; ^A selects all"},
@@ -557,12 +581,24 @@ const char* hintFor(const TuiState& state) {
         case Overlay::Help:    return "any key returns";
         case Overlay::Picker:  return "Up/Down choose   Enter accept   Esc type it instead";
         case Overlay::Running: return "Esc  stop the run";
-        case Overlay::Confirm: return "(s)ave and quit   (d)iscard and quit   (c)ancel";
+        case Overlay::Confirm:
+            switch (state.confirmFor()) {
+                case ConfirmFor::Quit:         return "(s)ave and quit   (d)iscard and quit   (c)ancel";
+                case ConfirmFor::NewFile:      return "(s)ave first   (d)iscard changes   (c)ancel";
+                case ConfirmFor::DeleteRun:    return "(y)es, delete it   (n)o";
+                case ConfirmFor::OpenExisting: return "(y)es, open it   (n)o, another name";
+            }
+            break;
+        case Overlay::Prompt:  return "Enter accepts   Esc cancels";
         case Overlay::None:    break;
     }
     switch (state.view()) {
         case View::Flow:    return "Up/Down move   Enter opens that block in the text   F1 keys";
-        case View::Runs:    return "Up/Down choose   Enter runs it   ^N adds one   F1 keys";
+        case View::Runs:
+            if (state.runsFocus() == RunsFocus::Form)
+                return state.editingRunField() ? "Enter keeps it   Esc leaves it"
+                                               : "Up/Down field   Enter change   ? explain   Tab list   F1 keys";
+            return "Up/Down choose   Enter runs it   A adds   Del deletes   Tab fields   F1 keys";
         case View::Results: return "Up/Down scroll   ^W save   ^R run again   F1 keys";
         case View::Model:   break;
     }
@@ -603,6 +639,7 @@ void render(const TuiState& state, Screen& screen) {
             break;
         case Overlay::Picker:  renderPicker(state, screen, L);  break;
         case Overlay::Running: renderRunning(state, screen, L); break;
+        case Overlay::Prompt:  renderPrompt(state, screen, L);  break;
         case Overlay::Confirm: break;
         case Overlay::None:    break;
     }
