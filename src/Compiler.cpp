@@ -194,6 +194,23 @@ void checkStations(const ModelDocument& doc, std::vector<Diagnostic>& out) {
     }
 }
 
+void checkMatches(const ModelDocument& doc, std::vector<Diagnostic>& out) {
+    for (std::size_t r = 0; r < doc.rowCount("Match"); ++r) {
+        const std::string name = doc.cell("Match", r, "Name");
+        if (doc.cellOrDefault("Match", r, "Type") == "Attribute" &&
+            doc.cell("Match", r, "Attribute").empty())
+            report(out, Severity::Error, "Match", r, "Attribute",
+                   "Type = Attribute needs the Attribute to match on");
+        std::size_t lanes = 0;
+        for (std::size_t l = 0; l < doc.rowCount("MatchLane"); ++l)
+            if (doc.cell("MatchLane", l, "Match") == name) ++lanes;
+        if (lanes < 2 || lanes > 5)
+            report(out, Severity::Error, "Match", r, "Name",
+                   "match '" + name + "' has " + std::to_string(lanes) +
+                   " lane(s); it needs 2 to 5 [MatchLane] rows naming it");
+    }
+}
+
 // --- pass 2: references ----------------------------------------------------
 // "Block" is the pseudo-type meaning "any flowchart block", which is what an
 // exit column points at. Everything else names one real module type.
@@ -221,6 +238,17 @@ void checkReferences(const ModelDocument& doc, std::vector<Diagnostic>& out) {
                 // already spells "leaves the system" as a null next.
                 if (value.empty()) continue;
 
+                if (c.referencedType == "Block" && !isDeclared(doc, "Block", value) &&
+                    isDeclared(doc, "Match", value)) {
+                    std::string lanes;
+                    for (std::size_t l = 0; l < doc.rowCount("MatchLane"); ++l)
+                        if (doc.cell("MatchLane", l, "Match") == value)
+                            lanes += (lanes.empty() ? "" : ", ") + doc.cell("MatchLane", l, "Name");
+                    report(out, Severity::Error, type, r, c.id,
+                           "'" + value + "' is a Match -- route to one of its lanes" +
+                           (lanes.empty() ? std::string() : ": " + lanes));
+                    continue;
+                }
                 if (!isDeclared(doc, c.referencedType, value))
                     out.push_back(Diagnostic{
                         Severity::Error, SourceSpan{},
@@ -381,6 +409,8 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
                 else if (what == "Expression")   kind = RecordNode::What::Expression;
                 model.recordNamed(name, kind, cell("Attribute"), cell("Value"),
                                   cell("Statistic"));
+            } else if (type == "Match") {
+                model.match(name, cell("Type") == "Attribute" ? cell("Attribute") : std::string());
             } else if (type == "Station") {
                 model.stationBlock(name);
             } else if (type == "Route") {
@@ -402,6 +432,9 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
         else if (target == "EntityType") model.assignEntityType(block, value);
         else                             model.assignTo(block, field, value);
     }
+
+    for (std::size_t r = 0; r < doc.rowCount("MatchLane"); ++r)
+        model.matchLane(doc.cell("MatchLane", r, "Match"), doc.cell("MatchLane", r, "Name"));
 
     for (std::size_t r = 0; r < doc.rowCount("DecideBranch"); ++r) {
         const std::string decide    = doc.cell("DecideBranch", r, "Decide");
@@ -442,6 +475,11 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
         }
     }
 
+    for (std::size_t r = 0; r < doc.rowCount("MatchLane"); ++r) {
+        const std::string next = doc.cell("MatchLane", r, "Next");
+        if (!next.empty()) model.route(doc.cell("MatchLane", r, "Name"), next);
+    }
+
     // 7. Entry: where the first source feeds, or the first flowchart block.
     std::string entry;
     if (doc.rowCount("Create") > 0) entry = doc.cell("Create", 0, "Next");
@@ -479,8 +517,11 @@ std::vector<std::string> referenceCandidates(const ModelDocument& doc,
     };
 
     if (targetType == "Block") {
+        // v16: a Match is entered through its lanes, which are the blocks
+        // other blocks name; the Match itself is not somewhere to go.
         for (const ModuleSchema& s : reg.all())
-            if (s.kind == ModuleKind::Flowchart) rowNames(s.typeName);
+            if (s.kind == ModuleKind::Flowchart && s.typeName != "Match") rowNames(s.typeName);
+        rowNames("MatchLane");
     } else {
         rowNames(targetType);
     }
@@ -514,6 +555,7 @@ bool compileInto(const ModelDocument& doc, Model& model,
     checkExpressionCells(doc, diagnostics);
     checkVariables(doc, diagnostics);
     checkStations(doc, diagnostics);
+    checkMatches(doc, diagnostics);
     // The build cannot run with broken references or unparseable expressions,
     // so it is skipped and structureChecked stays false. Reporting a model as
     // checked when it was not is the failure this project keeps refusing.

@@ -347,6 +347,20 @@ std::vector<ModuleSchema> buildSchemas() {
                           "Where entities go next. Blank means they leave the "
                           "system.")}));
 
+    s.push_back(make("Match", ModuleKind::Flowchart,
+                     "Hold entities in 2 to 5 lanes until each lane has one -- "
+                     "or, by attribute, one with the same value -- then release "
+                     "one from every lane at once. Arena's Match module. The "
+                     "lanes are MatchLane rows; route entities to a lane's name.",
+                     {ident("Name", "This block's name. MatchLane rows name it."),
+                      enumeration("Type", {"Any", "Attribute"}, "Any",
+                                  "Any matches whoever is at the head of each "
+                                  "lane. Attribute only matches entities that "
+                                  "agree on Attribute."),
+                      text("Attribute",
+                           "Which attribute must agree, for example myZone. "
+                           "Only used when Type is Attribute.")}));
+
     s.push_back(make("Station", ModuleKind::Flowchart,
                      "A place entities arrive at. Arena's Station module. A "
                      "Route sends entities here by name, with no line drawn; "
@@ -395,6 +409,19 @@ std::vector<ModuleSchema> buildSchemas() {
                       ref("To", "Block",
                           "Where an entity taking this branch goes.")},
                      /*readOnly=*/false, /*parent=*/"Decide"));
+
+    s.push_back(make("MatchLane", ModuleKind::Child,
+                     "One lane of a Match: a queue other blocks route to by this "
+                     "row's Name, and the exit its matched entity leaves by. "
+                     "Arena draws these as a Match's numbered inputs and "
+                     "outputs. ROW ORDER is lane order.",
+                     {ref("Match", "Match", "Which Match this lane belongs to.", true),
+                      ident("Name", "The lane's name. Other blocks' Next names "
+                                    "it, and the report lists its queue under it."),
+                      ref("Next", "Block",
+                          "Where this lane's matched entity goes. Blank means "
+                          "it leaves the system.")},
+                     /*readOnly=*/false, /*parent=*/"Match"));
 
     s.push_back(make("AssignField", ModuleKind::Child,
                      "One field an Assign sets. Arena puts these in a grid "

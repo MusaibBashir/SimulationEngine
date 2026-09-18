@@ -351,4 +351,90 @@ void runV16Tests() {
                       x.message.find("Nowhere") != std::string::npos;
         check(warned && !hasErrors(d), "a Station nothing reaches is a warning, not an error");
     }
+
+    section("Match pairs entities with the same attribute");
+    {
+        // Riders at 0 and 10, zone 1. One car at 25, zone 1: it takes the
+        // rider who has waited longest. A zone-2 car at 30 matches nobody.
+        const std::string text =
+            "version = 1\n[Run]\nName = R\nLength = 100\n"
+            "[Create]\nName = Riders\nInterarrival = 10\nMax Arrivals = 2\nNext = SR\n"
+            "[Assign]\nName = SR\nNext = RL\n"
+            "[AssignField]\nAssign = SR\nTarget = Attribute\nName = zone\nValue = 1\n"
+            "[AssignField]\nAssign = SR\nTarget = Attribute\nName = t0\nValue = TNOW\n"
+            "[Create]\nName = Cars\nInterarrival = 5\nFirst At = 25\nMax Arrivals = 2\nNext = SC\n"
+            "[Assign]\nName = SC\nNext = CL\n"
+            "[AssignField]\nAssign = SC\nTarget = Attribute\nName = zone\nValue = TNOW / 25\n"
+            "[Match]\nName = M\nType = Attribute\nAttribute = zone\n"
+            "[MatchLane]\nMatch = M\nName = RL\nNext = Picked\n"
+            "[MatchLane]\nMatch = M\nName = CL\nNext = Gone\n"
+            "[Record]\nName = Picked\nWhat = TimeInterval\nAttribute = t0\n"
+            "[Dispose]\nName = Gone\n";
+        SimulationSystem sim(1);
+        std::vector<Diagnostic> d;
+        check(compileInto(readDocument(text).document, sim.model(), d), "it compiles");
+        sim.stopAt(100).execute();
+        const auto& picked = sim.model().nodeAs<RecordNode>("Picked");
+        check(picked.count() == 1, "one matching car picks up exactly one rider");
+        check(picked.average() == 25.0, "the rider who has waited longest goes first");
+        const auto& riders = sim.model().nodeAs<MatchLaneNode>("RL");
+        const auto& cars = sim.model().nodeAs<MatchLaneNode>("CL");
+        check(riders.waiting() == 1, "the other rider still waits");
+        check(cars.waiting() == 1, "and so does the car from another zone");
+        check(riders.averageWait() == 25.0 && cars.averageWait() == 0.0,
+              "each lane measures its own waits");
+        // Rider area: 1 over [0,10), 2 over [10,25), 1 over [25,100) = 10+30+75.
+        checkClose(riders.averageWaiting(100.0), 115.0 / 100.0, 1e-12,
+                   "and its time-average length");
+    }
+    {
+        const std::string anyText =
+            "version = 1\n[Run]\nName = R\nLength = 50\n"
+            "[Create]\nName = A\nInterarrival = 10\nNext = LA\n"
+            "[Create]\nName = B\nInterarrival = 20\nNext = LB\n"
+            "[Match]\nName = M\n"
+            "[MatchLane]\nMatch = M\nName = LA\nNext = Out\n"
+            "[MatchLane]\nMatch = M\nName = LB\nNext = Out\n"
+            "[Dispose]\nName = Out\n";
+        SimulationSystem sim(1);
+        std::vector<Diagnostic> d;
+        check(compileInto(readDocument(anyText).document, sim.model(), d), "a Match of Any compiles");
+        sim.stopAt(45).execute();
+        check(sim.model().nodeAs<MatchNode>("M").matches() == 3,
+              "Any matches whoever is at the head: B's arrivals at 0, 20, 40");
+        // stopAt ends after the first event past the limit, so A's arrival
+        // at 50 happens: A at 30, 40 and 50 are left.
+        check(sim.queueLength("LA") == 3.0, "NQ reads a lane");
+    }
+    {
+        std::vector<Diagnostic> d;
+        Model m;
+        compileInto(readDocument("version = 1\n[Create]\nName = C\nInterarrival = 1\nNext = L\n"
+                                 "[Match]\nName = M\n[MatchLane]\nMatch = M\nName = L\n").document, m, d);
+        check(hasErrors(d), "a Match needs at least two lanes");
+        d.clear();
+        Model toMatch;
+        compileInto(readDocument("version = 1\n[Create]\nName = C\nInterarrival = 1\nNext = M\n"
+                                 "[Match]\nName = M\n[MatchLane]\nMatch = M\nName = A\n"
+                                 "[MatchLane]\nMatch = M\nName = B\n").document, toMatch, d);
+        bool named = false;
+        for (const Diagnostic& x : d) named |= x.message.find("one of its lanes: A, B") != std::string::npos;
+        check(named, "routing to the Match itself names its lanes");
+    }
+    {
+        // Cars loop back into their lane for ever; that is a population, not a
+        // routing loop, and must compile.
+        const std::string loop =
+            "version = 1\n[Run]\nName = R\nLength = 30\n"
+            "[Create]\nName = Riders\nInterarrival = 1\nNext = RL\n"
+            "[Create]\nName = Cars\nInterarrival = 1\nMax Arrivals = 1\nPer Arrival = 2\nNext = CL\n"
+            "[Match]\nName = M\n"
+            "[MatchLane]\nMatch = M\nName = RL\nNext = Out\n"
+            "[MatchLane]\nMatch = M\nName = CL\nNext = Trip\n"
+            "[Delay]\nName = Trip\nDuration = 3\nNext = CL\n"
+            "[Dispose]\nName = Out\n";
+        std::vector<Diagnostic> d;
+        Model m;
+        check(compileInto(readDocument(loop).document, m, d), "cars circulating through a Match lane compile");
+    }
 }

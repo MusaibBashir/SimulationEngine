@@ -20,6 +20,7 @@
 #include "Nodes.hpp"
 #include "Create.hpp"
 #include "Transfer.hpp"
+#include "Match.hpp"
 #include "Station.hpp"
 #include "Distribution.hpp"
 #include "ModelError.hpp"
@@ -232,6 +233,10 @@ public:
     Model& stationBlock(const std::string& name);
     Model& routeBlock(const std::string& name, const std::string& timeText);
     Model& routeTo(const std::string& routeName, const std::string& stationName);
+    // v16: Arena's Match. `attribute` empty means Any. Lanes are blocks of
+    // their own, added in lane order; other blocks route to a lane by name.
+    Model& match(const std::string& name, const std::string& attribute);
+    Model& matchLane(const std::string& matchName, const std::string& laneName);
 
     // --- wiring ---
     Model& route(const std::string& from, const std::string& to);

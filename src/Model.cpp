@@ -441,6 +441,23 @@ Model& Model::routeTo(const std::string& routeName, const std::string& stationNa
     return *this;
 }
 
+Model& Model::match(const std::string& name, const std::string& attribute) {
+    requireUnique(name);
+    // Not through add(): nothing enters a Match by its own name, so it must
+    // never become the default entry block.
+    m_nodes.push_back(std::make_unique<MatchNode>(name, attribute));
+    return *this;
+}
+
+Model& Model::matchLane(const std::string& matchName, const std::string& laneName) {
+    requireUnique(laneName);
+    MatchNode& owner = nodeAs<MatchNode>(matchName);
+    auto lane = std::make_unique<MatchLaneNode>(laneName, &owner);
+    owner.addLane(lane.get());
+    add(std::move(lane));
+    return *this;
+}
+
 Model& Model::dispose(const std::string& name) {
     requireUnique(name);
     add(std::make_unique<DisposeNode>(name));
@@ -745,6 +762,11 @@ std::vector<Diagnostic> Model::checkStructure() const {
         }
     }
     if (m_sources.empty())  fail("model has no arrival source -- call arrivals() or source()");
+    for (const auto& n : m_nodes)
+        if (const auto* m = dynamic_cast<const MatchNode*>(n.get()))
+            if (m->laneCount() < 2 || m->laneCount() > 5)
+                fail("match '" + m->name() + "' has " + std::to_string(m->laneCount()) +
+                     " lane(s); a Match needs 2 to 5 [MatchLane] rows");
     if (m_entry == nullptr) fail("model has no entry block -- call entryAt()");
     for (const CreateNode* c : m_sources)
         if (c->next() == nullptr)
@@ -759,6 +781,10 @@ std::vector<Diagnostic> Model::checkStructure() const {
             static void dfs(const INode* n, std::set<const INode*>& visiting,
                             std::set<const INode*>& done, std::string& loopAt) {
                 if (!n || done.count(n) || !loopAt.empty()) return;
+                // v16: a loop back into a Match lane is a POPULATION waiting
+                // for partners -- cars returning to wait for riders -- not
+                // entities that can never leave. Arena allows it; so does this.
+                if (dynamic_cast<const MatchLaneNode*>(n)) { done.insert(n); return; }
                 if (!visiting.insert(n).second) { loopAt = n->name(); return; }
                 if (auto* d = dynamic_cast<const DecideNode*>(n))
                     dfs(d->trueBranch(), visiting, done, loopAt);

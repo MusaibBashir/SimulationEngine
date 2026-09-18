@@ -52,6 +52,7 @@ add_library(des_engine STATIC
     src/Nodes.cpp
     src/Create.cpp
     src/Transfer.cpp
+    src/Match.cpp
     src/Node.cpp
     src/Model.cpp
     src/SimulationSystem.cpp

@@ -217,7 +217,10 @@ void NodeContext::destroy(Entity* e) { m_sim.destroyEntity(e->id()); }
 double SimulationSystem::queueLength(const std::string& blockName) const {
     if (const Station* s = m_model.station(blockName))
         return static_cast<double>(s->queue().length());
-    throw ModelError("NQ(" + blockName + "): no Process block named '" + blockName + "'");
+    if (const auto* l = dynamic_cast<const MatchLaneNode*>(m_model.node(blockName)))
+        return static_cast<double>(l->waiting());
+    throw ModelError("NQ(" + blockName + "): no Process block or Match lane named '" +
+                     blockName + "'");
 }
 
 double SimulationSystem::resourceBusy(const std::string& name) const {
@@ -312,9 +315,14 @@ void SimulationSystem::refreshState() {
     // reported a queue length and a WIP of exactly zero while 32 balls sat
     // waiting. A statistic that is silently zero is worse than one that is
     // missing, because it gets copied into an answer.
-    for (std::size_t i = 0; i < m_model.nodeCount(); ++i)
+    for (std::size_t i = 0; i < m_model.nodeCount(); ++i) {
         if (auto* b = dynamic_cast<const BatchNode*>(&m_model.nodeAt(i)))
             queued += static_cast<int>(b->waitingForBatch());
+        // v16: the same reasoning for a Match lane -- riders waiting for a car
+        // are waiting, whatever the block is called.
+        if (auto* l = dynamic_cast<const MatchLaneNode*>(&m_model.nodeAt(i)))
+            queued += static_cast<int>(l->waiting());
+    }
 
     // WIP is every entity the system is holding, wherever it is -- in service,
     // in a queue, on a conveyor, waiting for a batch. Counting only queues and
