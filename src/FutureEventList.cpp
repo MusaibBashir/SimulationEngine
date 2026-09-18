@@ -61,4 +61,9 @@ SimTime FutureEventList::nextEventTime() const {
     return m_fel.top().time();
 }
 
+const EventNotice& FutureEventList::peekImminent() const {
+    assert(!m_fel.empty());
+    return m_fel.top();
+}
+
 }  // namespace des
