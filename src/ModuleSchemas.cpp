@@ -322,15 +322,27 @@ std::vector<ModuleSchema> buildSchemas() {
                      "Arena's Record module.",
                      {ident("Name", "This block's name, and the name the "
                                     "statistic is reported under."),
-                      enumeration("What", {"Count", "Attribute", "TimeInSystem"},
+                      enumeration("What", {"Count", "TimeInterval", "Expression",
+                                           "Attribute", "TimeInSystem"},
                                   "Count",
-                                  "Count tallies entities passing. Attribute "
-                                  "records the value of Attribute. TimeInSystem "
+                                  "Count adds Value (1 unless set) for each entity "
+                                  "passing. TimeInterval records TNOW minus "
+                                  "Attribute -- how long since that time was "
+                                  "stamped. Expression records Value. Attribute "
+                                  "records the attribute itself. TimeInSystem "
                                   "records how long the entity has been in the "
                                   "model."),
                       text("Attribute",
-                           "Which attribute to record. Only used when What is "
-                           "Attribute."),
+                           "Which attribute. Used by TimeInterval (the time it "
+                           "holds) and Attribute (its value)."),
+                      expression("Value",
+                                 "Count: how much to add, 1 if blank. "
+                                 "Expression: the value to record, for example "
+                                 "metSLA.", false),
+                      text("Statistic",
+                           "The name it is reported under -- Arena's Counter "
+                           "Name or Tally Name. Several Records may share one. "
+                           "Blank means this block's Name."),
                       ref("Next", "Block",
                           "Where entities go next. Blank means they leave the "
                           "system.")}));

@@ -220,6 +220,11 @@ public:
     Model& record(const std::string& name);                              // count
     Model& recordAttribute(const std::string& name, const std::string& attributeName);
     Model& recordTimeInSystem(const std::string& name);
+    // v16: the document's Record. `valueText` may be empty; `statistic` is the
+    // name it is reported under.
+    Model& recordNamed(const std::string& name, RecordNode::What what,
+                       const std::string& attribute, const std::string& valueText,
+                       const std::string& statistic);
     Model& dispose(const std::string& name);
 
     // --- wiring ---

@@ -6,6 +6,7 @@
 #include "Parser.hpp"
 #include "QueueRule.hpp"
 #include <cassert>
+#include <map>
 #include <set>
 #include <sstream>
 
@@ -409,6 +410,17 @@ Model& Model::recordTimeInSystem(const std::string& name) {
     return *this;
 }
 
+Model& Model::recordNamed(const std::string& name, RecordNode::What what,
+                          const std::string& attribute, const std::string& valueText,
+                          const std::string& statistic) {
+    requireUnique(name);
+    auto r = std::make_unique<RecordNode>(name, what, attribute,
+                                          valueText.empty() ? ExpressionPtr() : ex(valueText));
+    r->setStatistic(statistic.empty() ? name : statistic);
+    add(std::move(r));
+    return *this;
+}
+
 Model& Model::dispose(const std::string& name) {
     requireUnique(name);
     add(std::make_unique<DisposeNode>(name));
@@ -640,9 +652,12 @@ std::vector<Diagnostic> Model::checkExpressions() const {
             d->durationExpression().validate(vc, problems);
         else if (const auto* a = dynamic_cast<const AssignNode*>(n.get()))
             for (const AssignNode::Rule& r : a->rules()) r.value->validate(vc, problems);
-        else if (const auto* dec = dynamic_cast<const DecideNode*>(n.get()))
+        else if (const auto* dec = dynamic_cast<const DecideNode*>(n.get())) {
             for (const DecideNode::Branch& b : dec->branches())
                 if (b.condition) b.condition->validate(vc, problems);
+        } else if (const auto* rec = dynamic_cast<const RecordNode*>(n.get())) {
+            if (rec->valueExpression()) rec->valueExpression()->validate(vc, problems);
+        }
     }
     return problems;
 }
@@ -690,6 +705,23 @@ std::vector<Diagnostic> Model::checkStructure() const {
     };
 
     if (m_nodes.empty())    fail("model has no blocks");
+
+    // One name, one kind: a total and an average cannot be pooled into one
+    // number that means anything.
+    {
+        std::map<std::string, const RecordNode*> firstOf;
+        for (const auto& n : m_nodes) {
+            const auto* r = dynamic_cast<const RecordNode*>(n.get());
+            if (r == nullptr || r->statistic().empty()) continue;
+            const auto it = firstOf.find(r->statistic());
+            if (it == firstOf.end()) { firstOf.emplace(r->statistic(), r); continue; }
+            if (it->second->isCounter() != r->isCounter())
+                fail("statistic '" + r->statistic() + "' is written by '" + it->second->name() +
+                     "' as a " + (it->second->isCounter() ? "counter" : "tally") + " and by '" +
+                     r->name() + "' as a " + (r->isCounter() ? "counter" : "tally") +
+                     " -- a count and an average cannot share one name");
+        }
+    }
     if (m_sources.empty())  fail("model has no arrival source -- call arrivals() or source()");
     if (m_entry == nullptr) fail("model has no entry block -- call entryAt()");
     for (const CreateNode* c : m_sources)

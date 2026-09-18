@@ -17,6 +17,7 @@
 
 using namespace des;
 using des_test::check;
+using des_test::checkClose;
 using des_test::modelPath;
 using des_test::section;
 
@@ -272,5 +273,45 @@ void runV16Tests() {
         bool refused = false;
         try { m.assignVariable("A", "T", "1"); } catch (const ModelError&) { refused = true; }
         check(refused, "assigning to an array is refused, for now");
+    }
+
+    section("Records share a statistic, and TimeInterval measures from an attribute");
+    {
+        const std::string text =
+            "version = 1\n[Run]\nName = R\nLength = 100\n"
+            "[Create]\nName = C\nInterarrival = 10\nMax Arrivals = 3\nNext = S\n"
+            "[Assign]\nName = S\nNext = D\n"
+            "[AssignField]\nAssign = S\nTarget = Attribute\nName = t0\nValue = TNOW\n"
+            "[Delay]\nName = D\nDuration = 2\nNext = W\n"
+            "[Record]\nName = W\nWhat = TimeInterval\nAttribute = t0\nStatistic = Wait\nNext = K\n"
+            "[Record]\nName = K\nWhat = Count\nValue = 2\nStatistic = Trips\nNext = E\n"
+            "[Record]\nName = E\nWhat = Expression\nValue = t0 <= 5\n";
+        SimulationSystem sim(1);
+        std::vector<Diagnostic> d;
+        check(compileInto(readDocument(text).document, sim.model(), d), "it compiles");
+        sim.stopAt(100).execute();
+        check(sim.model().nodeAs<RecordNode>("W").average() == 2.0, "every interval is 2");
+        check(sim.model().nodeAs<RecordNode>("W").statistic() == "Wait", "under its statistic's name");
+        check(sim.model().nodeAs<RecordNode>("K").total() == 6.0, "3 passes x Value 2 = 6");
+        checkClose(sim.model().nodeAs<RecordNode>("E").average(), 1.0 / 3.0, 1e-12,
+                   "an Expression Record averages its value: one of three stamped by 5");
+        check(sim.model().nodeAs<RecordNode>("E").statistic() == "E",
+              "an unnamed statistic is the block's name");
+    }
+    {
+        std::vector<Diagnostic> d;
+        Model m;
+        compileInto(readDocument(
+            "version = 1\n[Create]\nName = C\nInterarrival = 1\nNext = A\n"
+            "[Record]\nName = A\nWhat = Count\nStatistic = X\nNext = B\n"
+            "[Record]\nName = B\nWhat = TimeInSystem\nStatistic = X\n").document, m, d);
+        check(hasErrors(d), "a counter and a tally may not share a name");
+        d.clear();
+        Model shared;
+        compileInto(readDocument(
+            "version = 1\n[Create]\nName = C\nInterarrival = 1\nNext = A\n"
+            "[Record]\nName = A\nWhat = TimeInSystem\nStatistic = X\nNext = B\n"
+            "[Record]\nName = B\nWhat = TimeInSystem\nStatistic = X\n").document, shared, d);
+        check(!hasErrors(d), "two tallies may");
     }
 }

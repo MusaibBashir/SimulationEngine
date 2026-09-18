@@ -257,15 +257,28 @@ public:
 // ---------------------------------------------------------------------------
 class RecordNode : public INode {
 public:
-    enum class What { Count, Attribute, TimeInSystem };
+    // v16: TimeInterval records TNOW minus an attribute (Arena's Time
+    // Interval), Expression records Value. Count adds Value, 1 by default.
+    enum class What { Count, Attribute, TimeInSystem, TimeInterval, Expression };
 private:
     What m_what;
     std::string m_attribute;
+    ExpressionPtr m_value;          // v16: Count's amount, Expression's value
+    std::string m_statistic;        // v16: "" for a Record built in C++
     long long m_count{0};
     double m_total{0.0}, m_min{0.0}, m_max{0.0};
 public:
     explicit RecordNode(std::string name);
     RecordNode(std::string name, std::string attribute);
+    RecordNode(std::string name, What what, std::string attribute, ExpressionPtr value);
+
+    // A Record NAMED into a statistic is reported under that name, pooled with
+    // every other Record writing to it -- Arena's Counter Name and Tally Name.
+    void setStatistic(std::string name) { m_statistic = std::move(name); }
+    const std::string& statistic() const { return m_statistic; }
+    What what() const { return m_what; }
+    bool isCounter() const { return m_what == What::Count; }
+    const IExpression* valueExpression() const { return m_value.get(); }
     // Returns a unique_ptr because INode is deliberately non-copyable: a node
     // is an identity in a graph, not a value. Copying one would give two nodes
     // that other nodes' next-pointers disagree about.

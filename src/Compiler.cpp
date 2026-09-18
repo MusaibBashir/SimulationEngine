@@ -352,9 +352,13 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
                     model.separate(name);
             } else if (type == "Record") {
                 const std::string what = cell("What");
-                if (what == "Attribute")           model.recordAttribute(name, cell("Attribute"));
-                else if (what == "TimeInSystem")   model.recordTimeInSystem(name);
-                else                               model.record(name);
+                RecordNode::What kind = RecordNode::What::Count;
+                if (what == "Attribute")         kind = RecordNode::What::Attribute;
+                else if (what == "TimeInSystem") kind = RecordNode::What::TimeInSystem;
+                else if (what == "TimeInterval") kind = RecordNode::What::TimeInterval;
+                else if (what == "Expression")   kind = RecordNode::What::Expression;
+                model.recordNamed(name, kind, cell("Attribute"), cell("Value"),
+                                  cell("Statistic"));
             } else if (type == "Dispose") {
                 model.dispose(name);
             }
