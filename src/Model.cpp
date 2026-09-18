@@ -421,6 +421,26 @@ Model& Model::recordNamed(const std::string& name, RecordNode::What what,
     return *this;
 }
 
+Model& Model::stationBlock(const std::string& name) {
+    requireUnique(name);
+    add(std::make_unique<StationNode>(name));
+    return *this;
+}
+
+Model& Model::routeBlock(const std::string& name, const std::string& timeText) {
+    requireUnique(name);
+    add(std::make_unique<RouteNode>(name, ex(timeText)));
+    return *this;
+}
+
+Model& Model::routeTo(const std::string& routeName, const std::string& stationName) {
+    auto* s = dynamic_cast<StationNode*>(node(stationName));
+    if (s == nullptr)
+        throw ModelError("route '" + routeName + "': '" + stationName + "' is not a Station");
+    nodeAs<RouteNode>(routeName).setDestination(s);
+    return *this;
+}
+
 Model& Model::dispose(const std::string& name) {
     requireUnique(name);
     add(std::make_unique<DisposeNode>(name));
@@ -657,6 +677,8 @@ std::vector<Diagnostic> Model::checkExpressions() const {
                 if (b.condition) b.condition->validate(vc, problems);
         } else if (const auto* rec = dynamic_cast<const RecordNode*>(n.get())) {
             if (rec->valueExpression()) rec->valueExpression()->validate(vc, problems);
+        } else if (const auto* rt = dynamic_cast<const RouteNode*>(n.get())) {
+            rt->timeExpression().validate(vc, problems);
         }
     }
     return problems;

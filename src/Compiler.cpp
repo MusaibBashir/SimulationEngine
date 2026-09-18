@@ -172,6 +172,28 @@ std::vector<std::string> arrayNamesOf(const ModelDocument& doc) {
     return names;
 }
 
+// v16: a Station nothing names is a landing pad no Route flies to. Legal --
+// it may be half-built -- and worth a word, because a misspelt Destination on
+// the Route is the usual reason and that one IS reported as an error there.
+void checkStations(const ModelDocument& doc, std::vector<Diagnostic>& out) {
+    const ModuleRegistry& reg = ModuleRegistry::instance();
+    std::vector<std::string> named;
+    for (const std::string& type : doc.types()) {
+        const ModuleSchema* schema = reg.find(type);
+        if (schema == nullptr) continue;
+        for (std::size_t r = 0; r < doc.rowCount(type); ++r)
+            for (const Column& c : schema->columns)
+                if (c.type == ColumnType::Reference) named.push_back(doc.cell(type, r, c.id));
+    }
+    for (std::size_t r = 0; r < doc.rowCount("Station"); ++r) {
+        const std::string name = doc.cell("Station", r, "Name");
+        if (!name.empty() && std::find(named.begin(), named.end(), name) == named.end())
+            report(out, Severity::Warning, "Station", r, "Name",
+                   "nothing arrives at station '" + name + "' -- no Route's Destination "
+                   "or block's Next names it");
+    }
+}
+
 // --- pass 2: references ----------------------------------------------------
 // "Block" is the pseudo-type meaning "any flowchart block", which is what an
 // exit column points at. Everything else names one real module type.
@@ -359,6 +381,10 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
                 else if (what == "Expression")   kind = RecordNode::What::Expression;
                 model.recordNamed(name, kind, cell("Attribute"), cell("Value"),
                                   cell("Statistic"));
+            } else if (type == "Station") {
+                model.stationBlock(name);
+            } else if (type == "Route") {
+                model.routeBlock(name, cell("Route Time"));
             } else if (type == "Dispose") {
                 model.dispose(name);
             }
@@ -396,6 +422,10 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
             const std::string next = doc.cell(type, r, "Next");
             if (!next.empty()) model.route(name, next);
 
+            if (type == "Route") {
+                const std::string to = doc.cell(type, r, "Destination");
+                if (!to.empty()) model.routeTo(name, to);
+            }
             if (type == "Separate") {
                 const std::string dup = doc.cell(type, r, "Duplicate");
                 if (!dup.empty()) model.routeDuplicate(name, dup);
@@ -483,6 +513,7 @@ bool compileInto(const ModelDocument& doc, Model& model,
     checkReferences(doc, diagnostics);
     checkExpressionCells(doc, diagnostics);
     checkVariables(doc, diagnostics);
+    checkStations(doc, diagnostics);
     // The build cannot run with broken references or unparseable expressions,
     // so it is skipped and structureChecked stays false. Reporting a model as
     // checked when it was not is the failure this project keeps refusing.

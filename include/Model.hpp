@@ -19,6 +19,7 @@
 #include "Node.hpp"
 #include "Nodes.hpp"
 #include "Create.hpp"
+#include "Transfer.hpp"
 #include "Station.hpp"
 #include "Distribution.hpp"
 #include "ModelError.hpp"
@@ -226,6 +227,11 @@ public:
                        const std::string& attribute, const std::string& valueText,
                        const std::string& statistic);
     Model& dispose(const std::string& name);
+    // v16: Arena's Station and Route. A Route goes to its destination Station
+    // after the route time; it has no Next.
+    Model& stationBlock(const std::string& name);
+    Model& routeBlock(const std::string& name, const std::string& timeText);
+    Model& routeTo(const std::string& routeName, const std::string& stationName);
 
     // --- wiring ---
     Model& route(const std::string& from, const std::string& to);

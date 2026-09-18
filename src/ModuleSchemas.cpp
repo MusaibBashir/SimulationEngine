@@ -347,6 +347,27 @@ std::vector<ModuleSchema> buildSchemas() {
                           "Where entities go next. Blank means they leave the "
                           "system.")}));
 
+    s.push_back(make("Station", ModuleKind::Flowchart,
+                     "A place entities arrive at. Arena's Station module. A "
+                     "Route sends entities here by name, with no line drawn; "
+                     "from here they carry on to Next. Takes no time.",
+                     {ident("Name", "The station's name, which a Route's "
+                                    "Destination names."),
+                      ref("Next", "Block",
+                          "Where arriving entities go. Blank means they leave "
+                          "the system.")}));
+
+    s.push_back(make("Route", ModuleKind::Flowchart,
+                     "Travel to a Station. Arena's Route module. The entity is "
+                     "away for Route Time, then arrives at Destination. A Route "
+                     "has no Next -- its Destination is where it goes.",
+                     {ident("Name", "This block's name."),
+                      expression("Route Time",
+                                 "How long the trip takes, for example "
+                                 "TravelTime(myZone, 1) * UNIF(0.85, 1.15)."),
+                      ref("Destination", "Station",
+                          "The Station it arrives at.", true)}));
+
     s.push_back(make("Dispose", ModuleKind::Flowchart,
                      "Where entities leave the model. Arena's Dispose module. "
                      "A block whose Next is blank disposes of its entities too; "

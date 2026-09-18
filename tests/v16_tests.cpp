@@ -314,4 +314,41 @@ void runV16Tests() {
             "[Record]\nName = B\nWhat = TimeInSystem\nStatistic = X\n").document, shared, d);
         check(!hasErrors(d), "two tallies may");
     }
+
+    section("A Route delivers to its Station after the route time");
+    {
+        const std::string text =
+            "version = 1\n[Run]\nName = R\nLength = 100\n"
+            "[Create]\nName = C\nInterarrival = 10\nMax Arrivals = 2\nNext = Go\n"
+            "[Route]\nName = Go\nRoute Time = 3\nDestination = There\n"
+            "[Station]\nName = There\nNext = T\n"
+            "[Record]\nName = T\nWhat = TimeInSystem\n";
+        SimulationSystem sim(1);
+        std::vector<Diagnostic> d;
+        check(compileInto(readDocument(text).document, sim.model(), d), "it compiles");
+        check(!hasErrors(d) && d.empty(), "with nothing to warn about");
+        sim.stopAt(100).execute();
+        check(sim.model().nodeAs<RecordNode>("T").average() == 3.0, "3 on the road");
+        check(sim.model().nodeAs<RecordNode>("T").count() == 2, "both arrived");
+        check(sim.model().nodeAs<RouteNode>("Go").travelled() == 2, "the Route counts its trips");
+        checkClose(sim.model().nodeAs<RouteNode>("Go").averageInTransit(100.0), 0.06, 1e-12,
+                   "and 6 entity-units on the road over 100 is 0.06 on average");
+    }
+    {
+        std::vector<Diagnostic> d;
+        Model m;
+        compileInto(readDocument("version = 1\n[Create]\nName = C\nInterarrival = 1\nNext = Go\n"
+                                 "[Route]\nName = Go\nRoute Time = 1\nDestination = C\n").document, m, d);
+        check(hasErrors(d), "a Route must go to a Station");
+        d.clear();
+        Model lonely;
+        compileInto(readDocument("version = 1\n[Create]\nName = C\nInterarrival = 1\nNext = O\n"
+                                 "[Dispose]\nName = O\n[Station]\nName = Nowhere\n").document,
+                    lonely, d);
+        bool warned = false;
+        for (const Diagnostic& x : d)
+            warned |= x.severity == Severity::Warning &&
+                      x.message.find("Nowhere") != std::string::npos;
+        check(warned && !hasErrors(d), "a Station nothing reaches is a warning, not an error");
+    }
 }
