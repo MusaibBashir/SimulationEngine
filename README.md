@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1732/1732 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1740/1740 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -429,8 +429,11 @@ Up/Down walks the blocks:
                                                       |Riders_Waiting|
 ```
 
-`L` switches to the list. `P` saves it as a PNG in an `images` folder beside
-the model and opens it. Graphviz is needed for the graph; the installer offers
+Left/Right pan a graph wider than the window, with a slider along the bottom
+edge showing which slice is in view (and one down the right for a tall graph);
+Home comes back to the chosen block, and clicking a box chooses it. `L`
+switches to the list. `P` saves it as a PNG in an `images` folder beside the
+model and opens it. Double-clicking a `.des` file opens the program maximized. Graphviz is needed for the graph; the installer offers
 to install it (`winget install Graphviz.Graphviz` by hand), and without it the
 tab shows the list.
 
@@ -647,7 +650,7 @@ sim/
 ├── cli/             the des command: check, run and regress
 ├── tui/             des_tui: the terminal UI, and the only platform code
 ├── examples/models/ hand-written .des models
-├── tests/           1732 unit checks
+├── tests/           1740 unit checks
 ├── include/         50 headers
 └── src/             42 sources
 ```

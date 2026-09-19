@@ -85,6 +85,22 @@ struct TableGrid {
 };
 TableGrid tableGridFor(const TuiState& state, const Layout& L);
 
+// v16.2: which part of the flow graph is on screen, and where its sliders are.
+// Shared by the renderer and the mouse, like tableGridFor().
+struct FlowViewport {
+    bool shown{false};        // false: no graph (list view, or no Graphviz)
+    int  x{0}, y{0};          // the graph cell at the view's top-left
+    int  cols{0}, rows{0};    // how much of the graph fits
+    int  width{0}, height{0}; // the whole graph
+    int  top{0};              // screen row of the view's first line
+    // The horizontal slider sits on the frame's bottom edge: '<' at hLeft,
+    // '>' at hRight, the track between. The vertical one on its right edge.
+    bool hSlider{false}, vSlider{false};
+    int  hLeft{0}, hRight{0}, hRow{0};
+    int  vTop{0}, vBottom{0}, vColumn{0};
+};
+FlowViewport flowViewportFor(const TuiState& state, const Layout& L);
+
 void render(const TuiState& state, Screen& screen);
 
 }  // namespace des

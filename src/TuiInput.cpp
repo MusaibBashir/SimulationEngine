@@ -160,7 +160,22 @@ bool handlePalette(TuiState& state, Key key) {
     return true;
 }
 
-bool handleFlow(TuiState& state, Key key) {
+// v16.2: move the graph's view by (dx, dy) cells, from wherever it is now.
+void panFlow(TuiState& state, int dx, int dy, int width, int height) {
+    const FlowViewport v = flowViewportFor(state, layoutFor(state, width, height));
+    if (!v.shown) return;
+    state.setFlowView(std::max(0, std::min(v.x + dx, std::max(0, v.width - v.cols))),
+                      std::max(0, std::min(v.y + dy, std::max(0, v.height - v.rows))));
+}
+
+bool handleFlow(TuiState& state, Key key, int width, int height) {
+    const int step = std::max(8, (width - 2) / 3);
+    switch (key.kind) {
+        case KeyKind::Left:     panFlow(state, -step, 0, width, height); return true;
+        case KeyKind::Right:    panFlow(state, step, 0, width, height); return true;
+        case KeyKind::Home:     state.followFlowCursor(); return true;
+        default: break;
+    }
     switch (key.kind) {
         case KeyKind::Up:       state.stepFlow(-1); break;
         case KeyKind::Down:     state.stepFlow(1); break;
@@ -335,7 +350,12 @@ bool handleMouse(TuiState& state, Key key, int width, int height) {
                 if (key.x < L.dividerX) state.stepPalette(by);
                 else                    state.buffer().moveBy(by, 0);
                 break;
-            case View::Flow:    state.stepFlow(by); break;
+            case View::Flow:
+                // Shift+wheel -- and a sideways wheel, which arrives as one --
+                // pans; the plain wheel still walks the blocks.
+                if (key.shift) panFlow(state, static_cast<int>(by) * 4, 0, width, height);
+                else           state.stepFlow(by);
+                break;
             case View::Runs:    state.stepRun(by); break;
             case View::Results: state.scrollResults(by); break;
             case View::Tables:
@@ -408,7 +428,55 @@ bool handleMouse(TuiState& state, Key key, int width, int height) {
     if (state.view() != View::Model) {
         const int row = key.y - (L.bodyTop + 2);
         if (row < 0) return true;
-        if (state.view() == View::Flow)      state.stepFlow(row - static_cast<long long>(state.flowCursor()));
+        if (state.view() == View::Flow) {
+            const FlowViewport v = flowViewportFor(state, L);
+            if (!v.shown) {
+                state.stepFlow(row - static_cast<long long>(state.flowCursor()));
+                return true;
+            }
+            const int step = std::max(8, v.cols / 3);
+            // The horizontal slider: an end steps, the track jumps there.
+            if (v.hSlider && key.y == v.hRow && key.x >= v.hLeft && key.x <= v.hRight) {
+                if (key.x == v.hLeft)       panFlow(state, -step, 0, width, height);
+                else if (key.x == v.hRight) panFlow(state, step, 0, width, height);
+                else {
+                    const int track = v.hRight - v.hLeft - 1;
+                    const int at = (key.x - v.hLeft - 1) * v.width / std::max(1, track) - v.cols / 2;
+                    state.setFlowView(std::max(0, std::min(at, v.width - v.cols)), v.y);
+                }
+                return true;
+            }
+            if (v.vSlider && key.x == v.vColumn && key.y >= v.vTop && key.y <= v.vBottom) {
+                const int vstep = std::max(3, v.rows / 3);
+                if (key.y == v.vTop)         panFlow(state, 0, -vstep, width, height);
+                else if (key.y == v.vBottom) panFlow(state, 0, vstep, width, height);
+                else {
+                    const int track = v.vBottom - v.vTop - 1;
+                    const int at = (key.y - v.vTop - 1) * v.height / std::max(1, track) - v.rows / 2;
+                    state.setFlowView(v.x, std::max(0, std::min(at, v.height - v.rows)));
+                }
+                return true;
+            }
+            // A click on a box chooses that block.
+            const int gx = v.x + key.x - 1, gy = v.y + key.y - v.top;
+            const AsciiGraph* g = state.flowGraph();
+            const std::vector<FlowBlock> blocks = flowOf(state.document());
+            for (std::size_t i = 0; g != nullptr && i < blocks.size(); ++i) {
+                const auto it = g->boxes.find(blocks[i].name);
+                if (it == g->boxes.end()) continue;
+                const CellRect& b = it->second;
+                if (gx >= b.left && gx <= b.right && gy >= b.top && gy <= b.bottom) {
+                    const bool again = i == state.flowCursor();
+                    const int keepX = v.x, keepY = v.y;
+                    state.stepFlow(static_cast<long long>(i) - static_cast<long long>(state.flowCursor()));
+                    // Clicking must not make the picture jump under the mouse.
+                    state.setFlowView(keepX, keepY);
+                    if (again) state.gotoFlowBlock();
+                    return true;
+                }
+            }
+            return true;
+        }
         else if (state.view() == View::Runs) {
             const std::size_t at = static_cast<std::size_t>(row);
             if (key.x < L.runsFormX - 2) {
@@ -546,7 +614,7 @@ bool handleKey(TuiState& state, Key key, int width, int height) {
     }
 
     switch (state.view()) {
-        case View::Flow:    return handleFlow(state, key);
+        case View::Flow:    return handleFlow(state, key, width, height);
         case View::Runs:    return handleRuns(state, key);
         case View::Results: return handleResults(state, key);
         case View::Tables:  return handleTables(state, key);

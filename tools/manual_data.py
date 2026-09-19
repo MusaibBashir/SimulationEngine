@@ -7,7 +7,7 @@ the call-flow chapters. Prose is passed to reportlab as markup, so use &amp;,
 &lt; and &gt; rather than the bare characters.
 """
 
-VERSION_LINE = "v16.2 — the flow as a graph · 1732 checks · 145 types"
+VERSION_LINE = "v16.2 — the flow as a graph · 1740 checks · 146 types"
 
 FRONT_MATTER = (
     "A discrete-event simulation engine in the spirit of Arena's Basic Process "
@@ -62,6 +62,7 @@ TYPE_DOC = {
     "PromptFor": "What the one-line Prompt is for: naming a new model, or naming an unnamed one on its first save.",
     "RunsFocus": "Which half of the Runs tab has the keyboard: the list of runs, or the chosen run's form.",
     "PickerFor": "Which field a Picker writes into: the editor's current line, the Runs form's selected field, or a table's Time Units.",
+    "FlowViewport": "Which part of the flow graph is on screen and where its sliders are: the view's top-left cell, how much fits, the whole graph's size, and the ends of the horizontal and vertical sliders. Worked out once, so the renderer draws the sliders and the mouse reads clicks on them by the same arithmetic.",
     "PlainNode": "One node as Graphviz's plain output gives it: name, label, shape, centre and size in inches, y upwards.",
     "PlainEdge": "One edge from the plain output: its ends, the B-spline control points of its route, its style, and its label with the label's position.",
     "PlainLayout": "Everything `dot -Tplain` said about a graph: its size and every node and edge. ok() is false for an empty or unreadable one.",
@@ -793,7 +794,12 @@ CHAPTERS = [
             "drawAscii() draws boxes where dot put them and edges along its splines. Only "
             "findDot() and runDot() touch the machine, so the rest is tested without "
             "Graphviz. P renders a PNG into an images folder beside the model."),
-   ("types", ["PlainNode", "PlainEdge", "PlainLayout", "AsciiGraph"]),
+   ("text", "A graph wider or taller than the window pans: Left and Right move the view, "
+            "Up/Down choose a block and the view follows it, Home comes back to it, and a "
+            "slider along the bottom edge -- and one down the right when the graph is taller "
+            "than the window -- shows which slice is in view. Clicking the track jumps there; "
+            "clicking a box chooses that block."),
+   ("types", ["PlainNode", "PlainEdge", "PlainLayout", "AsciiGraph", "FlowViewport"]),
   ]),
 
  (10, "The Flowchart",
@@ -1033,6 +1039,10 @@ CHAPTERS = [
               ["findDot() / runDot(...)", "Where Graphviz is, and running it to a file in "
                "any format it supports."],
               ["flowImagePath(model)", "<model's folder>/images/<model>-flow.png."],
+              ["flowViewportFor(state, layout)", "Which part of the graph is in view, and "
+               "where its sliders are."],
+              ["maximizeOwnWindow()", "Maximizes the program's window when it has one of "
+               "its own -- the owning Windows Terminal window, or the classic console."],
               ["tabView / tabLabel", "The tabs in order, and each one's label with any "
                "error count."],
               ["tableGridFor(state, layout)", "The current table's grid geometry, shared by "

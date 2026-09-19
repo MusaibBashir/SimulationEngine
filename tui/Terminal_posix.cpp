@@ -229,6 +229,9 @@ std::string defaultModelPath() { return "untitled.des"; }
 // window about to vanish with the last message still in it.
 bool launchedOnOwnConsole() { return false; }
 
+// A terminal emulator's window belongs to the person who opened it.
+void maximizeOwnWindow() {}
+
 bool openWithDefaultApp(const std::string& path) {
     // In the background, and silent: a viewer that writes to the terminal
     // would draw over the UI.

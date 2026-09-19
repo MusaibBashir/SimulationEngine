@@ -88,7 +88,7 @@ public:
         if (r.EventType == KEY_EVENT) return r.Event.KeyEvent.bKeyDown != 0;
         if (r.EventType == MOUSE_EVENT) {
             const MOUSE_EVENT_RECORD& m = r.Event.MouseEvent;
-            if (m.dwEventFlags == MOUSE_WHEELED) return true;
+            if (m.dwEventFlags == MOUSE_WHEELED || m.dwEventFlags == MOUSE_HWHEELED) return true;
             return m.dwEventFlags == 0 && m.dwButtonState != 0;
         }
         return false;
@@ -126,8 +126,19 @@ public:
                     // The high word is signed, and positive means away from
                     // the user -- which is scrolling UP the document.
                     const short delta = static_cast<short>(HIWORD(m.dwButtonState));
-                    return Key::mouse(delta > 0 ? MouseButton::WheelUp
-                                                : MouseButton::WheelDown, x, y);
+                    Key k = Key::mouse(delta > 0 ? MouseButton::WheelUp
+                                                 : MouseButton::WheelDown, x, y);
+                    k.shift = (m.dwControlKeyState & SHIFT_PRESSED) != 0;
+                    return k;
+                }
+                if (m.dwEventFlags == MOUSE_HWHEELED) {
+                    // A sideways wheel or a touchpad swipe: positive is right.
+                    // It arrives as Shift+wheel, which is what pans.
+                    const short delta = static_cast<short>(HIWORD(m.dwButtonState));
+                    Key k = Key::mouse(delta > 0 ? MouseButton::WheelDown
+                                                 : MouseButton::WheelUp, x, y);
+                    k.shift = true;
+                    return k;
                 }
                 if (m.dwEventFlags != 0) continue;      // a move, or a drag
                 if (m.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)
@@ -269,6 +280,24 @@ bool openWithDefaultApp(const std::string& path) {
     const INT_PTR r = reinterpret_cast<INT_PTR>(
         ShellExecuteA(nullptr, "open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
     return r > 32;
+}
+
+void maximizeOwnWindow() {
+    HWND console = GetConsoleWindow();
+    if (console == nullptr) return;
+    // Under Windows Terminal the console window is a stand-in that is never
+    // shown; the window a person sees is its OWNER. ShowWindow on either did
+    // nothing visible -- measured -- but the maximize button's own message
+    // does, once the terminal window has finished coming up, hence the retry.
+    HWND shown = GetAncestor(console, GA_ROOTOWNER);
+    if (shown == nullptr || shown == console) {
+        ShowWindow(console, SW_MAXIMIZE);        // the classic console
+        return;
+    }
+    for (int tries = 0; tries < 20 && !IsZoomed(shown); ++tries) {
+        PostMessageA(shown, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+        Sleep(50);
+    }
 }
 
 bool launchedOnOwnConsole() {

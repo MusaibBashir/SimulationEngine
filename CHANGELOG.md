@@ -14,6 +14,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   arrowheads, Decide branches labelled, a Route's trip to its Station dotted,
   sources on the left. Up/Down walks the blocks and the view follows the chosen
   one; Enter still opens it in the text; `L` switches to the list.
+- **A big graph pans.** Left/Right move the view, Up/Down still choose a block
+  (the view follows it), Home comes back to it. A slider along the bottom edge
+  shows which slice of a wide graph is in view -- and one down the right edge
+  for a tall one; clicking the track jumps there, clicking its ends steps, and
+  Shift+wheel or a sideways swipe pans. Clicking a box chooses that block, and
+  clicking it again opens it in the text.
+- **Opened on its own -- a double-clicked `.des` file, or the program -- the
+  window starts maximized**, in the classic console and in Windows Terminal
+  (where the window a person sees is the console's owner, and only the
+  maximize button's own message moves it).
 - **`P` saves the graph as a PNG** in an `images` folder beside the model
   (`images/<model>-flow.png`) and opens it in the default image viewer.
 - **The installer offers to install Graphviz** with winget when it is not

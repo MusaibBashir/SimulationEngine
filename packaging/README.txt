@@ -82,9 +82,13 @@ once with this command in a terminal, then restart the program:
 
     winget install Graphviz.Graphviz
 
-Without it the Flow tab shows the same wiring as a list. On the Flow tab, L
-switches between the graph and the list, and P saves the graph as a picture
-in an "images" folder next to the model and opens it.
+Without it the Flow tab shows the same wiring as a list. On the Flow tab, the
+Left and Right arrows move across a graph too wide for the window -- the bar
+along the bottom shows which part is in view, and can be clicked -- Up and
+Down choose a block, L switches between the graph and the list, and P saves
+the graph as a picture in an "images" folder next to the model and opens it.
+
+Double-clicking a model opens the program maximized.
 
 On the Tables tab, numbers such as a fleet size, a travel-time table or an
 hourly arrival schedule are edited as a grid. Pick a kind on the left and

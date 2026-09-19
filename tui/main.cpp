@@ -66,6 +66,10 @@ int main(int argc, char** argv) {
                                  : "reopened " + path);
     }
 
+    // A window of its own opens maximized: a flowchart wants the room, and
+    // a double-clicked model should not open in a postage stamp.
+    if (launchedOnOwnConsole()) maximizeOwnWindow();
+
     std::string whyNot;
     std::unique_ptr<ITerminal> terminal = openTerminal(whyNot);
     if (!terminal) {

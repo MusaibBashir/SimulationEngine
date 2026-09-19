@@ -115,6 +115,46 @@ TableGrid tableGridFor(const TuiState& state, const Layout& L) {
     return g;
 }
 
+FlowViewport flowViewportFor(const TuiState& state, const Layout& L) {
+    FlowViewport v;
+    if (state.view() != View::Flow || state.flowAsList()) return v;
+    const AsciiGraph* g = state.flowGraph();
+    if (g == nullptr) return v;
+    v.shown = true;
+    v.top = L.bodyTop + 1;
+    v.rows = std::max(1, L.bodyBottom - v.top);
+    v.cols = std::max(1, L.width - 2);
+    v.height = static_cast<int>(g->lines.size());
+    for (const std::string& l : g->lines) v.width = std::max(v.width, static_cast<int>(l.size()));
+
+    if (state.flowViewPinned()) {
+        v.x = state.flowViewX();
+        v.y = state.flowViewY();
+    } else {
+        // Follow the chosen block: centre it.
+        const std::vector<FlowBlock> blocks = flowOf(state.document());
+        if (state.flowCursor() < blocks.size()) {
+            const auto it = g->boxes.find(blocks[state.flowCursor()].name);
+            if (it != g->boxes.end()) {
+                v.x = (it->second.left + it->second.right) / 2 - v.cols / 2;
+                v.y = (it->second.top + it->second.bottom) / 2 - v.rows / 2;
+            }
+        }
+    }
+    v.x = std::max(0, std::min(v.x, std::max(0, v.width - v.cols)));
+    v.y = std::max(0, std::min(v.y, std::max(0, v.height - v.rows)));
+
+    v.hSlider = v.width > v.cols;
+    v.vSlider = v.height > v.rows;
+    v.hRow = L.bodyBottom;
+    v.hLeft = 2;
+    v.hRight = std::max(v.hLeft + 4, L.width - 34);   // the right end keeps the key hints
+    v.vColumn = L.width - 1;
+    v.vTop = L.bodyTop + 1;
+    v.vBottom = L.bodyBottom - 1;
+    return v;
+}
+
 Layout layoutFor(const TuiState& state, int width, int height) {
     Layout L;
     L.width  = width;
@@ -317,21 +357,14 @@ void renderModel(const TuiState& state, Screen& screen, const Layout& L) {
 // picture the way it walks the list.
 bool renderFlowGraph(const TuiState& state, Screen& screen, const Layout& L,
                      const std::vector<FlowBlock>& blocks) {
-    if (state.flowAsList()) return false;
+    const FlowViewport v = flowViewportFor(state, L);
+    if (!v.shown) return false;
     const AsciiGraph* g = state.flowGraph();
-    if (g == nullptr) return false;
-    const int top = L.bodyTop + 1;
-    const int rows = L.bodyBottom - top;
-    const int cols = L.width - 2;
-    int ox = 0, oy = 0;
+    const int top = v.top, rows = v.rows, cols = v.cols, ox = v.x, oy = v.y;
     const CellRect* chosen = nullptr;
     if (state.flowCursor() < blocks.size()) {
         const auto it = g->boxes.find(blocks[state.flowCursor()].name);
         if (it != g->boxes.end()) chosen = &it->second;
-    }
-    if (chosen != nullptr) {
-        ox = std::max(0, (chosen->left + chosen->right) / 2 - cols / 2);
-        oy = std::max(0, (chosen->top + chosen->bottom) / 2 - rows / 2);
     }
     for (int r = 0; r < rows; ++r) {
         const std::size_t line = static_cast<std::size_t>(oy + r);
@@ -351,7 +384,36 @@ bool renderFlowGraph(const TuiState& state, Screen& screen, const Layout& L,
                 screen.put(sx, sy, ch, Attr::Reverse);
             }
     }
-    screen.text(3, L.bodyBottom, " L list   P save picture ", Attr::Dim);
+    // The sliders: how much of the graph is in view, and where. The thumb's
+    // length is the visible share, so a graph twice the screen's width has a
+    // thumb half the track long.
+    const auto thumb = [](int track, int view, int whole, int at, int& from, int& len) {
+        len = std::max(1, track * view / std::max(1, whole));
+        from = whole > view ? (track - len) * at / std::max(1, whole - view) : 0;
+    };
+    if (v.hSlider) {
+        const int track = v.hRight - v.hLeft - 1;
+        int from = 0, len = 0;
+        thumb(track, v.cols, v.width, v.x, from, len);
+        screen.put(v.hLeft, v.hRow, '<', Attr::Bold);
+        for (int i = 0; i < track; ++i)
+            screen.put(v.hLeft + 1 + i, v.hRow, i >= from && i < from + len ? '#' : '-',
+                       i >= from && i < from + len ? Attr::Bold : Attr::Dim);
+        screen.put(v.hRight, v.hRow, '>', Attr::Bold);
+    }
+    if (v.vSlider) {
+        const int track = v.vBottom - v.vTop - 1;
+        int from = 0, len = 0;
+        thumb(track, v.rows, v.height, v.y, from, len);
+        screen.put(v.vColumn, v.vTop, '^', Attr::Bold);
+        for (int i = 0; i < track; ++i)
+            screen.put(v.vColumn, v.vTop + 1 + i, i >= from && i < from + len ? '#' : '|',
+                       i >= from && i < from + len ? Attr::Bold : Attr::Dim);
+        screen.put(v.vColumn, v.vBottom, 'v', Attr::Bold);
+    }
+    const std::string keys = " <- -> pan  L list  P picture ";
+    screen.text(std::max(v.hRight + 2, L.width - 1 - static_cast<int>(keys.size())), L.bodyBottom,
+                keys, Attr::Dim);
     return true;
 }
 
@@ -822,7 +884,7 @@ const char* hintFor(const TuiState& state) {
                                : "Arrows move  type to edit  ^V paste  ^O add row  Del row  Tab panel  ? help";
             }
             break;
-        case View::Flow:    return "Up/Down block   Enter opens it in the text   L graph/list   P save picture   F1 keys";
+        case View::Flow:    return "Up/Down block  Left/Right pan  Home back to it  Enter open  L list  P picture";
         case View::Runs:
             if (state.runsFocus() == RunsFocus::Form)
                 return state.editingRunField() ? "Enter keeps it   Esc leaves it"

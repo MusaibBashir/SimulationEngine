@@ -124,9 +124,9 @@ void runFlowGraphTests() {
     {
         const std::string dot = findDot();
         if (dot.empty()) {
-            // Nine: the same number the branch below runs, so every leg of the
+            // Seventeen: the same number the branch below runs, so every leg of the
             // gate accounts for the same suite.
-            skip(9, "Graphviz is not installed here, so dot is not run");
+            skip(17, "Graphviz is not installed here, so dot is not run");
         } else {
             const ModelDocument doc = readDocument(fileText(modelPath("decide.des"))).document;
             const std::string out =
@@ -164,6 +164,40 @@ void runFlowGraphTests() {
                       screen.asText().find("-> Big") != std::string::npos,
                   "L shows the list instead");
             std::filesystem::remove_all(dir);
+
+            // A graph wider than the screen: the view pans, and the sliders say where.
+            const int W = 100, H = 30;
+            TuiState r = TuiState::fromText(fileText(modelPath("ride_hailing.des")), "ride.des");
+            handleKey(r, Key::control('f'), W, H);
+            FlowViewport v = flowViewportFor(r, layoutFor(r, W, H));
+            check(v.shown && v.hSlider && v.width > v.cols, "ride_hailing is wider than the screen, so it has a slider");
+            const int before = v.x;
+            handleKey(r, Key::special(KeyKind::Right), W, H);
+            v = flowViewportFor(r, layoutFor(r, W, H));
+            check(r.flowViewPinned() && v.x > before, "Right pans the view right");
+            handleKey(r, Key::special(KeyKind::Left), W, H);
+            v = flowViewportFor(r, layoutFor(r, W, H));
+            check(v.x < before + 1 && v.x >= 0, "Left pans it back");
+            handleKey(r, Key::mouse(MouseButton::Left, v.hRight - 1, v.hRow), W, H);
+            v = flowViewportFor(r, layoutFor(r, W, H));
+            check(v.x == v.width - v.cols, "clicking the far end of the track jumps to the right edge");
+            Screen wide(W, H);
+            render(r, wide);
+            check(wide.line(v.hRow).find('#') != std::string::npos &&
+                      wide.line(v.hRow).find('<') != std::string::npos,
+                  "the slider is drawn, with its thumb");
+            handleKey(r, Key::special(KeyKind::Home), W, H);
+            check(!r.flowViewPinned(), "Home goes back to following the chosen block");
+            handleKey(r, Key::special(KeyKind::Right), W, H);
+            handleKey(r, Key::special(KeyKind::Down), W, H);
+            check(!r.flowViewPinned(), "and so does choosing another block");
+            // Clicking the chosen block's box a second time opens it in the text.
+            v = flowViewportFor(r, layoutFor(r, W, H));
+            const std::vector<FlowBlock> blocks = flowOf(r.document());
+            const CellRect& box = r.flowGraph()->boxes.at(blocks[r.flowCursor()].name);
+            handleKey(r, Key::mouse(MouseButton::Left, 1 + (box.left + box.right) / 2 - v.x,
+                                    v.top + (box.top + box.bottom) / 2 - v.y), W, H);
+            check(r.view() == View::Model, "clicking the chosen block's box opens it in the text");
         }
     }
 

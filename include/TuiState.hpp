@@ -264,6 +264,13 @@ public:
     const AsciiGraph* flowGraph() const;
     const std::string& flowGraphError() const { return m_flowError; }
     bool flowAsList() const { return m_flowAsList; }
+    // Where the graph's view is, when somebody has moved it. Until then -- and
+    // again after Up/Down or Home -- it follows the chosen block.
+    bool flowViewPinned() const { return m_flowPinned; }
+    int  flowViewX() const { return m_flowViewX; }
+    int  flowViewY() const { return m_flowViewY; }
+    void setFlowView(int x, int y) { m_flowViewX = x; m_flowViewY = y; m_flowPinned = true; }
+    void followFlowCursor() { m_flowPinned = false; }
     void setFlowAsList(bool on) { m_flowAsList = on; }
     // P: <model's folder>/images/<model>-flow.png, then opened.
     bool saveFlowPicture();
@@ -380,6 +387,9 @@ private:
 
     std::size_t m_flowCursor{0};
     bool        m_flowAsList{false};
+    bool        m_flowPinned{false};
+    int         m_flowViewX{0};
+    int         m_flowViewY{0};
     // The layout is a CACHE of the document, so filling it from a const
     // renderer is not a change anybody can see.
     mutable std::string m_flowDot;

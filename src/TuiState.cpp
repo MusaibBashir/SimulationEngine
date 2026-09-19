@@ -1084,6 +1084,7 @@ void TuiState::stepFlow(long long delta) {
     long long i = static_cast<long long>(m_flowCursor) + delta;
     i = std::max<long long>(0, std::min(i, static_cast<long long>(n) - 1));
     m_flowCursor = static_cast<std::size_t>(i);
+    m_flowPinned = false;       // choosing a block brings the view back to it
 }
 
 void TuiState::gotoFlowBlock() {
