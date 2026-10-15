@@ -55,6 +55,11 @@ bool replyText(const HttpResponse& r, std::string& text, std::string& error) {
         const std::string why = p.ok ? p.value["error"]["message"].asString() : std::string();
         error = "the provider answered HTTP " + std::to_string(r.status) +
                 (why.empty() ? std::string() : ": " + why);
+        // A 404 from a chat endpoint is nearly always the model name. Say
+        // where it is set, since that is the one thing the person can change.
+        if (r.status == 404)
+            error += " -- the model is set by `model =` in " + llmConfigPath() +
+                     " (or DES_LLM_MODEL)";
         return false;
     }
     if (!p.ok) { error = "the provider's reply was not JSON: " + p.error; return false; }
@@ -140,6 +145,10 @@ std::string llmConfigPath() {
     return (dir / "llm.conf").string();
 }
 
+namespace {
+const char* const kRetiredDefaultModel = "llama-3.3-70b-versatile";
+}
+
 LlmConfig parseLlmConfig(const std::string& text, LlmConfig c) {
     std::size_t start = 0;
     while (start < text.size()) {
@@ -158,7 +167,11 @@ LlmConfig parseLlmConfig(const std::string& text, LlmConfig c) {
         const std::string value = trim(line.substr(eq + 1));
         if (key == "api_key")                         c.apiKey = value;
         else if (key == "base_url" && !value.empty()) c.baseUrl = value;
-        else if (key == "model" && !value.empty())    c.model = value;
+        // The first build wrote its own default into every settings file it
+        // saved a key to, so "llama-3.3-70b-versatile" there is almost never a
+        // choice anybody made -- and Groq has since withdrawn it, answering
+        // 404. Read as "no model chosen", so the current default applies.
+        else if (key == "model" && !value.empty() && value != kRetiredDefaultModel) c.model = value;
         else if (key == "reasoning_format")           c.reasoningFormat = value;
         else if (key == "reasoning_effort")           c.reasoningEffort = value;
     }
@@ -178,20 +191,68 @@ std::string llmConfigText(const LlmConfig& c) {
            "reasoning_effort = " + c.reasoningEffort + "\n";
 }
 
+std::string withApiKey(const std::string& existing, const std::string& key) {
+    // A new file names only the key. The model and server stay commented
+    // out, so a later version's default reaches this person -- the first
+    // build wrote every setting out and froze its default model in place.
+    if (existing.find_first_not_of(" \t\r\n") == std::string::npos) {
+        const LlmConfig d;
+        return "# DES Simulator: the language model behind F2 (describe a model).\n"
+               "# Uncomment a line to change it. Any OpenAI-compatible server works;\n"
+               "# for Ollama on this machine: base_url = http://localhost:11434/v1, no key.\n"
+               "# base_url = " + d.baseUrl + "\n"
+               "# model = " + d.model + "\n"
+               "# reasoning_effort = none      (a reasoning model, thinking off)\n"
+               "api_key = " + key + "\n";
+    }
+    // Otherwise only the api_key line changes. Every other line -- comments,
+    // choices, keys a newer version added -- is kept as it was, except the
+    // retired default model, which is commented out with the reason.
+    std::string out;
+    bool replaced = false;
+    std::size_t start = 0;
+    while (start < existing.size()) {
+        std::size_t end = existing.find('\n', start);
+        if (end == std::string::npos) end = existing.size();
+        std::string line = existing.substr(start, end - start);
+        start = end + 1;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const std::size_t eq = line.find('=');
+        const std::size_t b = line.find_first_not_of(" \t");
+        std::string name;
+        std::string value;
+        if (eq != std::string::npos && b != std::string::npos && line[b] != '#') {
+            name = line.substr(b, eq - b);
+            name.erase(name.find_last_not_of(" \t") + 1);
+            value = line.substr(eq + 1);
+            value.erase(0, value.find_first_not_of(" \t"));
+            value.erase(value.find_last_not_of(" \t") + 1);
+        }
+        if (name == "api_key") {
+            if (!replaced) out += "api_key = " + key + "\n";
+            replaced = true;
+        } else if (name == "model" && value == kRetiredDefaultModel) {
+            out += "# model = " + value + "   (withdrawn by Groq; the current default is used)\n";
+        } else {
+            out += line + "\n";
+        }
+    }
+    if (!replaced) out += "api_key = " + key + "\n";
+    return out;
+}
+
 bool saveApiKey(const std::string& key, std::string& error) {
     namespace fs = std::filesystem;
     const fs::path path = llmConfigPath();
-    LlmConfig c;
+    std::string existing;
     {
         std::ifstream in(path, std::ios::binary);
         if (in.is_open())
-            c = parseLlmConfig(std::string((std::istreambuf_iterator<char>(in)),
-                                           std::istreambuf_iterator<char>()));
+            existing.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
     }
-    c.apiKey = key;
     std::error_code ec;
     fs::create_directories(path.parent_path(), ec);
-    const std::string text = llmConfigText(c);
+    const std::string text = withApiKey(existing, key);
 #ifdef _WIN32
     // %APPDATA% is inside the user's own profile, which other accounts cannot
     // read; that is the protection on Windows.

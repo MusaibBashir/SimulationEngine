@@ -86,6 +86,12 @@ std::string llmConfigPath();
 LlmConfig   parseLlmConfig(const std::string& text, LlmConfig base = LlmConfig{});
 std::string llmConfigText(const LlmConfig& config);
 
+// The settings file's text with its api_key set: only that line changes in an
+// existing file; a new one names the key alone, with the model and server as
+// comments, so later defaults still apply. Separate from the save so a test
+// can check it without touching the real file.
+std::string withApiKey(const std::string& existingText, const std::string& key);
+
 // Writes the key into the settings file, keeping whatever else is there.
 // Created readable by this user alone. False, with the reason, on failure.
 bool saveApiKey(const std::string& key, std::string& error);

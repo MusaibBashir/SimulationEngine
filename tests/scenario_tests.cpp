@@ -375,6 +375,10 @@ void testGenerator() {
         t.add(401, R"({"error": {"message": "Invalid API Key"}})");
         const GenerateResult r = generateModel("x", JsonValue(), testConfig(), t);
         check(!r.ok && contains(r.error, "refused the API key"), "a 401 says the key was refused");
+        RecordedTransport t404;
+        t404.add(404, R"({"error": {"message": "The model `x` does not exist or you do not have access to it."}})");
+        check(contains(generateModel("x", JsonValue(), testConfig(), t404).error, "llm.conf"),
+              "a 404 says where the model name is set");
         RecordedTransport t429;
         t429.add(429, "{}");
         check(contains(generateModel("x", JsonValue(), testConfig(), t429).error, "rate-limiting"),

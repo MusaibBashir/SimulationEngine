@@ -277,6 +277,25 @@ void testKey() {
           "the settings file is read, an unknown key ignored");
     check(parseLlmConfig(llmConfigText(parsed)).apiKey == "k", "...and written back the same");
 
+    // Saving a key changes the key and nothing else.
+    const std::string fresh = withApiKey("", "gsk_new");
+    check(parseLlmConfig(fresh).apiKey == "gsk_new" && parseLlmConfig(fresh).model == LlmConfig{}.model,
+          "a new settings file names the key and leaves the model to the default");
+    check(contains(fresh, "# model = "), "...showing the model as a comment, to change by hand");
+    const std::string chosen = withApiKey("# mine\nmodel = some/other-model\napi_key = old\nfuture = 3\n", "gsk_new");
+    check(chosen == "# mine\nmodel = some/other-model\napi_key = gsk_new\nfuture = 3\n",
+          "in an existing file only the api_key line changes -- a chosen model is kept");
+
+    // The first build froze its default model into the file when it saved a
+    // key; Groq has since withdrawn that model.
+    const std::string firstBuild = "base_url = https://api.groq.com/openai/v1\nmodel = llama-3.3-70b-versatile\n"
+                                   "api_key = gsk_old\nreasoning_format = \nreasoning_effort = \n";
+    check(parseLlmConfig(firstBuild).model == "qwen/qwen3.8-27b" && parseLlmConfig(firstBuild).apiKey == "gsk_old",
+          "a file the first build wrote uses the current default model, and keeps its key");
+    const std::string resaved = withApiKey(firstBuild, "gsk_new");
+    check(contains(resaved, "# model = llama-3.3-70b-versatile") && parseLlmConfig(resaved).model == "qwen/qwen3.8-27b",
+          "saving a key again comments that model out, saying why");
+
     // saveApiKey writes into the user's settings folder: pointed at a scratch
     // one here, so the test never touches a real key.
     const std::filesystem::path dir = std::filesystem::temp_directory_path() / "des_ask_settings";
