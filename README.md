@@ -647,6 +647,37 @@ publish as a GitHub release with the changelog section as its notes and a
 published unless both platforms pass. Running the workflow by hand from the
 Actions tab builds a version without publishing it.
 
+## The desktop app (in progress, `desktop-ui` branch)
+
+A windowed app beside the terminal one, in Qt 6 Widgets, with one design on
+Windows and macOS (Qt's Fusion style and one palette, `gui/Theme.cpp`):
+
+- **Modules** on the left, grouped as Arena groups them — double-click inserts
+  one, hover explains it.
+- **Model**: the `.des` text with colour, line numbers, and every error as a red
+  wave on its line, a dot in the gutter, and its message on hover.
+- **Flow**: the model drawn top to bottom as boxes and arrows, branch
+  probabilities on the arrows, loops around the side; click a box to open its
+  record. Ctrl+wheel zooms.
+- **Results**: the engine's own report, under a bar per station showing how
+  busy it was, averaged over every replication — shared resources summed.
+- **Describe** on the right: the same describe-a-model as F2 in the terminal,
+  with **Talk** for speaking it and Settings for the key.
+- **Problems** along the bottom; double-click one to go to it.
+
+`F5` runs, `Shift+F5` stops, `F2` describes, `F3` talks. The text is the
+model, as in the terminal UI: every view is redrawn from it as you type.
+
+```
+cmake -S . -B build-gui -DDES_BUILD_GUI=ON -DCMAKE_PREFIX_PATH=<Qt 6>/lib/cmake
+cmake --build build-gui --target des_gui
+```
+
+`.github/workflows/desktop.yml` builds it on Windows with MSVC and Qt 6.8,
+packages it with `windeployqt` (Qt ships as DLLs beside the exe, as its LGPL
+licence expects) and takes screenshots on the runner. macOS comes next, from
+the same code.
+
 ## Describing a model instead of writing it
 
 *v17, in progress on the `voice-agent` branch.* Say or type what happens and a

@@ -150,6 +150,9 @@ void RunController::finishRun() {
     // SimulationSystem, and the system does not survive this function.
     m_lastReport.str(std::string());
     m_sim->report(m_lastReport);
+    // v17: each station's state at the end of this run, for the same reason --
+    // a front end drawing utilisation after the study has nothing else to read.
+    m_finalSnapshots.push_back(snapshotOf(*m_sim));
     m_sim.reset();
 
     if (m_setup.antithetic && !m_mirrorHalf) {

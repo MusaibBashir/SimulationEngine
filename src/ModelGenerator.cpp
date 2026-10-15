@@ -257,8 +257,8 @@ std::string llmConfigText(const LlmConfig& c) {
            "stt_language = " + c.sttLanguage + "\n";
 }
 
-std::string withApiKey(const std::string& existing, const std::string& key) {
-    // A new file names only the key. The model and server stay commented
+std::string withSetting(const std::string& existing, const std::string& setting, const std::string& value) {
+    // A new file names only what was set. The model and server stay commented
     // out, so a later version's default reaches this person -- the first
     // build wrote every setting out and froze its default model in place.
     if (existing.find_first_not_of(" \t\r\n") == std::string::npos) {
@@ -268,12 +268,12 @@ std::string withApiKey(const std::string& existing, const std::string& key) {
                "# for Ollama on this machine: base_url = http://localhost:11434/v1, no key.\n"
                "# base_url = " + d.baseUrl + "\n"
                "# model = " + d.model + "\n"
-               "# reasoning_effort = none      (a reasoning model, thinking off)\n"
-               "api_key = " + key + "\n";
+               "# reasoning_effort = none      (a reasoning model, thinking off)\n" +
+               setting + " = " + value + "\n";
     }
-    // Otherwise only the api_key line changes. Every other line -- comments,
-    // choices, keys a newer version added -- is kept as it was, except the
-    // retired default model, which is commented out with the reason.
+    // Otherwise only that setting's line changes. Every other line --
+    // comments, choices, keys a newer version added -- is kept as it was,
+    // except the retired default model, which is commented out with the reason.
     std::string out;
     bool replaced = false;
     std::size_t start = 0;
@@ -286,28 +286,36 @@ std::string withApiKey(const std::string& existing, const std::string& key) {
         const std::size_t eq = line.find('=');
         const std::size_t b = line.find_first_not_of(" \t");
         std::string name;
-        std::string value;
+        std::string val;
         if (eq != std::string::npos && b != std::string::npos && line[b] != '#') {
             name = line.substr(b, eq - b);
             name.erase(name.find_last_not_of(" \t") + 1);
-            value = line.substr(eq + 1);
-            value.erase(0, value.find_first_not_of(" \t"));
-            value.erase(value.find_last_not_of(" \t") + 1);
+            val = line.substr(eq + 1);
+            val.erase(0, val.find_first_not_of(" \t"));
+            val.erase(val.find_last_not_of(" \t") + 1);
         }
-        if (name == "api_key") {
-            if (!replaced) out += "api_key = " + key + "\n";
+        if (name == setting) {
+            if (!replaced) out += setting + " = " + value + "\n";
             replaced = true;
-        } else if (name == "model" && value == kRetiredDefaultModel) {
-            out += "# model = " + value + "   (withdrawn by Groq; the current default is used)\n";
+        } else if (name == "model" && val == kRetiredDefaultModel) {
+            out += "# model = " + val + "   (withdrawn by Groq; the current default is used)\n";
         } else {
             out += line + "\n";
         }
     }
-    if (!replaced) out += "api_key = " + key + "\n";
+    if (!replaced) out += setting + " = " + value + "\n";
     return out;
 }
 
+std::string withApiKey(const std::string& existing, const std::string& key) {
+    return withSetting(existing, "api_key", key);
+}
+
 bool saveApiKey(const std::string& key, std::string& error) {
+    return saveLlmSetting("api_key", key, error);
+}
+
+bool saveLlmSetting(const std::string& setting, const std::string& value, std::string& error) {
     namespace fs = std::filesystem;
     const fs::path path = llmConfigPath();
     std::string existing;
@@ -318,7 +326,7 @@ bool saveApiKey(const std::string& key, std::string& error) {
     }
     std::error_code ec;
     fs::create_directories(path.parent_path(), ec);
-    const std::string text = withApiKey(existing, key);
+    const std::string text = withSetting(existing, setting, value);
 #ifdef _WIN32
     // %APPDATA% is inside the user's own profile, which other accounts cannot
     // read; that is the protection on Windows.

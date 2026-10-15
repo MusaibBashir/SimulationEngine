@@ -7,6 +7,13 @@
 #include <random>
 
 #ifdef _WIN32
+  #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+  #endif
+  #ifndef NOMINMAX
+    #define NOMINMAX
+  #endif
+  #include <windows.h>
   #define DES_POPEN  _popen
   #define DES_PCLOSE _pclose
 #else
@@ -63,6 +70,63 @@ std::string tempName(const char* suffix) {
     std::error_code ec;
     const std::filesystem::path dir = std::filesystem::temp_directory_path(ec);
     return ((ec ? std::filesystem::path(".") : dir) / (std::string(buf) + suffix)).string();
+}
+
+// curl --config <file>, stdout and stderr together, into `output`.
+//
+// On Windows NOT through _popen: _popen runs cmd.exe, and from a windowed
+// program -- the desktop app has no console -- that opens a console window
+// for every request, a black box flashing up and away. CreateProcess with
+// CREATE_NO_WINDOW runs curl with no window at all, console app or not.
+bool runCurl(const std::string& cfgPath, std::string& output, int& rc) {
+#ifdef _WIN32
+    // System32's curl by its full path, so a stray curl.exe earlier on PATH --
+    // Git's, say, built against a different TLS stack -- is not the one used.
+    std::string exe = "curl.exe";
+    if (const char* root = std::getenv("SystemRoot")) {
+        const std::string sys = std::string(root) + "\\System32\\curl.exe";
+        if (std::filesystem::exists(sys)) exe = sys;
+    }
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof sa;
+    sa.bInheritHandle = TRUE;
+    HANDLE readEnd = nullptr, writeEnd = nullptr;
+    if (!CreatePipe(&readEnd, &writeEnd, &sa, 0)) return false;
+    SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOA si{};
+    si.cb = sizeof si;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = writeEnd;
+    si.hStdError = writeEnd;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    PROCESS_INFORMATION pi{};
+    std::string cmd = "\"" + exe + "\" --config \"" + cfgPath + "\"";
+    const BOOL started = CreateProcessA(nullptr, &cmd[0], nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
+                                        nullptr, nullptr, &si, &pi);
+    CloseHandle(writeEnd);   // ours; the child has its own, so EOF comes when it exits
+    if (!started) { CloseHandle(readEnd); return false; }
+    char buf[4096];
+    DWORD n = 0;
+    while (ReadFile(readEnd, buf, sizeof buf, &n, nullptr) && n > 0) output.append(buf, n);
+    CloseHandle(readEnd);
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD code = 0;
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    rc = static_cast<int>(code);
+    return true;
+#else
+    const std::string cmd = "curl --config '" + cfgPath + "' 2>&1";
+    FILE* pipe = DES_POPEN(cmd.c_str(), "r");
+    if (pipe == nullptr) return false;
+    char buf[4096];
+    std::size_t n;
+    while ((n = std::fread(buf, 1, sizeof buf, pipe)) > 0) output.append(buf, n);
+    rc = DES_PCLOSE(pipe);
+    return true;
+#endif
 }
 
 }  // namespace
@@ -139,26 +203,9 @@ HttpResponse CurlTransport::run(const std::string& url, const std::string& confi
         return r;
     }
 
-#ifdef _WIN32
-    // System32's curl by its full path, so a stray curl.exe earlier on PATH --
-    // Git's, say, built against a different TLS stack -- is not the one used.
-    std::string exe = "curl.exe";
-    if (const char* root = std::getenv("SystemRoot")) {
-        const std::string sys = std::string(root) + "\\System32\\curl.exe";
-        if (std::filesystem::exists(sys)) exe = "\"" + sys + "\"";
-    }
-    const std::string cmd = "\"" + exe + " --config \"" + cfgPath + "\" 2>&1\"";
-#else
-    const std::string cmd = "curl --config '" + cfgPath + "' 2>&1";
-#endif
-
-    FILE* pipe = DES_POPEN(cmd.c_str(), "r");
-    if (pipe == nullptr) { r.error = "could not start curl"; return r; }
     std::string output;
-    char buf[4096];
-    std::size_t n;
-    while ((n = std::fread(buf, 1, sizeof buf, pipe)) > 0) output.append(buf, n);
-    const int rc = DES_PCLOSE(pipe);
+    int rc = 0;
+    if (!runCurl(cfgPath, output, rc)) { r.error = "could not start curl"; return r; }
 
     const std::size_t nl = output.find_last_of('\n');
     const std::string last = nl == std::string::npos ? output : output.substr(nl + 1);

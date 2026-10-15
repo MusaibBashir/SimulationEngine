@@ -1,0 +1,102 @@
+# ============================================================================
+# .github/workflows/desktop.yml  --  the Qt desktop app, built and packaged
+# ============================================================================
+# Windows first: MSVC + Qt 6, the suite run on the same compiler, then
+# windeployqt gathers the Qt libraries beside DES-Simulator.exe (LGPL: Qt is
+# shipped as separate DLLs, so it can be replaced) and the folder is zipped.
+# A screenshot is taken on the runner itself, so a layout change can be seen
+# as Windows draws it without anyone opening the zip.
+#
+# Runs on every push to desktop-ui, and from the Actions tab with a version.
+# macOS joins once the Windows build is settled -- same code, same design.
+
+name: desktop
+
+on:
+  push:
+    branches: [desktop-ui]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version for the package name, e.g. 17.0.0-desktop.1'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ inputs.version || format('dev-{0}', github.sha) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDES_BUILD_GUI=ON -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --target des_gui des_tests
+
+      - name: The suite, on the same compiler as the app
+        shell: pwsh
+        run: |
+          .\build\des_tests.exe | Select-String -Pattern 'FAIL|checks passed|skipped'
+          if ($LASTEXITCODE -ne 0) { throw "the suite failed" }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $stage = "dist/DES-Simulator"
+          New-Item -ItemType Directory -Force -Path "$stage/examples" | Out-Null
+          Copy-Item build/DES-Simulator.exe $stage/
+          # --compiler-runtime: the MSVC runtime DLLs go in the folder too, so
+          # nothing has to be installed first.
+          windeployqt --release --compiler-runtime --no-translations --no-system-d3d-compiler --no-opengl-sw "$stage/DES-Simulator.exe"
+          Copy-Item examples/models/*.des "$stage/examples/"
+          Get-ChildItem -Recurse $stage | Measure-Object -Property Length -Sum | ForEach-Object { "{0:N1} MB in the folder" -f ($_.Sum / 1MB) }
+
+      - name: Starts, and draws itself
+        shell: pwsh
+        run: |
+          # The offscreen platform, borrowed from Qt for this one check and
+          # removed again: the shipped folder has only the real one.
+          $stage = "dist/DES-Simulator"
+          Copy-Item "$env:QT_ROOT_DIR/plugins/platforms/qoffscreen.dll" "$stage/platforms/"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          & "$stage/DES-Simulator.exe" --screenshot flow.png --tab flow "$stage/examples/shared.des" | Out-Null
+          & "$stage/DES-Simulator.exe" --screenshot results.png --tab results --run "$stage/examples/decide.des" | Out-Null
+          Remove-Item "$stage/platforms/qoffscreen.dll"
+          if (!(Test-Path flow.png) -or !(Test-Path results.png)) { throw "the app did not draw itself" }
+
+      - name: Zip
+        shell: pwsh
+        # Windows' own bsdtar, not Compress-Archive: tools/package.sh records why
+        # (backslashes in entry names, which break the zip on a Mac or Linux).
+        run: |
+          Set-Location dist
+          C:\Windows\System32\tar.exe -a -c -f "DES-Simulator-$env:VERSION-windows-x64-desktop.zip" DES-Simulator
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          if-no-files-found: error
+          path: dist/DES-Simulator-*-windows-x64-desktop.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows-screenshots
+          path: |
+            flow.png
+            results.png

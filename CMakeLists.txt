@@ -154,14 +154,17 @@ target_compile_options(des_tui PRIVATE ${DES_WARNINGS})
 #   Windows  nothing at link time (WASAPI is loaded when recording starts)
 #   macOS    Core Audio, linked rather than loaded (MA_NO_RUNTIME_LINKING)
 #   Linux    dlopen and threads, for whichever sound server is there
-target_include_directories(des_tui SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio)
-if(APPLE)
-    target_link_libraries(des_tui PRIVATE "-framework CoreFoundation" "-framework CoreAudio"
-                                          "-framework AudioToolbox")
-elseif(UNIX)
-    find_package(Threads REQUIRED)
-    target_link_libraries(des_tui PRIVATE ${CMAKE_DL_LIBS} Threads::Threads m)
-endif()
+function(des_use_microphone target)
+    target_include_directories(${target} SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio)
+    if(APPLE)
+        target_link_libraries(${target} PRIVATE "-framework CoreFoundation" "-framework CoreAudio"
+                                                "-framework AudioToolbox")
+    elseif(UNIX)
+        find_package(Threads REQUIRED)
+        target_link_libraries(${target} PRIVATE ${CMAKE_DL_LIBS} Threads::Threads m)
+    endif()
+endfunction()
+des_use_microphone(des_tui)
 if(WIN32)
     # shell32 and ole32 for SHGetKnownFolderPath and CoTaskMemFree, which find
     # the user's REAL Documents folder -- redirected into OneDrive on a great
@@ -169,6 +172,46 @@ if(WIN32)
     # in. uuid holds the FOLDERID constants in MinGW. All three are Windows' own
     # libraries, so a static build still needs nothing installed.
     target_link_libraries(des_tui PRIVATE shell32 ole32 uuid)
+endif()
+
+# ----------------------------------------------------------------------------
+# v17: the desktop app, in Qt 6 Widgets. OFF by default, so building the
+# engine, the CLI, the terminal UI and the tests still needs no Qt at all:
+#   cmake -S . -B build-gui -DDES_BUILD_GUI=ON -DCMAKE_PREFIX_PATH=<Qt>/lib/cmake
+# One design on Windows and macOS: Qt's Fusion style with one palette
+# (gui/Theme.cpp), not each platform's native widgets.
+# ----------------------------------------------------------------------------
+option(DES_BUILD_GUI "Build the Qt desktop app (DES-Simulator)" OFF)
+if(DES_BUILD_GUI)
+    find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets)
+    add_executable(des_gui
+        gui/main.cpp
+        gui/MainWindow.cpp
+        gui/ModelEditor.cpp
+        gui/DesHighlighter.cpp
+        gui/FlowView.cpp
+        gui/ResultsView.cpp
+        gui/AskPanel.cpp
+        gui/SettingsDialog.cpp
+        gui/Theme.cpp
+        tui/Microphone.cpp
+    )
+    set_target_properties(des_gui PROPERTIES
+        AUTOMOC ON
+        OUTPUT_NAME "DES-Simulator"
+        WIN32_EXECUTABLE ON          # a window, no console behind it
+        MACOSX_BUNDLE ON
+        MACOSX_BUNDLE_GUI_IDENTIFIER "org.dessimulator.app"
+        MACOSX_BUNDLE_BUNDLE_NAME "DES Simulator")
+    target_link_libraries(des_gui PRIVATE des_ui Qt6::Widgets)
+    # The engine has a Schedule::slots(); Qt's `slots`, `signals` and `emit`
+    # macros would rewrite it. The GUI spells them Q_SLOTS, Q_SIGNALS, Q_EMIT.
+    target_compile_definitions(des_gui PRIVATE QT_NO_KEYWORDS)
+    target_compile_options(des_gui PRIVATE ${DES_WARNINGS})
+    des_use_microphone(des_gui)
+    if(WIN32)
+        target_link_libraries(des_gui PRIVATE shell32 ole32 uuid)
+    endif()
 endif()
 
 add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp tests/v16_tests.cpp tests/tables_tests.cpp tests/flowgraph_tests.cpp tests/scenario_tests.cpp tests/ask_tests.cpp)
