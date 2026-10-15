@@ -119,7 +119,7 @@ void testOpening() {
     handleKey(s, Key::function(2));
     check(s.overlay() == Overlay::Ask, "F2 opens it");
     const std::string screen = screenText(s);
-    check(contains(screen, "describe the model -- sent to api.groq.com, llama-3.3-70b-versatile"),
+    check(contains(screen, "describe the model -- sent to api.groq.com, qwen/qwen3.8-27b"),
           "the panel says where the words go, and to which model");
     check(contains(screen, "Win+H") && contains(screen, "Dictation"),
           "...and how to speak instead of typing, on both systems");
@@ -218,7 +218,7 @@ void testWaiting() {
     typeText(s, "two tellers");
     handleKey(s, Key::special(KeyKind::Enter));
     check(s.askBusy() && fake.held.size() == 1, "the request is out");
-    check(contains(screenText(s), "asking llama-3.3-70b-versatile"), "the panel says it is waiting");
+    check(contains(screenText(s), "asking qwen/qwen3.8-27b"), "the panel says it is waiting");
     check(contains(screenText(s), "Esc  stop waiting"), "...and how to stop");
     typeText(s, "x");
     check(s.askDraft().empty(), "typing while waiting does not queue up words");

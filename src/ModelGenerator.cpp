@@ -1,5 +1,6 @@
 #include "ModelGenerator.hpp"
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -25,6 +26,17 @@ std::string env(const char* name) {
 }
 
 using Messages = std::vector<std::pair<std::string, std::string>>;
+
+// A reasoning model's <think>...</think>, should a server pass it through in
+// the content. Its braces would otherwise be the first "{" the JSON search
+// finds.
+std::string withoutThinking(std::string text) {
+    for (std::size_t open = text.find("<think>"); open != std::string::npos; open = text.find("<think>")) {
+        const std::size_t close = text.find("</think>", open);
+        text.erase(open, close == std::string::npos ? std::string::npos : close + 8 - open);
+    }
+    return text;
+}
 
 // The reply's text, or an explanation of why there is none.
 bool replyText(const HttpResponse& r, std::string& text, std::string& error) {
@@ -55,7 +67,11 @@ bool replyText(const HttpResponse& r, std::string& text, std::string& error) {
     }
     const JsonValue& content = choice["message"]["content"];
     if (!content.isString() || content.asString().empty()) { error = "the reply was empty"; return false; }
-    text = content.asString();
+    text = withoutThinking(content.asString());
+    if (text.find_first_not_of(" \t\r\n") == std::string::npos) {
+        error = "the reply held only the model's thinking, no answer";
+        return false;
+    }
     return true;
 }
 
@@ -143,6 +159,8 @@ LlmConfig parseLlmConfig(const std::string& text, LlmConfig c) {
         if (key == "api_key")                         c.apiKey = value;
         else if (key == "base_url" && !value.empty()) c.baseUrl = value;
         else if (key == "model" && !value.empty())    c.model = value;
+        else if (key == "reasoning_format")           c.reasoningFormat = value;
+        else if (key == "reasoning_effort")           c.reasoningEffort = value;
     }
     while (!c.baseUrl.empty() && c.baseUrl.back() == '/') c.baseUrl.pop_back();
     return c;
@@ -154,7 +172,10 @@ std::string llmConfigText(const LlmConfig& c) {
            "#   base_url = http://localhost:11434/v1   and no api_key.\n"
            "base_url = " + c.baseUrl + "\n"
            "model = " + c.model + "\n"
-           "api_key = " + c.apiKey + "\n";
+           "api_key = " + c.apiKey + "\n"
+           "# For a reasoning model: reasoning_effort = none turns thinking off.\n"
+           "reasoning_format = " + c.reasoningFormat + "\n"
+           "reasoning_effort = " + c.reasoningEffort + "\n";
 }
 
 bool saveApiKey(const std::string& key, std::string& error) {
@@ -242,13 +263,27 @@ const std::string& systemPrompt() {
     return prompt;
 }
 
+std::string effectiveReasoningFormat(const LlmConfig& config) {
+    if (!config.reasoningFormat.empty()) return config.reasoningFormat;
+    std::string m = config.model;
+    for (char& c : m) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return m.find("qwen3") != std::string::npos ? "hidden" : std::string();
+}
+
 std::string chatRequestBody(const LlmConfig& config, const Messages& messages) {
     JsonValue body = JsonValue::object();
     body.set("model", JsonValue::string(config.model));
     // Zero: the same sentence should give the same model, and a form-filling
     // task has no use for creativity.
     body.set("temperature", JsonValue::number(0));
-    body.set("max_tokens", JsonValue::number(2048));
+    // Room for a reasoning model's hidden thinking as well as the answer: the
+    // thinking counts against this, and running out mid-thought is a reply
+    // cut off before the JSON starts.
+    body.set("max_tokens", JsonValue::number(8192));
+    const std::string reasoning = effectiveReasoningFormat(config);
+    if (!reasoning.empty()) body.set("reasoning_format", JsonValue::string(reasoning));
+    if (!config.reasoningEffort.empty())
+        body.set("reasoning_effort", JsonValue::string(config.reasoningEffort));
     JsonValue format = JsonValue::object();
     format.set("type", JsonValue::string("json_object"));
     body.set("response_format", format);

@@ -680,6 +680,12 @@ des generate "customers arrive thirty an hour, two tellers take about 3 minutes 
 des generate --from model.scenario.json "there are two tellers"     # answering a question
 ```
 
+**The model** is Qwen 3.8 27B (`qwen/qwen3.8-27b`) on Groq. Groq lists it as a
+*preview* model, so if it is ever withdrawn, change `model` in `llm.conf` — any
+Groq model works, for example `llama-3.3-70b-versatile`. Qwen thinks before it
+answers; `reasoning_effort = none` in `llm.conf` turns that off for faster,
+cheaper replies.
+
 **Other providers:** `base_url` and `model` in `llm.conf`, or `DES_LLM_BASE_URL`
 and `DES_LLM_MODEL`, point it at any OpenAI-compatible server — for example
 `http://localhost:11434/v1` and `llama3.1` for Ollama on your own machine,

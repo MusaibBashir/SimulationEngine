@@ -318,10 +318,12 @@ void testGenerator() {
         check(t.urls.size() == 1 && t.urls[0] == "https://api.groq.com/openai/v1/chat/completions",
               "the request goes to Groq's OpenAI-compatible endpoint");
         const JsonValue body = json(t.bodies[0]);
-        check(body["model"].asString() == "llama-3.3-70b-versatile" &&
+        check(body["model"].asString() == "qwen/qwen3.8-27b" &&
                   body["temperature"].asNumber() == 0.0 &&
                   body["response_format"]["type"].asString() == "json_object",
-              "70B Llama, temperature 0, JSON mode");
+              "Qwen 3.8 27B, temperature 0, JSON mode");
+        check(body["reasoning_format"].asString() == "hidden" && !body.has("reasoning_effort"),
+              "a Qwen 3 model is sent reasoning_format hidden, which Groq requires with JSON mode");
         check(contains(body["messages"].items()[1]["content"].asString(), "2 tellers"),
               "the model reads the pre-parsed text");
         bool auth = false;
@@ -392,6 +394,28 @@ void testGenerator() {
         t.add(200, reply(kTeller));
         check(generateModel("x", JsonValue(), local, t).ok && t.headers[0].size() == 1,
               "a local server with no key gets no Authorization header");
+        check(!json(t.bodies[0]).has("reasoning_format"),
+              "a model that does not reason is not sent reasoning_format, which Groq would refuse");
+
+        LlmConfig set = testConfig();
+        set.reasoningFormat = "parsed";
+        set.reasoningEffort = "none";
+        RecordedTransport t2;
+        t2.add(200, reply(kTeller));
+        generateModel("x", JsonValue(), set, t2);
+        check(json(t2.bodies[0])["reasoning_format"].asString() == "parsed" &&
+                  json(t2.bodies[0])["reasoning_effort"].asString() == "none",
+              "the settings choose the reasoning format and effort when given");
+
+        RecordedTransport t3;
+        t3.add(200, reply(std::string("<think>maybe {\"time_unit\": \"hours\"}? no.</think>\n") + kTeller));
+        const GenerateResult thought = generateModel("x", JsonValue(), testConfig(), t3);
+        check(thought.ok && thought.scenario.timeUnit == TimeUnit::Minutes,
+              "thinking passed through in the content is skipped, braces and all");
+        RecordedTransport t4;
+        t4.add(200, reply("<think>only thoughts</think>"));
+        check(contains(generateModel("x", JsonValue(), testConfig(), t4).error, "only the model's thinking"),
+              "a reply that is all thinking says so");
     }
 
     check(maskKey("gsk_abcdefghijklmnopwxyz") == "gsk_…wxyz", "a key is shown as its prefix and last four");

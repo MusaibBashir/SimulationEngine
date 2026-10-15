@@ -44,8 +44,20 @@ public:
 
 struct LlmConfig {
     std::string baseUrl{"https://api.groq.com/openai/v1"};
-    std::string model{"llama-3.3-70b-versatile"};
+    // Qwen 3.8 27B on Groq. A Groq PREVIEW model -- for evaluation, and
+    // liable to be withdrawn -- so it is a setting, never a constant
+    // anything else depends on.
+    std::string model{"qwen/qwen3.8-27b"};
     std::string apiKey;          // empty for a local server that needs none
+
+    // For reasoning models. Groq REFUSES JSON mode with a reasoning model
+    // unless reasoning_format is "hidden" or "parsed" (HTTP 400), and refuses
+    // the parameter on a model that does not reason -- so it is sent only
+    // when set here, or when the model is one known to need it (Qwen 3).
+    // reasoning_effort "none" turns the thinking off: faster and cheaper,
+    // worth trying once there is an eval set to say what it costs in quality.
+    std::string reasoningFormat;    // "hidden" | "parsed" | empty: automatic
+    std::string reasoningEffort;    // "none" | "low" | "medium" | "high" | empty: not sent
 
     // DES_LLM_BASE_URL, DES_LLM_MODEL, and DES_LLM_API_KEY or GROQ_API_KEY.
     static LlmConfig fromEnvironment();
@@ -68,7 +80,8 @@ struct LlmConfig {
 //   other    $XDG_CONFIG_HOME/des-simulator/llm.conf, or ~/.config/...
 std::string llmConfigPath();
 
-// `key = value` lines: api_key, base_url, model. Unknown keys and # comments
+// `key = value` lines: api_key, base_url, model, reasoning_format,
+// reasoning_effort. Unknown keys and # comments
 // are ignored, so a newer version's file does not break an older program.
 LlmConfig   parseLlmConfig(const std::string& text, LlmConfig base = LlmConfig{});
 std::string llmConfigText(const LlmConfig& config);
@@ -100,6 +113,9 @@ GenerateResult generateModel(const std::string& description, const JsonValue& pr
 // Exposed for tests and for `des generate --show-prompt`. Byte-identical on
 // every call, so a provider that caches prompt prefixes can.
 const std::string& systemPrompt();
+// The reasoning_format the request will carry: the setting, else "hidden" for
+// a Qwen 3 model, else nothing.
+std::string        effectiveReasoningFormat(const LlmConfig& config);
 std::string        chatRequestBody(const LlmConfig& config,
                                    const std::vector<std::pair<std::string, std::string>>& messages);
 

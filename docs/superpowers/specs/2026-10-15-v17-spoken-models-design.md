@@ -1,7 +1,9 @@
 # v17 — a model you can describe out loud
 
 **Status:** approved 2026-10-15 — scope: arrivals, processing steps, delays,
-branches, shared resources, run setup; Groq's 70B Llama; voice through the
+branches, shared resources, run setup; Qwen 3.8 27B on Groq (changed from the
+70B Llama at the user's request; sent with reasoning_format=hidden, which Groq
+requires for JSON mode on a reasoning model); voice through the
 OS's own speech typing. Steps 1–5 built on `voice-agent`. In the TUI the panel is `F2`, not `^A`:
 `^A` was already select-all and `^K` the key map, so `^K` changes the key
 only inside the panel.
@@ -148,7 +150,7 @@ provider integration:
 
 ```
 base_url = https://api.groq.com/openai/v1
-model    = llama-3.3-70b-versatile
+model    = qwen/qwen3.8-27b
 api_key  = (from DES_LLM_API_KEY, or the ^K prompt)
 ```
 
