@@ -5,6 +5,95 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Unreleased] — v17, on `voice-agent` — "Describe a model out loud"
+
+### Added
+
+- **`F2` in the editor: describe a model, or speak it.** A panel (also the
+  **Ask F2** button on the top bar) takes a description typed or dictated with
+  the operating system's own speech typing -- `Win+H` on Windows, Dictation on
+  macOS. A small language model fills in a short form, and this project's own
+  code writes the model, which replaces the text as **one edit** (`^Z` takes
+  it back). The panel lists what was understood and every number it had to
+  assume; a missing fact or an overloaded server comes back as a question,
+  answered in the same box. The request runs in the background and `Esc`
+  stops waiting. Scope: arrival streams, processing steps with their own or
+  shared servers, delays, chance branches, run setup.
+- **The language model never writes `.des` text.** It fills in a Scenario of
+  about twenty fields (`include/Scenario.hpp`); the reader checks every field,
+  sending a malformed one back to the model once by name and turning a missing
+  one into a question; `ScenarioBuilder` writes every block, `Next` and
+  default, listing each default as an assumption; the result is compiled
+  before it is handed over.
+- **A pre-parser** reads the numbers first: number words to digits, "half an
+  hour" to 30 minutes, the time between arrivals written beside every rate,
+  and "about 15 minutes" marked as the pattern it means.
+- **Offered load as a question.** The traffic equations are solved over the
+  form (branches and rework loops included); a step or shared resource at or
+  above 100% asks how many servers there are, and how many would keep up.
+- **Qwen 3.8 27B on Groq** by default (`qwen/qwen3.8-27b`), at temperature 0 in
+  JSON mode, with `reasoning_format: hidden` sent automatically -- Groq refuses
+  JSON mode with a reasoning model otherwise. Any OpenAI-compatible server
+  works, Ollama on the same machine included.
+- **`llm.conf`**, per user (`%APPDATA%\DES Simulator\` on Windows,
+  `~/Library/Application Support/DES Simulator/` on a Mac): `api_key`,
+  `model`, `base_url`, `reasoning_format`, `reasoning_effort`. `^K` in the
+  panel saves the key, readable by the user alone; it is never written into a
+  model and is shown only as `gsk_...wxyz`.
+- **`des generate "<description>"`** and **`des generate --from
+  model.scenario.json "<answer>"`** on the command line, and **`des new
+  scenario.json`**, which builds a model from a hand-written form with no
+  language model at all.
+- **HTTPS through the system's own `curl`**, which ships with Windows 10/11 and
+  macOS: nothing new to install. The key and request body go in owner-only
+  temporary files, never on a command line.
+- A small JSON reader and writer (`src/Json.cpp`), depth-limited, and a third
+  library, `des_ai`, which links `des_engine` and never the reverse.
+- **Release builds by CI** (`.github/workflows/release.yml`): a `v*` tag builds
+  the Windows zip and installer and a universal macOS zip and dmg through
+  `tools/package.sh` and the new `tools/package_macos.sh`, then publishes them
+  with this file's section as the notes. A run from the Actions tab builds
+  without publishing.
+
+### Learned from testing on Qwen 3.8 27B
+
+Each of these was a wrong model on a real run, and each is now handled in code
+rather than by asking the model more firmly:
+
+- "Thirty an hour, the teller takes 3 minutes" became fixed gaps and fixed
+  service. A bare number now means random with that mean, rates are written as
+  "on average one every 2 minutes", and a fixed time is listed as an
+  assumption.
+- "About 15 minutes" became exponential. It is now marked `around` beside the
+  words before the model sees them.
+- "After the doctor, 20% need an X-ray" with no word on the other 80% sent
+  everyone to X-ray (140% busy). A branch whose target is also where the rest
+  would fall through now sends the rest past it, and says so.
+- Answering "3" to a server question came back as a form with no arrivals and
+  no steps. A count is now filled in by code with no call at all; other answers
+  go to the model with the question they answer, and its reply is merged onto
+  the form instead of replacing it.
+
+### Fixed
+
+- **A new or reopened model dropped what the program sets up at start-up.**
+  After `^N` or opening a file, F2 said "not available in this build" and
+  forgot the key, and `P` on the Flow tab could no longer open its picture (the
+  latter since 16.2). The session's settings now survive the change of model.
+- **`tools/package_macos.sh` refused a good universal binary**: `otool -L`
+  prints a heading per architecture, and the second was read as a library.
+  This is why the first two release runs on `main` failed on macOS.
+- Saving a key wrote every setting into `llm.conf`, freezing the default model
+  of the build that saved it; only the `api_key` line changes now, and the
+  first test build's `model = llama-3.3-70b-versatile` (since withdrawn by
+  Groq) is ignored. A 404 says where the model name is set.
+- The masked key used an ellipsis that a Windows console not set to UTF-8 drew
+  as `ÔÇª`; it is three dots now.
+- `packaging/README_macos.txt` was ignored by the `*.txt` rule in
+  `.gitignore`.
+
+---
+
 ## [16.2.0] — 2026-09-19 — "The flow as a graph"
 
 ### Added
