@@ -134,12 +134,12 @@ void testPreParse() {
     const PreParsed rate = preParse("thirty customers per hour, served in 3 minutes");
     check(rate.notes.size() == 1 && contains(rate.notes[0], "one every 2 minutes"),
           "a rate per hour is turned into the time between arrivals");
-    check(contains(rate.text, "per hour (one every 2 minutes)"),
+    check(contains(rate.text, "per hour (on average one every 2 minutes)"),
           "...and written beside the rate, where the model will read it");
 
-    check(contains(preParse("4 trucks a day").text, "(one every 6 hours)"),
+    check(contains(preParse("4 trucks a day").text, "(on average one every 6 hours)"),
           "a slow rate is given in hours");
-    check(contains(preParse("120 calls an hour").text, "(one every 30 seconds)"),
+    check(contains(preParse("120 calls an hour").text, "(on average one every 30 seconds)"),
           "a fast rate is given in seconds");
     check(preParse("takes 5 minutes per customer").notes.empty(),
           "'5 minutes per customer' is a time, not a rate");
@@ -252,6 +252,11 @@ void testBuilder() {
     check(expressionFor(t, TimeUnit::Minutes, &said, "Wash") == "TRIA(3, 4, 5)",
           "'about 4' with no bounds is a quarter either side");
     check(said.size() == 1 && contains(said[0], "between 3 and 5"), "...and that invention is said out loud");
+    t.pattern = Pattern::Fixed;
+    said.clear();
+    check(expressionFor(t, TimeUnit::Minutes, &said, "Teller") == "CONS(4)" && said.size() == 1 &&
+              contains(said[0], "no variation"),
+          "a fixed time is said out loud too -- no variation is a strong claim nobody may have made");
 
     const BuiltScenario b = buildScenario(readScenario(json(kTeller)).scenario);
     const std::string text = writeDocument(b.document);

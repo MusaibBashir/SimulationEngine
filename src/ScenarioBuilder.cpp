@@ -201,6 +201,12 @@ std::string expressionFor(const TimeSpec& t, TimeUnit unit, std::vector<std::str
     auto in = [&](double v) { return num(convertTime(v, t.unit, unit)); };
     switch (t.pattern) {
         case Pattern::Fixed:
+            // No variation at all is a strong claim -- it removes most of the
+            // queueing -- and a small model reaches for it whenever a sentence
+            // gives one number. So it is said out loud like any other choice.
+            if (assumptions != nullptr && !what.empty())
+                assumptions->push_back(what + ": exactly " + num(*t.mean) + " " + lowerUnit(t.unit) +
+                                       " every time, with no variation. Say \"on average\" if it varies.");
             return "CONS(" + in(*t.mean) + ")";
         case Pattern::Random:
             if (assumptions != nullptr && !what.empty())

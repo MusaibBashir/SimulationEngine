@@ -203,7 +203,9 @@ PreParsed preParse(const std::string& description) {
                     for (std::size_t k = i; k <= u; ++k) phrase += t[k].text;
                     const std::string note = phrase + " = one every " + num(every) + " " + unit;
                     out.notes.push_back(note);
-                    inserts.emplace_back(u, " (one every " + num(every) + " " + unit + ")");
+                    // "on average": a bare "(one every 2 minutes)" reads as a
+                    // timetable, and a model given it chose fixed gaps.
+                    inserts.emplace_back(u, " (on average one every " + num(every) + " " + unit + ")");
                 }
                 break;
             }
