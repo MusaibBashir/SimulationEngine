@@ -605,12 +605,13 @@ void runTuiTests() {
         check(saved.find("Long") != std::string::npos,
               "and the file says which run it was, which a bare report does not");
 
-        // ^N writes another [Run] rather than making you remember the fields.
+        // A writes another [Run] rather than making you remember the fields.
         TuiState t = TuiState::fromText(text, "many.des");
         handleKey(t, Key::control('u'));
-        handleKey(t, Key::control('n'));
-        check(t.document().rowCount("Run") == 3, "^N adds a [Run]");
-        check(t.view() == View::Model, "and goes to the text to name it");
+        handleKey(t, Key::character('a'));
+        check(t.document().rowCount("Run") == 3, "A adds a [Run]");
+        check(t.view() == View::Runs && t.runsFocus() == RunsFocus::Form,
+              "and opens its fields in the form");
     }
 
     section("Results are empty until there are any, and say so");
@@ -629,6 +630,7 @@ void runTuiTests() {
     section("^F shows the wiring, including the wiring that is wrong");
     {
         TuiState t = TuiState::open(modelPath("teller.des"));
+        t.setFlowAsList(true);
         handleKey(t, Key::control('f'));
         check(t.view() == View::Flow, "^F opens the flow");
 
@@ -655,6 +657,7 @@ void runTuiTests() {
             // Listed first it read as the default tried first, which is
             // backwards -- and this view exists to catch that kind of thing.
             TuiState d = TuiState::open(modelPath("decide.des"));
+            d.setFlowAsList(true);
             handleKey(d, Key::control('f'));
             Screen screen(90, 26);
             render(d, screen);
@@ -675,6 +678,7 @@ void runTuiTests() {
                 "Next = Typo\n\n[Process]\nName = Serve\nService = 1\n",
                 "broken.des");
             check(hasErrors(b.diagnostics()), "the model does not compile");
+            b.setFlowAsList(true);
             handleKey(b, Key::control('f'));
             check(b.view() == View::Flow, "and ^F opens anyway");
             Screen screen(90, 26);
@@ -696,8 +700,11 @@ void runTuiTests() {
         const int W = 90, H = 26;
         const Layout L = layoutFor(s, W, H);
 
-        handleKey(s, Key::mouse(MouseButton::Left, L.tabStart[1] + 1, L.barRow), W, H);
+        handleKey(s, Key::mouse(MouseButton::Left, L.tabStart[2] + 1, L.barRow), W, H);
         check(s.view() == View::Flow, "clicking a tab opens it");
+        handleKey(s, Key::mouse(MouseButton::Left, L.tabStart[1] + 1, L.barRow), W, H);
+        check(s.view() == View::Tables, "the second tab is Tables");
+        handleKey(s, Key::mouse(MouseButton::Left, L.tabStart[2] + 1, L.barRow), W, H);
         handleKey(s, Key::mouse(MouseButton::Left, L.tabStart[0] + 1, L.barRow), W, H);
         check(s.view() == View::Model, "and clicking another comes back");
 
@@ -913,6 +920,7 @@ void runTuiTests() {
         handleKey(s, Key::special(KeyKind::Escape));
 
         // The flow agrees with what was typed.
+        s.setFlowAsList(true);
         handleKey(s, Key::control('f'));
         Screen flow(90, 26);
         render(s, flow);

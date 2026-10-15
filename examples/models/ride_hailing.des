@@ -1,0 +1,532 @@
+version = 1
+
+# ============================================================================
+# Multi-Zone Ride-Hailing Dispatch & Driver Repositioning
+# Group 9, Simulation Laboratory, IIT Kharagpur -- the mid-semester model,
+# rebuilt from the Arena build guide (sections 0-7 plus the 8.1-8.4 and 8.6
+# upgrades; the Process Analyzer scenarios of 8.5 are not part of this file).
+#
+# Riders and cars are BOTH moving entities. A Match pairs a waiting rider
+# with a waiting car in the same zone (myZone); the car then drives the trip
+# and parks in the zone the trip ended in, where it waits again. Because most
+# trips end Downtown, cars drain out of the Suburb -- the spatial imbalance
+# the study measures.
+#
+# Time is in minutes. Zones: 1 = Downtown, 2 = Suburb, 3 = Airport.
+# Fleet and demand are the report's quarter scale (10 contract + 40 freelance
+# cars), which Arena's academic licence required; change Num_CV and Num_FV to
+# study other fleets.
+# ============================================================================
+
+[Run]
+Name         = Shift
+Length       = 480
+Warm-up      = 60
+Replications = 100
+Time Units   = Minutes
+
+[Entity]
+Name = Passenger
+
+[Entity]
+Name = Driver
+
+# --- Aryan C: fleet size (8.5 made these variables so they can be varied) ---
+[Variable]
+Name          = Num_CV
+Initial Value = 10
+
+[Variable]
+Name          = Num_FV
+Initial Value = 40
+
+# --- Aryan B (8.3): origin-destination travel times in minutes. Row = the
+# zone the car is in, column = the zone the trip ends in.
+[Variable]
+Name          = TravelTime
+Rows          = 3
+Columns       = 3
+Initial Value = 4, 14, 22,  14, 5, 28,  22, 28, 3
+
+# ============================================================================
+# 1. LOKESH -- demand. Riders per hour, 06:00 to 14:00; the Suburb's 8-9am
+# spike (8.1) is what starves it.
+# ============================================================================
+
+[Schedule]
+Name       = Sched_Downtown
+Type       = Arrival
+Time Units = Hours
+
+[ScheduleRow]
+Schedule = Sched_Downtown
+Value    = 6
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Downtown
+Value    = 10
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Downtown
+Value    = 14
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Downtown
+Value    = 10
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Downtown
+Value    = 8
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Downtown
+Value    = 6
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Downtown
+Value    = 8
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Downtown
+Value    = 5
+Duration = 1
+
+[Schedule]
+Name       = Sched_Suburb
+Type       = Arrival
+Time Units = Hours
+
+[ScheduleRow]
+Schedule = Sched_Suburb
+Value    = 4
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Suburb
+Value    = 9
+Duration = 1
+
+# The rush hour.
+[ScheduleRow]
+Schedule = Sched_Suburb
+Value    = 23
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Suburb
+Value    = 10
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Suburb
+Value    = 6
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Suburb
+Value    = 5
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Suburb
+Value    = 7
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Suburb
+Value    = 4
+Duration = 1
+
+[Schedule]
+Name       = Sched_Airport
+Type       = Arrival
+Time Units = Hours
+
+[ScheduleRow]
+Schedule = Sched_Airport
+Value    = 3
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Airport
+Value    = 4
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Airport
+Value    = 5
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Airport
+Value    = 6
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Airport
+Value    = 5
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Airport
+Value    = 4
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Airport
+Value    = 5
+Duration = 1
+
+[ScheduleRow]
+Schedule = Sched_Airport
+Value    = 5
+Duration = 1
+
+[Create]
+Name        = Create_Pax_Downtown
+Entity Type = Passenger
+Schedule    = Sched_Downtown
+Next        = Stamp_Pax_Downtown
+
+[Assign]
+Name = Stamp_Pax_Downtown
+Next = Riders_Waiting
+
+[AssignField]
+Assign = Stamp_Pax_Downtown
+Target = Attribute
+Name   = myZone
+Value  = 1
+
+[AssignField]
+Assign = Stamp_Pax_Downtown
+Target = Attribute
+Name   = tStart
+Value  = TNOW
+
+[Create]
+Name        = Create_Pax_Suburb
+Entity Type = Passenger
+Schedule    = Sched_Suburb
+Next        = Stamp_Pax_Suburb
+
+[Assign]
+Name = Stamp_Pax_Suburb
+Next = Riders_Waiting
+
+[AssignField]
+Assign = Stamp_Pax_Suburb
+Target = Attribute
+Name   = myZone
+Value  = 2
+
+[AssignField]
+Assign = Stamp_Pax_Suburb
+Target = Attribute
+Name   = tStart
+Value  = TNOW
+
+[Create]
+Name        = Create_Pax_Airport
+Entity Type = Passenger
+Schedule    = Sched_Airport
+Next        = Stamp_Pax_Airport
+
+[Assign]
+Name = Stamp_Pax_Airport
+Next = Riders_Waiting
+
+[AssignField]
+Assign = Stamp_Pax_Airport
+Target = Attribute
+Name   = myZone
+Value  = 3
+
+[AssignField]
+Assign = Stamp_Pax_Airport
+Target = Attribute
+Name   = tStart
+Value  = TNOW
+
+# ============================================================================
+# 5. ARYAN C -- the fleet, all of it created at time 0 and spread across the
+# zones. Per Arrival names the variable, so one number sizes each fleet.
+# ============================================================================
+
+[Create]
+Name         = Create_CV_Fleet
+Entity Type  = Driver
+Interarrival = 1
+Per Arrival  = Num_CV
+Max Arrivals = 1
+First At     = 0
+Next         = Tag_CV
+
+[Assign]
+Name = Tag_CV
+Next = Cars_Waiting
+
+[AssignField]
+Assign = Tag_CV
+Target = Attribute
+Name   = vType
+Value  = 1
+
+[AssignField]
+Assign = Tag_CV
+Target = Attribute
+Name   = myZone
+Value  = DISC(0.34, 1, 0.67, 2, 1.0, 3)
+
+[Create]
+Name         = Create_FV_Fleet
+Entity Type  = Driver
+Interarrival = 1
+Per Arrival  = Num_FV
+Max Arrivals = 1
+First At     = 0
+Next         = Tag_FV
+
+[Assign]
+Name = Tag_FV
+Next = Cars_Waiting
+
+[AssignField]
+Assign = Tag_FV
+Target = Attribute
+Name   = vType
+Value  = 2
+
+[AssignField]
+Assign = Tag_FV
+Target = Attribute
+Name   = myZone
+Value  = DISC(0.34, 1, 0.67, 2, 1.0, 3)
+
+# ============================================================================
+# 4. SHIVARCHA -- the matching engine. Lane 1 riders, lane 2 cars; a pair
+# leaves only when both are in the same zone.
+# ============================================================================
+
+[Match]
+Name      = Match_Rider_Driver
+Type      = Attribute
+Attribute = myZone
+
+[MatchLane]
+Match = Match_Rider_Driver
+Name  = Riders_Waiting
+Next  = Calc_SLA
+
+[MatchLane]
+Match = Match_Rider_Driver
+Name  = Cars_Waiting
+Next  = Pickup_Deadhead
+
+# ============================================================================
+# 6. MUSAIB -- statistics on the rider side (8.6: the 5-minute service level).
+# ============================================================================
+
+[Assign]
+Name = Calc_SLA
+Next = Rec_ServiceLevel
+
+[AssignField]
+Assign = Calc_SLA
+Target = Attribute
+Name   = metSLA
+Value  = (TNOW - tStart) <= 5
+
+[Record]
+Name      = Rec_ServiceLevel
+What      = Expression
+Value     = metSLA
+Statistic = ServiceLevel
+Next      = Split_By_Zone
+
+[Decide]
+Name = Split_By_Zone
+Type = Condition
+Next = Wait_Airport
+
+[DecideBranch]
+Decide    = Split_By_Zone
+Condition = myZone == 1
+To        = Wait_Downtown
+
+[DecideBranch]
+Decide    = Split_By_Zone
+Condition = myZone == 2
+To        = Wait_Suburb
+
+[Record]
+Name      = Wait_Downtown
+What      = TimeInterval
+Attribute = tStart
+Next      = Rider_PickedUp_Exit
+
+[Record]
+Name      = Wait_Suburb
+What      = TimeInterval
+Attribute = tStart
+Next      = Rider_PickedUp_Exit
+
+[Record]
+Name      = Wait_Airport
+What      = TimeInterval
+Attribute = tStart
+Next      = Rider_PickedUp_Exit
+
+[Dispose]
+Name = Rider_PickedUp_Exit
+
+# ============================================================================
+# The car side: deadhead to the rider (8.4), count the trip, choose where it
+# ends, drive there.
+# ============================================================================
+
+[Delay]
+Name     = Pickup_Deadhead
+Duration = UNIF(1, 4)
+Next     = Count_Trips
+
+[Record]
+Name      = Count_Trips
+What      = Count
+Statistic = Trips_Completed
+Next      = Choose_Destination
+
+# 3. ARYAN B -- 60% of trips end Downtown, 25% in the Suburb, the rest at the
+# Airport.
+[Decide]
+Name = Choose_Destination
+Type = Chance
+Next = Trip_to_Airport
+
+[DecideBranch]
+Decide      = Choose_Destination
+Probability = 0.60
+To          = Trip_to_Downtown
+
+[DecideBranch]
+Decide      = Choose_Destination
+Probability = 0.25
+To          = Trip_to_Suburb
+
+[Route]
+Name        = Trip_to_Downtown
+Route Time  = TravelTime(myZone, 1) * UNIF(0.85, 1.15)
+Destination = Zone1_Station
+
+[Route]
+Name        = Trip_to_Suburb
+Route Time  = TravelTime(myZone, 2) * UNIF(0.85, 1.15)
+Destination = Zone2_Station
+
+[Route]
+Name        = Trip_to_Airport
+Route Time  = TravelTime(myZone, 3) * UNIF(0.85, 1.15)
+Destination = Zone3_Station
+
+# ============================================================================
+# 2. AKSHAT -- the landing pads. The car is now in the trip's zone.
+# ============================================================================
+
+[Station]
+Name = Zone1_Station
+Next = SetZone_Downtown
+
+[Station]
+Name = Zone2_Station
+Next = SetZone_Suburb
+
+[Station]
+Name = Zone3_Station
+Next = SetZone_Airport
+
+[Assign]
+Name = SetZone_Downtown
+Next = Count_ThisTrip
+
+[AssignField]
+Assign = SetZone_Downtown
+Target = Attribute
+Name   = myZone
+Value  = 1
+
+[Assign]
+Name = SetZone_Suburb
+Next = Count_ThisTrip
+
+[AssignField]
+Assign = SetZone_Suburb
+Target = Attribute
+Name   = myZone
+Value  = 2
+
+[Assign]
+Name = SetZone_Airport
+Next = Count_ThisTrip
+
+[AssignField]
+Assign = SetZone_Airport
+Target = Attribute
+Name   = myZone
+Value  = 3
+
+# 8.2: contract drivers break after 5 trips and log off from minute 420.
+# Freelancers keep driving.
+[Assign]
+Name = Count_ThisTrip
+Next = CV_ShiftOver
+
+[AssignField]
+Assign = Count_ThisTrip
+Target = Attribute
+Name   = TripsSinceBreak
+Value  = TripsSinceBreak + 1
+
+[Decide]
+Name = CV_ShiftOver
+Type = Condition
+Next = NeedBreak
+
+[DecideBranch]
+Decide    = CV_ShiftOver
+Condition = vType == 1 && TNOW >= 420
+To        = CV_LoggedOff
+
+[Dispose]
+Name = CV_LoggedOff
+
+[Decide]
+Name = NeedBreak
+Type = Condition
+Next = Cars_Waiting
+
+[DecideBranch]
+Decide    = NeedBreak
+Condition = vType == 1 && TripsSinceBreak >= 5
+To        = Take_Break
+
+[Delay]
+Name     = Take_Break
+Duration = EXPO(10)
+Next     = Reset_Break
+
+[Assign]
+Name = Reset_Break
+Next = Cars_Waiting
+
+[AssignField]
+Assign = Reset_Break
+Target = Attribute
+Name   = TripsSinceBreak
+Value  = 0

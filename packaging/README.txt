@@ -13,11 +13,12 @@ STARTING IT
 
 Double-click DES-Simulator.exe.
 
-It opens a blank model called untitled.des, kept in
+It opens a blank model. The first time you save it (Ctrl+S) it asks for a
+name, and keeps it in
 
     Documents\DES Models\
 
-and opens that same file again next time, so your work is where you left it.
+Ctrl+N starts another new model, asking for its name first.
 
 To open some other model, drag its .des file onto DES-Simulator.exe. If you
 used the installer, double-clicking a .des file opens it directly.
@@ -49,7 +50,9 @@ blank, for you to fill in. Lines starting with # are comments.
 There is no drawing canvas. A CONNECTION between two modules is the name of
 the next module, typed into a "Next" field.
 
-The examples folder has four finished models to open and take apart.
+The examples folder has finished models to open and take apart, including
+ride_hailing.des: a three-zone ride-hailing city with riders and cars matched
+by zone, hourly arrival schedules, and cars driving to where their trips end.
 
 
 KEYS
@@ -61,6 +64,8 @@ KEYS
   Ctrl+J        jump to the first error; errors are marked E beside the line
   Ctrl+T        write a working model into an empty file
   Ctrl+R        run the model
+  Ctrl+N        a new model (it asks for the name)
+  Ctrl+D        the Tables tab: variables, arrays, matrices, schedules
   Ctrl+W        save the results to a file beside the model
   Ctrl+S        save the model
   Ctrl+Z Ctrl+Y undo, redo
@@ -68,8 +73,30 @@ KEYS
   Tab           move between the module list and the text
   Ctrl+Q        quit (it asks first if you have unsaved changes)
 
-The tabs along the top -- Model, Flow, Runs, Results -- can be clicked, or
-reached with Ctrl+B, Ctrl+F, Ctrl+U and Ctrl+E.
+The tabs along the top -- Model, Tables, Flow, Runs, Results -- can be
+clicked, or reached with Ctrl+B, Ctrl+D, Ctrl+F, Ctrl+U and Ctrl+E.
+
+The Flow tab draws the model as a graph using Graphviz. The installer offers
+to install Graphviz for you; if you skipped that, or used the zip, install it
+once with this command in a terminal, then restart the program:
+
+    winget install Graphviz.Graphviz
+
+Without it the Flow tab shows the same wiring as a list. On the Flow tab, the
+Left and Right arrows move across a graph too wide for the window -- the bar
+along the bottom shows which part is in view, and can be clicked -- Up and
+Down choose a block, L switches between the graph and the list, and P saves
+the graph as a picture in an "images" folder next to the model and opens it.
+
+Double-clicking a model opens the program maximized.
+
+On the Tables tab, numbers such as a fleet size, a travel-time table or an
+hourly arrival schedule are edited as a grid. Pick a kind on the left and
+press Enter to make one; the model uses it by its name. A block copied from
+Excel can be pasted straight into the grid.
+
+On the Runs tab: A adds a run, Delete removes one, and Tab moves into the
+chosen run's settings, where Enter changes a setting.
 
 
 IF SOMETHING GOES WRONG

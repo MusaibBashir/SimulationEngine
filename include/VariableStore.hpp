@@ -33,6 +33,16 @@ private:
     };
 
     std::unordered_map<std::string, Variable> m_variables;
+    // v16: a table of numbers under one name, read as Name(i) or Name(i, j).
+    struct Array {
+        int                 rows{1};
+        int                 columns{1};
+        std::vector<double> initial;
+        std::vector<double> current;
+    };
+    std::unordered_map<std::string, Array> m_arrays;
+    std::vector<std::string>               m_arrayOrder;   // NOT in m_order:
+                                                           // names() is the time-averaged ones
     std::vector<std::string>                  m_order;          // declaration order
     std::vector<std::string>                  m_attributeNames;
     SimTime                                   m_measuringSince{0.0};
@@ -42,6 +52,16 @@ public:
     // Throws ModelError on a duplicate, or on a collision with a known
     // attribute name.
     void declare(const std::string& name, double initialValue);
+    // `initial` holds rows x columns values row by row, or ONE value for all.
+    void declareArray(const std::string& name, int rows, int columns,
+                      const std::vector<double>& initial);
+    bool isArray(const std::string& name) const { return m_arrays.count(name) != 0; }
+    int  rowsOf(const std::string& name) const;
+    int  columnsOf(const std::string& name) const;
+    // 1-based and rounded. Outside the table is a ModelError naming the cell,
+    // never a read of whatever happens to be next in memory.
+    double element(const std::string& name, double row, double column = 1.0) const;
+    std::vector<std::string> arrayNames() const;
 
     // The attribute names declare() checks against. Set before declaring.
     void noteAttributeNames(std::vector<std::string> names);

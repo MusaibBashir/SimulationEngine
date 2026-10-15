@@ -121,7 +121,7 @@ t3=$(date +%s)
 timeout -k 30 "$LIMIT" ./des_san < /dev/null > run.log 2>&1
 rc=$?
 t4=$(date +%s)
-grep -E 'runtime error|ERROR: |SUMMARY|checks passed|FAIL|error: attempt' run.log
+grep -E 'runtime error|ERROR: |SUMMARY|checks passed|checks skipped|SKIP:|FAIL|error: attempt' run.log
 if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     echo "ERROR: the sanitised suite did not finish within ${LIMIT}s -- it was stopped in $(grep '^\[' run.log | tail -1)"
 elif [ "$rc" -ne 0 ]; then

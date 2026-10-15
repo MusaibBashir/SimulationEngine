@@ -33,4 +33,10 @@ ParseResult parseExpression(const std::string& source);
 // no cell to point at. Throws ModelError listing every diagnostic.
 ExpressionPtr expr(const std::string& source);
 
+// v16: the same, knowing which names are ARRAY variables, so TravelTime(1, 2)
+// is a read of one cell rather than a call to an unknown function.
+ParseResult parseExpression(const std::string& source,
+                            const std::vector<std::string>& arrayNames);
+ExpressionPtr expr(const std::string& source, const std::vector<std::string>& arrayNames);
+
 }  // namespace des

@@ -1,6 +1,7 @@
 #include "Terminal.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 #include <sys/ioctl.h>
@@ -227,5 +228,22 @@ std::string defaultModelPath() { return "untitled.des"; }
 // A POSIX terminal outlives the program running in it, so there is never a
 // window about to vanish with the last message still in it.
 bool launchedOnOwnConsole() { return false; }
+
+// A terminal emulator's window belongs to the person who opened it.
+void maximizeOwnWindow() {}
+
+bool openWithDefaultApp(const std::string& path) {
+    // In the background, and silent: a viewer that writes to the terminal
+    // would draw over the UI.
+    std::string quoted = "'";
+    for (const char c : path) quoted += c == '\'' ? std::string("'\\''") : std::string(1, c);
+    quoted += "'";
+#ifdef __APPLE__
+    const std::string cmd = "open " + quoted + " >/dev/null 2>&1 &";
+#else
+    const std::string cmd = "xdg-open " + quoted + " >/dev/null 2>&1 &";
+#endif
+    return std::system(cmd.c_str()) == 0;
+}
 
 }  // namespace des

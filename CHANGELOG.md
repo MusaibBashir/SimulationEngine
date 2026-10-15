@@ -5,6 +5,121 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [16.2.0] — 2026-09-19 — "The flow as a graph"
+
+### Added
+
+- **The Flow tab draws the model as a graph**, laid out by Graphviz and drawn in
+  characters: boxes where Graphviz placed them, edges along its routes with
+  arrowheads, Decide branches labelled, a Route's trip to its Station dotted,
+  sources on the left. Up/Down walks the blocks and the view follows the chosen
+  one; Enter still opens it in the text; `L` switches to the list.
+- **A big graph pans.** Left/Right move the view, Up/Down still choose a block
+  (the view follows it), Home comes back to it. A slider along the bottom edge
+  shows which slice of a wide graph is in view -- and one down the right edge
+  for a tall one; clicking the track jumps there, clicking its ends steps, and
+  Shift+wheel or a sideways swipe pans. Clicking a box chooses that block, and
+  clicking it again opens it in the text.
+- **Opened on its own -- a double-clicked `.des` file, or the program -- the
+  window starts maximized**, in the classic console and in Windows Terminal
+  (where the window a person sees is the console's owner, and only the
+  maximize button's own message moves it).
+- **`P` saves the graph as a PNG** in an `images` folder beside the model
+  (`images/<model>-flow.png`) and opens it in the default image viewer.
+- **The installer offers to install Graphviz** with winget when it is not
+  already there. Without Graphviz the Flow tab shows the list, and says why.
+- **Skipped checks are counted, not hidden.** The test harness has
+  `skip(n, why)`; the suite prints skipped checks apart from passed ones, and
+  `verify.sh` requires every leg to account for the same number (ran + skipped)
+  -- so the WSL leg, which has no Graphviz, says it skipped the nine checks
+  that run dot instead of quietly running a shorter suite.
+
+---
+
+## [16.1.0] — 2026-09-18 — "The Tables tab"
+
+### Added
+
+- **A Tables tab (^D)** for Variables, Arrays, Matrices and Schedules: the
+  kinds to make one from on the left, the chosen table's fields and grid in the
+  middle, every table on the right. A model uses a table by its name, as before.
+- The grid takes numbers only. Enter keeps a cell and moves down, Tab keeps it
+  and moves right -- so a block pasted from Excel into the terminal lands as it
+  looked there -- and typing past the last row of an array or schedule adds one.
+  `^V` pastes the program's own clipboard as a block; `^O` adds a row and `Del`
+  removes one.
+- Shrinking a table that would lose numbers, renaming a table something uses
+  (optionally everywhere it is used), and deleting one all ask first. The tab
+  has its own undo.
+- An error in a table is shown on the table, counted on the tab, and reached by
+  `^J`.
+
+### Changed
+
+- **Tables are saved in a marked section at the end of the .des file**, in one
+  fixed layout: opening a file takes them out of the Model text, saving writes
+  them back after it. A file with no tables is saved exactly as typed. The
+  first save of a file that had tables in the middle moves them to the end;
+  comments inside those blocks are not kept, except the one directly above each.
+- The Model palette no longer offers Variable, Schedule or ScheduleRow.
+- **The compiler checks names inside expressions**, which only a run did
+  before: an unknown variable, array or attribute is an error where the model
+  is edited and in `des check`, not at `^R`.
+
+---
+
+## [16.0.0] — 2026-09-18 — "The ride-hailing model"
+
+Group 9's mid-semester Arena model — multi-zone ride-hailing dispatch — can be
+built in this engine, and is: `examples/models/ride_hailing.des`. Over 100
+replications it reproduces the report's findings (Suburb wait 33.3 ± 4.9 min
+against Arena's 36.74 ± 6.03; Downtown 0; service level 0.867 against 0.875).
+Narrative in `V16_READLOG.md`.
+
+### Added
+
+- **Match**, with 2–5 named lanes (`[Match]` + `[MatchLane]`). Any, or Based on
+  Attribute; the longest-waiting candidate goes first. Lanes report their
+  length, waits and who is still waiting, and answer `NQ()`.
+- **Route and Station**: a Route holds an entity for its route time and
+  delivers it to the Station its Destination names.
+- **Arrival schedules** (`[Schedule]` + `[ScheduleRow]`, Type Arrival): a
+  Create that names one arrives as a non-stationary Poisson stream, generated
+  by thinning. `[Run]` gains **Time Units** (default Minutes), which a schedule
+  converts its own units to.
+- **Array Variables**: `Rows` and `Columns` on `[Variable]`, read as
+  `TravelTime(myZone, 2)`. Read-only in this version.
+- **Record**: TimeInterval (TNOW minus an attribute) and Expression types, a
+  Value (Count's amount), and a Statistic name several Records can share —
+  Arena's Counter and Tally names.
+- **A statistics table** in both reports: every counter, tally, Match lane and
+  Route, with mean ± 95% half-width across replications.
+- **The Runs tab is a form.** Every field of the chosen run can be changed in
+  place; `A` adds a run and `Del` deletes one, after asking.
+- **New models ask for a name**: `^N`, and the first `^S` on a scratch model.
+
+### Changed
+
+- **Create's Max Arrivals counts arrival events**, as Arena's does: Per Arrival
+  80 with Max Arrivals 1 is 80 entities, not one. No example used more than one
+  per arrival, so every baseline is unchanged.
+- **Per Arrival is an expression**, so it can name a Variable.
+- **A loop back into a Match lane is not a routing loop** — it is a population
+  (cars) waiting for partners.
+- On the Runs tab, adding a run moved from `^N` to `A`; `^N` is a new model.
+
+### Fixed
+
+- **A time limit stops the clock ON the limit.** A run of Length 480 used to
+  process the first event past 480 before stopping, so every time average was
+  divided by a run length nobody configured and an arrival after the horizon
+  was counted. The deadline is now an `EndSimulation` event, scheduled from
+  the rule's new `stopTime()`. Twelve example baselines, `teller.expected` and
+  `ride_hailing.expected` were re-captured for it, each moving only by that
+  sliver. A model that runs out of work early still ends where the work ends.
+- A study of a model with no Process read the first Process's utilisation
+  from an empty list. It reports 0 there now.
+
 ## [15.2.0] — 2026-09-14 — "A gate you can wait for"
 
 `tools/verify.sh` took about 25 minutes. On a 4-core laptop it now takes about

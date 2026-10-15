@@ -56,10 +56,50 @@ struct Layout {
 
     // Which file line is drawn on textTop, and which column is drawn at textX.
     std::size_t firstLine{0};
+    int runsFormX{0};      // v16: first column of the Runs tab's form
+    // v16.1: the Tables tab's three panels.
+    int tablesEditorX{0};  // first column of the middle panel
+    int tablesListX{0};    // first column of the right-hand list
     std::size_t firstColumn{0};
 };
 
 Layout layoutFor(const TuiState& state, int width, int height);
+
+// v16.1: the tabs along the top, in order. The label can carry a count --
+// "Tables ^D 1E" -- so both the bar and a click on it ask this one function.
+constexpr int TAB_COUNT = 5;
+View        tabView(int i);
+std::string tabLabel(const TuiState& state, int i);
+
+// Where the current table's grid is on screen, worked out once so a click is
+// turned back into a cell by the arithmetic that drew it.
+struct TableGrid {
+    int fieldTop{0};          // first header field's row
+    int gridTop{0};           // first grid row's screen row
+    int visibleRows{0};
+    int visibleColumns{0};
+    std::size_t firstRow{0};
+    std::size_t firstColumn{0};
+    int labelWidth{6};        // the row-number column
+    int cellWidth{11};
+};
+TableGrid tableGridFor(const TuiState& state, const Layout& L);
+
+// v16.2: which part of the flow graph is on screen, and where its sliders are.
+// Shared by the renderer and the mouse, like tableGridFor().
+struct FlowViewport {
+    bool shown{false};        // false: no graph (list view, or no Graphviz)
+    int  x{0}, y{0};          // the graph cell at the view's top-left
+    int  cols{0}, rows{0};    // how much of the graph fits
+    int  width{0}, height{0}; // the whole graph
+    int  top{0};              // screen row of the view's first line
+    // The horizontal slider sits on the frame's bottom edge: '<' at hLeft,
+    // '>' at hRight, the track between. The vertical one on its right edge.
+    bool hSlider{false}, vSlider{false};
+    int  hLeft{0}, hRight{0}, hRow{0};
+    int  vTop{0}, vBottom{0}, vColumn{0};
+};
+FlowViewport flowViewportFor(const TuiState& state, const Layout& L);
 
 void render(const TuiState& state, Screen& screen);
 

@@ -53,7 +53,10 @@ std::vector<std::string> wrapText(const std::string& text, int room) {
     return lines;
 }
 
-const char* const TAB_LABEL[4] = {"Model ^B", "Flow ^F", "Runs ^U", "Results ^E"};
+const char* const TAB_LABEL[TAB_COUNT] = {"Model ^B", "Tables ^D", "Flow ^F", "Runs ^U",
+                                          "Results ^E"};
+const View TAB_VIEW[TAB_COUNT] = {View::Model, View::Tables, View::Flow, View::Runs,
+                                  View::Results};
 
 int digitsIn(std::size_t n) {
     int d = 1;
@@ -84,6 +87,74 @@ void clearFor(Screen& screen, int /*x*/, int y, int /*w*/, int h) {
 
 }  // namespace
 
+View tabView(int i) { return TAB_VIEW[i < 0 || i >= TAB_COUNT ? 0 : i]; }
+
+std::string tabLabel(const TuiState& state, int i) {
+    std::string label = TAB_LABEL[i < 0 || i >= TAB_COUNT ? 0 : i];
+    if (tabView(i) == View::Tables && state.tableErrorCount() > 0)
+        label += " " + std::to_string(state.tableErrorCount()) + "E";
+    return label;
+}
+
+TableGrid tableGridFor(const TuiState& state, const Layout& L) {
+    TableGrid g;
+    g.fieldTop = L.bodyTop + 2;
+    const Table* t = state.currentTable();
+    const int fields = static_cast<int>(state.headerFields().size());
+    g.gridTop = g.fieldTop + fields + 2;
+    // Room below the grid for the used-by line and one issue.
+    g.visibleRows = std::max(1, L.bodyBottom - g.gridTop - 2);
+    const int width = L.tablesListX - 2 - L.tablesEditorX;
+    g.visibleColumns = std::max(1, (width - g.labelWidth) / g.cellWidth);
+    if (t != nullptr) {
+        const std::size_t vr = static_cast<std::size_t>(g.visibleRows);
+        const std::size_t vc = static_cast<std::size_t>(g.visibleColumns);
+        if (state.cellRow() >= vr) g.firstRow = state.cellRow() - vr + 1;
+        if (state.cellColumn() >= vc) g.firstColumn = state.cellColumn() - vc + 1;
+    }
+    return g;
+}
+
+FlowViewport flowViewportFor(const TuiState& state, const Layout& L) {
+    FlowViewport v;
+    if (state.view() != View::Flow || state.flowAsList()) return v;
+    const AsciiGraph* g = state.flowGraph();
+    if (g == nullptr) return v;
+    v.shown = true;
+    v.top = L.bodyTop + 1;
+    v.rows = std::max(1, L.bodyBottom - v.top);
+    v.cols = std::max(1, L.width - 2);
+    v.height = static_cast<int>(g->lines.size());
+    for (const std::string& l : g->lines) v.width = std::max(v.width, static_cast<int>(l.size()));
+
+    if (state.flowViewPinned()) {
+        v.x = state.flowViewX();
+        v.y = state.flowViewY();
+    } else {
+        // Follow the chosen block: centre it.
+        const std::vector<FlowBlock> blocks = flowOf(state.document());
+        if (state.flowCursor() < blocks.size()) {
+            const auto it = g->boxes.find(blocks[state.flowCursor()].name);
+            if (it != g->boxes.end()) {
+                v.x = (it->second.left + it->second.right) / 2 - v.cols / 2;
+                v.y = (it->second.top + it->second.bottom) / 2 - v.rows / 2;
+            }
+        }
+    }
+    v.x = std::max(0, std::min(v.x, std::max(0, v.width - v.cols)));
+    v.y = std::max(0, std::min(v.y, std::max(0, v.height - v.rows)));
+
+    v.hSlider = v.width > v.cols;
+    v.vSlider = v.height > v.rows;
+    v.hRow = L.bodyBottom;
+    v.hLeft = 2;
+    v.hRight = std::max(v.hLeft + 4, L.width - 34);   // the right end keeps the key hints
+    v.vColumn = L.width - 1;
+    v.vTop = L.bodyTop + 1;
+    v.vBottom = L.bodyBottom - 1;
+    return v;
+}
+
 Layout layoutFor(const TuiState& state, int width, int height) {
     Layout L;
     L.width  = width;
@@ -94,10 +165,13 @@ Layout layoutFor(const TuiState& state, int width, int height) {
     L.hintRow    = height - 1;
     L.statusRow  = height - 2;
     L.bodyBottom = height - 3;
+    L.runsFormX  = 34;
+    L.tablesEditorX = 19;
+    L.tablesListX   = std::max(L.tablesEditorX + 30, width - 25);
 
     int x = 1;
-    for (int i = 0; i < 4; ++i) {
-        const int w = static_cast<int>(std::string(TAB_LABEL[i]).size()) + 2;
+    for (int i = 0; i < TAB_COUNT; ++i) {
+        const int w = static_cast<int>(tabLabel(state, i).size()) + 2;
         L.tabStart.push_back(x);
         L.tabEnd.push_back(x + w);
         x += w;
@@ -146,16 +220,17 @@ void renderBar(const TuiState& state, Screen& screen, const Layout& L) {
     const int nameRoom = std::min(static_cast<int>(name.size()), L.width / 3);
     screen.text(L.width - nameRoom - 1, L.barRow, fitTail(name, nameRoom), Attr::Bold);
 
-    const View views[4] = {View::Model, View::Flow, View::Runs, View::Results};
-    for (int i = 0; i < 4; ++i) {
-        const bool here = state.view() == views[i];
+    for (int i = 0; i < TAB_COUNT; ++i) {
+        const bool here = state.view() == tabView(i);
         // Results is DIM until there are any. A tab that promises something
         // the program does not have yet is a tab somebody presses once and
         // then distrusts.
-        const bool empty = views[i] == View::Results && !state.haveResults();
+        const bool empty = tabView(i) == View::Results && !state.haveResults();
+        const bool broken = tabView(i) == View::Tables && state.tableErrorCount() > 0;
         screen.text(L.tabStart[i], L.barRow,
-                    " " + std::string(TAB_LABEL[i]) + " ",
-                    here ? Attr::Reverse : (empty ? Attr::Dim : Attr::Normal));
+                    " " + tabLabel(state, i) + " ",
+                    here ? Attr::Reverse : broken ? Attr::Error
+                         : (empty ? Attr::Dim : Attr::Normal));
     }
 }
 
@@ -278,6 +353,70 @@ void renderModel(const TuiState& state, Screen& screen, const Layout& L) {
     }
 }
 
+// v16.2: the graph. The view follows the chosen block, so Up/Down walks the
+// picture the way it walks the list.
+bool renderFlowGraph(const TuiState& state, Screen& screen, const Layout& L,
+                     const std::vector<FlowBlock>& blocks) {
+    const FlowViewport v = flowViewportFor(state, L);
+    if (!v.shown) return false;
+    const AsciiGraph* g = state.flowGraph();
+    const int top = v.top, rows = v.rows, cols = v.cols, ox = v.x, oy = v.y;
+    const CellRect* chosen = nullptr;
+    if (state.flowCursor() < blocks.size()) {
+        const auto it = g->boxes.find(blocks[state.flowCursor()].name);
+        if (it != g->boxes.end()) chosen = &it->second;
+    }
+    for (int r = 0; r < rows; ++r) {
+        const std::size_t line = static_cast<std::size_t>(oy + r);
+        if (line >= g->lines.size()) break;
+        const std::string& l = g->lines[line];
+        if (static_cast<std::size_t>(ox) < l.size())
+            screen.text(1, top + r, fit(l.substr(static_cast<std::size_t>(ox)), cols));
+    }
+    if (chosen != nullptr) {
+        for (int r = chosen->top; r <= chosen->bottom; ++r)
+            for (int c = chosen->left; c <= chosen->right; ++c) {
+                const int sx = 1 + c - ox, sy = top + r - oy;
+                if (sx < 1 || sx > cols || sy < top || sy >= top + rows) continue;
+                const std::string& l = g->lines[static_cast<std::size_t>(r)];
+                const char ch = static_cast<std::size_t>(c) < l.size()
+                                    ? l[static_cast<std::size_t>(c)] : ' ';
+                screen.put(sx, sy, ch, Attr::Reverse);
+            }
+    }
+    // The sliders: how much of the graph is in view, and where. The thumb's
+    // length is the visible share, so a graph twice the screen's width has a
+    // thumb half the track long.
+    const auto thumb = [](int track, int view, int whole, int at, int& from, int& len) {
+        len = std::max(1, track * view / std::max(1, whole));
+        from = whole > view ? (track - len) * at / std::max(1, whole - view) : 0;
+    };
+    if (v.hSlider) {
+        const int track = v.hRight - v.hLeft - 1;
+        int from = 0, len = 0;
+        thumb(track, v.cols, v.width, v.x, from, len);
+        screen.put(v.hLeft, v.hRow, '<', Attr::Bold);
+        for (int i = 0; i < track; ++i)
+            screen.put(v.hLeft + 1 + i, v.hRow, i >= from && i < from + len ? '#' : '-',
+                       i >= from && i < from + len ? Attr::Bold : Attr::Dim);
+        screen.put(v.hRight, v.hRow, '>', Attr::Bold);
+    }
+    if (v.vSlider) {
+        const int track = v.vBottom - v.vTop - 1;
+        int from = 0, len = 0;
+        thumb(track, v.rows, v.height, v.y, from, len);
+        screen.put(v.vColumn, v.vTop, '^', Attr::Bold);
+        for (int i = 0; i < track; ++i)
+            screen.put(v.vColumn, v.vTop + 1 + i, i >= from && i < from + len ? '#' : '|',
+                       i >= from && i < from + len ? Attr::Bold : Attr::Dim);
+        screen.put(v.vColumn, v.vBottom, 'v', Attr::Bold);
+    }
+    const std::string keys = " <- -> pan  L list  P picture ";
+    screen.text(std::max(v.hRight + 2, L.width - 1 - static_cast<int>(keys.size())), L.bodyBottom,
+                keys, Attr::Dim);
+    return true;
+}
+
 void renderFlow(const TuiState& state, Screen& screen, const Layout& L) {
     const std::vector<FlowBlock> blocks = flowOf(state.document());
     frame(screen, 0, L.bodyTop, L.width, L.bodyBottom - L.bodyTop + 1, "flow");
@@ -290,6 +429,10 @@ void renderFlow(const TuiState& state, Screen& screen, const Layout& L) {
         screen.text(3, L.bodyTop + 3, "the palette in the Model view.", Attr::Dim);
         return;
     }
+    if (renderFlowGraph(state, screen, L, blocks)) return;
+    if (!state.flowAsList() && !state.flowGraphError().empty())
+        screen.text(3, L.bodyBottom, fit(" " + state.flowGraphError() + " ", right - 4),
+                    Attr::Dim);
 
     const int rows = L.bodyBottom - L.bodyTop - 2;
     std::size_t first = 0;
@@ -344,51 +487,210 @@ void renderRuns(const TuiState& state, Screen& screen, const Layout& L) {
         screen.text(3, L.bodyTop + 3,
                     "empties -- but a [Run] says how long, how many times, and "
                     "with which seed.", Attr::Dim);
-        screen.text(3, L.bodyTop + 5, "^N adds one.", Attr::Bold);
+        screen.text(3, L.bodyTop + 5, "A adds one.", Attr::Bold);
         return;
     }
 
-    // Built from the SAME widths as the rows below. Written out by hand it
-    // was two columns adrift, which is the kind of thing that makes a reader
-    // distrust every number under it.
-    const std::size_t COLS[5] = {18, 9, 10, 7, 8};
-    const char* const HEADS[5] = {"name", "length", "warm-up", "reps", "seed"};
-    std::string header;
-    for (int i = 0; i < 5; ++i) {
-        std::string h = HEADS[i];
-        h.resize(COLS[i], ' ');
-        header += h;
-    }
-    screen.text(3, L.bodyTop + 1, fit(header, right - 3), Attr::Bold);
+    // LEFT: the runs. RIGHT: the chosen one's every field, so changing a run
+    // does not mean finding its block in the text.
+    const bool listFocus = state.runsFocus() == RunsFocus::List;
+    const int listWidth = L.runsFormX - 4;
+    screen.text(3, L.bodyTop + 1, fit("run           length  reps", listWidth), Attr::Bold);
     int y = L.bodyTop + 2;
-    for (std::size_t i = 0; i < state.runs().size(); ++i) {
-        if (y >= L.bodyBottom) break;
+    for (std::size_t i = 0; i < state.runs().size() && y < L.bodyBottom; ++i, ++y) {
         const bool here = (i == state.runIndex());
         if (here) screen.put(1, y, '>', Attr::Bold);
-        const auto cell = [&](const char* column) {
-            return state.document().cellOrDefault("Run", i, column);
-        };
-        const auto pad = [](std::string s, std::size_t w) {
-            if (s.empty()) s = "-";
-            s.resize(w, ' ');
-            return s;
-        };
-        std::string line = pad(state.runs()[i], COLS[0]);
-        line += pad(cell("Length"), COLS[1]);
-        line += pad(cell("Warm-up"), COLS[2]);
-        line += pad(cell("Replications"), COLS[3]);
-        line += pad(cell("Base Seed"), COLS[4]);
-        screen.text(3, y, fit(line, right - 3), here ? Attr::Reverse : Attr::Normal);
-        ++y;
+        std::string name = state.runs()[i];
+        name.resize(14, ' ');
+        std::string length = state.document().cell("Run", i, "Length");
+        if (length.empty()) length = "-";
+        length.resize(8, ' ');
+        std::string reps = state.document().cell("Run", i, "Replications");
+        if (reps.empty()) reps = "1";
+        screen.text(3, y, fit(name + length + reps, listWidth),
+                    here ? (listFocus ? Attr::Reverse : Attr::Bold) : Attr::Normal);
+    }
+    for (int row = L.bodyTop + 1; row < L.bodyBottom; ++row)
+        screen.put(L.runsFormX - 2, row, '|', Attr::Dim);
+
+    const ModuleSchema* schema = ModuleRegistry::instance().find("Run");
+    const int fx = L.runsFormX;
+    screen.text(fx, L.bodyTop + 1,
+                fit("run " + state.runs()[state.runIndex()], right - fx), Attr::Bold);
+    y = L.bodyTop + 2;
+    for (std::size_t f = 0; f < state.runFields().size() && y < L.bodyBottom; ++f, ++y) {
+        const std::string& id = state.runFields()[f];
+        const Column* col = schema ? schema->column(id) : nullptr;
+        const bool here = !listFocus && f == state.runField();
+        std::string label = id;
+        label.resize(18, ' ');
+        std::string value = state.document().cell("Run", state.runIndex(), id);
+        Attr attr = here ? Attr::Reverse : Attr::Normal;
+        if (here && state.editingRunField()) {
+            value = state.runFieldDraft() + "_";
+        } else if (value.empty()) {
+            value = (col && !col->defaultValue.empty()) ? col->defaultValue + "  (default)"
+                                                        : "(not set)";
+            if (!here) attr = Attr::Dim;
+        }
+        if (here) screen.put(fx - 1, y, '>', Attr::Bold);
+        screen.text(fx, y, fit(label + value, right - fx), attr);
+    }
+    if (y + 1 < L.bodyBottom)
+        screen.text(fx, y + 1, fit(listFocus ? "Tab: edit this run's fields"
+                                             : "Enter changes a field   ? explains it",
+                                   right - fx), Attr::Dim);
+}
+
+void renderTables(const TuiState& state, Screen& screen, const Layout& L) {
+    frame(screen, 0, L.bodyTop, L.width, L.bodyBottom - L.bodyTop + 1, "tables");
+    const TablesFocus focus = state.tablesFocus();
+    const int editorRight = L.tablesListX - 2;
+    for (int row = L.bodyTop + 1; row < L.bodyBottom; ++row) {
+        screen.put(L.tablesEditorX - 2, row, '|', Attr::Dim);
+        screen.put(editorRight, row, '|', Attr::Dim);
     }
 
-    if (y + 1 < L.bodyBottom)
-        screen.text(3, y + 1,
-                    "Enter runs the one you are on. ^N adds another. Enter on "
-                    "its name in", Attr::Dim);
-    if (y + 2 < L.bodyBottom)
-        screen.text(3, y + 2, "the Model view edits it like any other field.",
-                    Attr::Dim);
+    // LEFT: the kinds, which is what a new table is made from.
+    screen.text(2, L.bodyTop + 1, "new", Attr::Bold);
+    const char* const kinds[4] = {"Variable", "Array", "Matrix", "Schedule"};
+    for (std::size_t k = 0; k < 4; ++k) {
+        const int y = L.bodyTop + 2 + static_cast<int>(k);
+        const bool here = k == state.kindIndex();
+        if (here && focus == TablesFocus::Kinds) screen.put(1, y, '>', Attr::Bold);
+        screen.text(2, y, fit(kinds[k], 14),
+                    here ? (focus == TablesFocus::Kinds ? Attr::Reverse : Attr::Bold)
+                         : Attr::Normal);
+    }
+
+    // RIGHT: every table there is.
+    const int lx = L.tablesListX;
+    const int lw = L.width - 1 - lx;
+    screen.text(lx, L.bodyTop + 1, fit("tables", lw), Attr::Bold);
+    const std::vector<Table>& tables = state.tables();
+    const int listRows = L.bodyBottom - (L.bodyTop + 2);
+    std::size_t first = 0;
+    if (listRows > 0 && state.tableIndex() >= static_cast<std::size_t>(listRows))
+        first = state.tableIndex() - static_cast<std::size_t>(listRows) + 1;
+    for (std::size_t i = first; i < tables.size(); ++i) {
+        const int y = L.bodyTop + 2 + static_cast<int>(i - first);
+        if (y >= L.bodyBottom) break;
+        const Table& t = tables[i];
+        bool bad = false;
+        for (const TableIssue& issue : state.tableIssues())
+            bad |= issue.table == i && issue.severity == Severity::Error;
+        std::string shape;
+        switch (t.kind) {
+            case TableKind::Variable: shape = "var"; break;
+            case TableKind::Array:    shape = "[" + std::to_string(t.rows) + "]"; break;
+            case TableKind::Matrix:
+                shape = std::to_string(t.rows) + "x" + std::to_string(t.columns); break;
+            case TableKind::Schedule: shape = "sched"; break;
+        }
+        std::string name = t.name;
+        name.resize(static_cast<std::size_t>(std::max(1, lw - 9)), ' ');
+        const bool here = i == state.tableIndex();
+        if (bad) screen.put(lx - 1, y, 'E', Attr::Error);
+        screen.text(lx, y, fit(name + " " + shape, lw),
+                    here ? (focus == TablesFocus::List ? Attr::Reverse : Attr::Bold)
+                         : Attr::Normal);
+    }
+
+    // MIDDLE: the chosen table.
+    const int ex = L.tablesEditorX;
+    const int ew = editorRight - ex - 1;
+    const Table* t = state.currentTable();
+    if (t == nullptr) {
+        screen.text(ex, L.bodyTop + 2, fit("No tables yet.", ew), Attr::Dim);
+        screen.text(ex, L.bodyTop + 4,
+                    fit("Pick a kind on the left and press Enter to make one:", ew), Attr::Dim);
+        screen.text(ex, L.bodyTop + 5,
+                    fit("a Variable, an Array, a Matrix or a Schedule.", ew), Attr::Dim);
+        return;
+    }
+    screen.text(ex, L.bodyTop + 1,
+                fit(t->name + "  (" + kindName(t->kind) + ")", ew), Attr::Bold);
+    const TableGrid g = tableGridFor(state, L);
+    const bool editorFocus = focus == TablesFocus::Editor;
+    const std::vector<std::string> fields = state.headerFields();
+    for (std::size_t f = 0; f < fields.size(); ++f) {
+        const int y = g.fieldTop + static_cast<int>(f);
+        const bool here = editorFocus && !state.onGrid() && f == state.tableField();
+        std::string label = fields[f];
+        label.resize(12, ' ');
+        const std::string value = here && state.editingTable() ? state.tableDraft() + "_"
+                                                                : state.headerValue(f);
+        if (here) screen.put(ex - 1, y, '>', Attr::Bold);
+        screen.text(ex, y, fit(label + value, ew), here ? Attr::Reverse : Attr::Normal);
+    }
+
+    // The grid: column headings, row numbers, and the cells in view.
+    std::vector<std::string> headings;
+    if (t->kind == TableKind::Schedule) headings = {"Value", "Duration"};
+    else if (t->kind == TableKind::Matrix)
+        for (std::size_t c = 0; c < t->columns; ++c) headings.push_back(std::to_string(c + 1));
+    else headings = {"Value"};
+    const auto cellText = [&](const std::string& s) {
+        std::string out = s.size() + 1 >= static_cast<std::size_t>(g.cellWidth)
+                              ? s.substr(0, static_cast<std::size_t>(g.cellWidth) - 2) + "~"
+                              : s;
+        while (out.size() < static_cast<std::size_t>(g.cellWidth) - 1) out = " " + out;
+        return out + " ";
+    };
+    const std::size_t lastColumn =
+        std::min(t->columns, g.firstColumn + static_cast<std::size_t>(g.visibleColumns));
+    const int gx = ex + g.labelWidth;
+    for (std::size_t c = g.firstColumn; c < lastColumn; ++c)
+        screen.text(gx + static_cast<int>(c - g.firstColumn) * g.cellWidth, g.gridTop - 1,
+                    cellText(headings[c]), Attr::Bold);
+    const std::size_t lastRow =
+        std::min(t->rows, g.firstRow + static_cast<std::size_t>(g.visibleRows));
+    for (std::size_t r = g.firstRow; r < lastRow; ++r) {
+        const int y = g.gridTop + static_cast<int>(r - g.firstRow);
+        screen.text(ex, y, fit(std::to_string(r + 1), g.labelWidth - 1), Attr::Dim);
+        for (std::size_t c = g.firstColumn; c < lastColumn; ++c) {
+            const bool here = editorFocus && state.onGrid() &&
+                              r == state.cellRow() && c == state.cellColumn();
+            const std::string value = here && state.editingTable() ? state.tableDraft() + "_"
+                                                                    : t->at(r, c);
+            const bool number = isNumberCell(t->at(r, c));
+            screen.text(gx + static_cast<int>(c - g.firstColumn) * g.cellWidth, y,
+                        cellText(value),
+                        here ? Attr::Reverse : number ? Attr::Normal : Attr::Error);
+        }
+    }
+    if (g.firstRow > 0) screen.text(ex, g.gridTop - 1, "^", Attr::Dim);
+    if (lastRow < t->rows)
+        screen.text(ex, g.gridTop + g.visibleRows - 1, "v", Attr::Dim);
+
+    // Under the grid: who uses it, and what is wrong with it.
+    int y = std::min(L.bodyBottom - 2,
+                     g.gridTop + static_cast<int>(lastRow - g.firstRow) + 1);
+    const std::vector<std::string> users = state.tableUsers();
+    std::string used;
+    for (const std::string& u : users) used += (used.empty() ? "" : ", ") + u;
+    screen.text(ex, y++, fit(users.empty() ? "used by: nothing yet" : "used by: " + used, ew),
+                Attr::Dim);
+    for (const TableIssue& issue : state.tableIssues()) {
+        if (issue.table != state.tableIndex() || y >= L.bodyBottom) continue;
+        screen.text(ex, y++, fit(issue.message, ew),
+                    issue.severity == Severity::Error ? Attr::Error : Attr::Dim);
+    }
+}
+
+void renderPrompt(const TuiState& state, Screen& screen, const Layout& L) {
+    const int w = std::min(L.width - 10, 64);
+    const int h = 5;
+    const int x = (L.width - w) / 2;
+    const int y = (L.height - h) / 2;
+    clearFor(screen, x, y, w, h);
+    frame(screen, x, y, w, h,
+          state.promptFor() == PromptFor::SaveAs ? "save as" : "new model");
+    screen.text(x + 2, y + 1, "Name:", Attr::Bold);
+    screen.text(x + 8, y + 1, fitTail(state.promptText() + "_", w - 10));
+    screen.text(x + 2, y + 3,
+                fit("a bare name goes in the models folder; .des is added", w - 4),
+                Attr::Dim);
 }
 
 void renderResults(const TuiState& state, Screen& screen, const Layout& L) {
@@ -454,8 +756,7 @@ void renderPicker(const TuiState& state, Screen& screen, const Layout& L) {
     const int y = (L.height - h) / 2;
     clearFor(screen, x, y, w, h);
 
-    const std::string key = keyOfLine(state.buffer().lineAt(state.buffer().caret().line));
-    frame(screen, x, y, w, h, key);
+    frame(screen, x, y, w, h, state.pickerTitle());
 
     const int rows = h - 2;
     std::size_t first = 0;
@@ -514,21 +815,22 @@ void renderRunning(const TuiState& state, Screen& screen, const Layout& L) {
 
 void renderKeyMap(Screen& screen, const Layout& L) {
     const int w = std::min(L.width - 6, 72);
-    const int h = std::min(L.height - 4, 21);
+    const int h = std::min(L.height - 4, 22);
     const int x = (L.width - w) / 2;
     const int y = (L.height - h) / 2;
     clearFor(screen, x, y, w, h);
     frame(screen, x, y, w, h, "keys");
 
     static const char* const KEYS[][2] = {
-        {"^B ^F ^U ^E",  "Model, Flow, Runs, Results"},
+        {"^B ^D ^F ^U ^E", "Model, Tables, Flow, Runs, Results"},
         {"Tab",          "swap between the palette and the text"},
         {"Enter",        "in the palette: insert that module"},
         {"^G",           "explain whatever the cursor is on"},
         {"^L",           "list the values a field allows"},
         {"^J",           "jump to the first error"},
         {"^T",           "write a working model into an empty file"},
-        {"^R",           "run; ^N on the Runs tab adds another [Run]"},
+        {"^R",           "run; on the Runs tab A adds a run, Del deletes one"},
+        {"^N",           "a new model, asking for its name"},
         {"^W",           "save the results to a file"},
         {"^S",           "save the model"},
         {"^X ^C ^V",     "cut, copy, paste; ^A selects all"},
@@ -557,12 +859,37 @@ const char* hintFor(const TuiState& state) {
         case Overlay::Help:    return "any key returns";
         case Overlay::Picker:  return "Up/Down choose   Enter accept   Esc type it instead";
         case Overlay::Running: return "Esc  stop the run";
-        case Overlay::Confirm: return "(s)ave and quit   (d)iscard and quit   (c)ancel";
+        case Overlay::Confirm:
+            switch (state.confirmFor()) {
+                case ConfirmFor::Quit:         return "(s)ave and quit   (d)iscard and quit   (c)ancel";
+                case ConfirmFor::NewFile:      return "(s)ave first   (d)iscard changes   (c)ancel";
+                case ConfirmFor::DeleteRun:    return "(y)es, delete it   (n)o";
+                case ConfirmFor::OpenExisting: return "(y)es, open it   (n)o, another name";
+                case ConfirmFor::ResizeTable:  return "(y)es, resize   (n)o, leave it";
+                case ConfirmFor::DeleteTable:  return "(y)es, delete it   (n)o";
+                case ConfirmFor::RenameTable:  return "(y)es, everywhere   (n)o, only the table   Esc cancel";
+            }
+            break;
+        case Overlay::Prompt:  return "Enter accepts   Esc cancels";
         case Overlay::None:    break;
     }
     switch (state.view()) {
-        case View::Flow:    return "Up/Down move   Enter opens that block in the text   F1 keys";
-        case View::Runs:    return "Up/Down choose   Enter runs it   ^N adds one   F1 keys";
+        case View::Tables:
+            switch (state.tablesFocus()) {
+                case TablesFocus::Kinds:  return "Up/Down kind   Enter makes one   Tab next panel   ? explain   F1 keys";
+                case TablesFocus::List:   return "Up/Down table   Del deletes it   Tab next panel   ^Z undo   F1 keys";
+                case TablesFocus::Editor:
+                    return state.editingTable()
+                               ? "Enter keep+down   Tab keep+right   Esc drop"
+                               : "Arrows move  type to edit  ^V paste  ^O add row  Del row  Tab panel  ? help";
+            }
+            break;
+        case View::Flow:    return "Up/Down block  Left/Right pan  Home back to it  Enter open  L list  P picture";
+        case View::Runs:
+            if (state.runsFocus() == RunsFocus::Form)
+                return state.editingRunField() ? "Enter keeps it   Esc leaves it"
+                                               : "Up/Down field   Enter change   ? explain   Tab list   F1 keys";
+            return "Up/Down choose   Enter runs it   A adds   Del deletes   Tab fields   F1 keys";
         case View::Results: return "Up/Down scroll   ^W save   ^R run again   F1 keys";
         case View::Model:   break;
     }
@@ -590,6 +917,7 @@ void render(const TuiState& state, Screen& screen) {
     renderBar(state, screen, L);
     switch (state.view()) {
         case View::Model:   renderModel(state, screen, L);   break;
+        case View::Tables:  renderTables(state, screen, L);  break;
         case View::Flow:    renderFlow(state, screen, L);    break;
         case View::Runs:    renderRuns(state, screen, L);    break;
         case View::Results: renderResults(state, screen, L); break;
@@ -603,6 +931,7 @@ void render(const TuiState& state, Screen& screen) {
             break;
         case Overlay::Picker:  renderPicker(state, screen, L);  break;
         case Overlay::Running: renderRunning(state, screen, L); break;
+        case Overlay::Prompt:  renderPrompt(state, screen, L);  break;
         case Overlay::Confirm: break;
         case Overlay::None:    break;
     }

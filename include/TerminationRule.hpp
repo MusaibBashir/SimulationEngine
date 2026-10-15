@@ -46,6 +46,21 @@ public:
     virtual std::optional<double> progress(const SimulationSystem&) const {
         return std::nullopt;
     }
+
+    // v16: the clock time at which this rule ends the run, when that time is
+    // KNOWN BEFORE THE RUN STARTS. Nothing means unknowable in advance -- the
+    // same honest nothing progress() returns, for the same reason.
+    //
+    // Why this exists at all. isMet() is asked BETWEEN events, so it can only
+    // ever notice that a limit has passed, never stop the clock on it. A run
+    // with stopAt(45) whose next event was at t=50 processed that event and
+    // finished with now() == 50: five minutes of queue length, utilisation and
+    // one extra arrival that the configured Length does not cover. A limit
+    // that is knowable in advance has to be put ON THE EVENT LIST, where the
+    // clock can land exactly on it -- and only the rule itself knows whether
+    // it has such a time. Hence this, and not a special case for TimeLimit
+    // inside the engine.
+    virtual std::optional<SimTime> stopTime() const { return std::nullopt; }
 };
 
 class TimeLimit : public ITerminationRule {
@@ -55,6 +70,7 @@ public:
     bool isMet(const SimulationSystem& sim) const override;
     std::string describe() const override;
     std::optional<double> progress(const SimulationSystem& sim) const override;
+    std::optional<SimTime> stopTime() const override { return m_maxTime; }
     SimTime maxTime() const { return m_maxTime; }
 };
 
@@ -90,6 +106,7 @@ public:
     bool isMet(const SimulationSystem& sim) const override;
     std::string describe() const override;
     std::optional<double> progress(const SimulationSystem& sim) const override;
+    std::optional<SimTime> stopTime() const override;
     bool empty() const { return m_rules.empty(); }
 };
 

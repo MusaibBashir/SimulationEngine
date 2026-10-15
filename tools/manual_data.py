@@ -7,7 +7,7 @@ the call-flow chapters. Prose is passed to reportlab as markup, so use &amp;,
 &lt; and &gt; rather than the bare characters.
 """
 
-VERSION_LINE = "v15.2 — a gate you can wait for · 1383 checks · 120 types"
+VERSION_LINE = "v16.2 — the flow as a graph · 1740 checks · 146 types"
 
 FRONT_MATTER = (
     "A discrete-event simulation engine in the spirit of Arena's Basic Process "
@@ -45,6 +45,34 @@ TYPE_DOC = {
     "ReadResult": "What reading a .des file produces: the document, the diagnostics found while reading it, and the format version the file declared. Reading never throws — a malformed line becomes a diagnostic and reading continues.",
     "CellRef": "Which cell a diagnostic came from: module type, row position, column name. It composes with v10's SourceSpan rather than replacing it, so the character offset the parser measured survives inside the cell the compiler names.",
     "CompileResult": "What compiling a document produces: a Model when it succeeded, the diagnostics either way, and whether the structural pass actually ran. That last flag matters because the structure pass cannot run with broken references, and reporting a model as checked when it was not is the failure this project keeps refusing.",
+
+    # -- the ride-hailing model (v16)
+    "ArrayReadExpression": "Name(i) or Name(i, j) on an array Variable. The parser builds one only for a name it was told is an array, so a mistyped function is still reported as an unknown function rather than read as a table.",
+    "TimeUnit": "Seconds, Minutes, Hours or Days. The model has one, on its [Run]; a Schedule has its own, and the compiler converts once.",
+    "ScheduleSlot": "One row of an arrival schedule, already converted to the model's base unit: a rate per base unit and how long it lasts.",
+    "ArrivalSchedule": "Rate and duration rows, repeated after the last one. nextArrival() generates a non-stationary Poisson stream by THINNING -- candidates at the peak rate, each kept with probability rate(t) / peak -- which is exact for any shape, a rate of zero included, where drawing at the current rate overshoots the busy hour that starts a minute later.",
+    "ScheduledGapExpression": "A scheduled Create's interarrival. Evaluating it gives the gap to the next arrival, so the Create schedules it like any other; its mean is unknown on purpose, which is what tells the stability check it cannot judge this source.",
+    "LevelIntegral": "The time-average of a count that steps up and down -- entities in a Match lane, entities on a Route. Each block keeps its own and updates it when the count changes, so nothing visits it on every event.",
+    "StationNode": "Arena's Station: a place entities arrive at, by a Route naming it or by an ordinary Next. Takes no time.",
+    "RouteNode": "Arena's Route: holds an entity for its route time, then delivers it to the Station named in its Destination -- no line drawn. It has no Next, so the loop check and the visit ratios stop at a Route rather than following a teleport as if it were a wire.",
+    "MatchNode": "Arena's Match. Holds entities in 2 to 5 lanes until every lane has one -- or, by attribute, one with the same value -- then releases one from each at the same instant, each by its own lane's exit. Nothing routes to the Match itself.",
+    "MatchLaneNode": "One lane of a Match, and a block of its own: other blocks route to it by name, it keeps its own queue and statistics, and its Next is where its matched entity goes. A loop back into a lane is a population waiting for partners, not a routing loop.",
+    "NamedStatistic": "One number a model asked to have reported -- a Record's counter or tally, a Match lane's queue, a Route's traffic -- with the label the report prints. A flat list, so a study averages it across replications without knowing what kind of block it came from.",
+    "ConfirmFor": "Which question the one Confirm overlay is asking -- quit, new file, delete a run, open an existing file -- so a 'd' meaning discard-and-quit can never be read as discard-and-open.",
+    "PromptFor": "What the one-line Prompt is for: naming a new model, or naming an unnamed one on its first save.",
+    "RunsFocus": "Which half of the Runs tab has the keyboard: the list of runs, or the chosen run's form.",
+    "PickerFor": "Which field a Picker writes into: the editor's current line, the Runs form's selected field, or a table's Time Units.",
+    "FlowViewport": "Which part of the flow graph is on screen and where its sliders are: the view's top-left cell, how much fits, the whole graph's size, and the ends of the horizontal and vertical sliders. Worked out once, so the renderer draws the sliders and the mouse reads clicks on them by the same arithmetic.",
+    "PlainNode": "One node as Graphviz's plain output gives it: name, label, shape, centre and size in inches, y upwards.",
+    "PlainEdge": "One edge from the plain output: its ends, the B-spline control points of its route, its style, and its label with the label's position.",
+    "PlainLayout": "Everything `dot -Tplain` said about a graph: its size and every node and edge. ok() is false for an empty or unreadable one.",
+    "AsciiGraph": "The layout drawn in characters, one string per row, and where each node's box landed, so the Flow tab can highlight the chosen block and scroll to it.",
+    "TableKind": "Variable, Array, Matrix or Schedule -- the four things the Tables tab makes.",
+    "Table": "One table: its kind, name, note (the comment above it in the file), shape, and its cells as the TEXT that was typed, so 0.60 is written back as 0.60. A schedule is rows of (Value, Duration) with its Time Units.",
+    "SplitResult": "A file taken apart: the model text the Model tab edits, and the tables the Tables tab edits.",
+    "TablesFocus": "Which of the Tables tab's three panels has the keyboard: the kinds, the editor, or the list.",
+    "TableIssue": "A compiler diagnostic that landed in the tables section, put on the table it is about -- so the list can mark it, the editor can show it, and the tab can count it.",
+    "TableGrid": "Where the current table's grid is on screen: its top row, how many rows and columns are in view, and the first of each. Worked out once, so a click is turned back into a cell by the arithmetic that drew it.",
 
     # -- runtime control (v12)
     "RunState": "Where a run has got to: Ready, Running, Paused, Finished, Cancelled or Failed. Finished and Cancelled are terminal, and advance() on either returns 0 rather than throwing -- a front end that polls past the end is normal, not wrong.",
@@ -584,7 +612,7 @@ CHAPTERS = [
               "NameExpression", "UnaryExpression", "BinaryExpression",
               "LambdaExpression", "DistributionExpression", "ParseResult",
               "IModelState", "EvalContext", "FieldContext", "ValidationContext",
-              "VariableStore"]),
+              "VariableStore", "ArrayReadExpression"]),
   ]),
 
  (6, "The Document Layer",
@@ -739,7 +767,39 @@ CHAPTERS = [
    ("text", "layoutFor() computes the geometry once. render() draws with it and the input "
             "layer hit-tests clicks with it, so a click is turned back into what was "
             "clicked by the arithmetic that drew it."),
-   ("types", ["TextBuffer", "Caret", "View", "Pane", "Overlay", "Layout"]),
+   ("h3", "Runs you can change, files with names"),
+   ("text", "v16's Runs tab is a list and a form. Every change in the form rewrites one "
+            "line of that run's [Run] block -- tried on a copy first, so a bad value never "
+            "reaches the text, and one undo step. ^N asks for a model's name, and a model "
+            "opened with no file asks on its first save rather than becoming untitled.des. "
+            "One Confirm overlay and one Prompt serve every question, told apart by "
+            "ConfirmFor and PromptFor."),
+   ("types", ["TextBuffer", "Caret", "View", "Pane", "Overlay", "Layout",
+              "ConfirmFor", "PromptFor", "RunsFocus", "PickerFor"]),
+   ("h3", "Tables on their own tab (v16.1)"),
+   ("text", "Variables, arrays, matrices and schedules are edited as grids on the Tables "
+            "tab, and the Model tab's text holds the rest. They are still saved in the one "
+            ".des file: opening takes every [Variable], [Schedule] and [ScheduleRow] out of "
+            "the text (splitTables), and saving writes the text and then a marked section "
+            "in one fixed layout (joinTables), so saving twice writes the same bytes and the "
+            "engine reads the format it always has. What compiles is TuiState::joinedText(). "
+            "A cell takes numbers only; Enter keeps it and moves down and Tab keeps it and "
+            "moves right, which is what a block pasted into the terminal from Excel arrives "
+            "as."),
+   ("types", ["TableKind", "Table", "SplitResult", "TablesFocus", "TableIssue", "TableGrid"]),
+   ("h3", "The flow as a graph (v16.2)"),
+   ("text", "Graphviz lays the model out and the Flow tab draws that layout in characters. "
+            "dotFor() writes the DOT; dot runs once per change of the model, on a hidden "
+            "console of its own, and returns its plain layout; parsePlain() reads it and "
+            "drawAscii() draws boxes where dot put them and edges along its splines. Only "
+            "findDot() and runDot() touch the machine, so the rest is tested without "
+            "Graphviz. P renders a PNG into an images folder beside the model."),
+   ("text", "A graph wider or taller than the window pans: Left and Right move the view, "
+            "Up/Down choose a block and the view follows it, Home comes back to it, and a "
+            "slider along the bottom edge -- and one down the right when the graph is taller "
+            "than the window -- shows which slice is in view. Clicking the track jumps there; "
+            "clicking a box chooses that block."),
+   ("types", ["PlainNode", "PlainEdge", "PlainLayout", "AsciiGraph", "FlowViewport"]),
   ]),
 
  (10, "The Flowchart",
@@ -752,6 +812,15 @@ CHAPTERS = [
    ("types", ["NodeContext", "INode", "DelayNode", "AssignTarget", "AssignNode",
               "DecideNode", "BatchNode", "SeparateNode", "RecordNode",
               "DisposeNode", "Station", "CreateNode"]),
+   ("h3", "v16: what a ride-hailing model needs"),
+   ("text", "Cars and riders are both moving entities. A <b>Match</b> pairs one from each "
+            "lane when they agree on an attribute; a <b>Route</b> carries the car to the "
+            "<b>Station</b> its trip ends at; arrivals follow an <b>ArrivalSchedule</b> "
+            "through the day. A Create's Per Arrival may name a Variable, and Max Arrivals "
+            "counts arrivals -- so Per Arrival 80 with Max Arrivals 1 is a fleet of 80, as "
+            "in Arena. examples/models/ride_hailing.des puts all of it together."),
+   ("types", ["MatchNode", "MatchLaneNode", "StationNode", "RouteNode", "LevelIntegral",
+              "TimeUnit", "ScheduleSlot", "ArrivalSchedule", "ScheduledGapExpression"]),
   ]),
 
  (11, "The Model",
@@ -777,7 +846,7 @@ CHAPTERS = [
             "streams and the model. It also implements IModelState, which is how an "
             "expression reads the running system without the expression layer depending "
             "on the model."),
-   ("types", ["SimulationSystem", "StationResults", "RunResults",
+   ("types", ["SimulationSystem", "NamedStatistic", "StationResults", "RunResults",
               "ITerminationRule", "TimeLimit", "EntityLimit", "DrainedRule", "AnyOf",
               "TraceLevel", "Trace"]),
   ]),
@@ -949,13 +1018,55 @@ CHAPTERS = [
               ["blockTypeAt / keyOfLine", "Which record a line of text is inside, and the "
                "key of a key = value line."],
               ["starterModelText()", "A working single-server model, as text, with its "
-               "comments."]],
+               "comments."],
+              ["splitTables(text)", "A file's tables out of its text, with the comment "
+               "above each as its note."],
+              ["joinTables(text, tables)", "The file again: the text, then the marked "
+               "tables section. No tables: the text exactly as it was."],
+              ["tableLineRanges(text, tables)", "Where each table sits in the joined file, "
+               "so a diagnostic there is put on its table."],
+              ["parsePastedBlock(text)", "A block from a spreadsheet or CSV, split on tabs, "
+               "else commas or semicolons, else spaces."],
+              ["renameInText(text, from, to)", "Whole-word renames on the value side of "
+               "key = value lines; comments are left alone."],
+              ["usersOf(doc, name)", "Every record that names a table -- what a rename or "
+               "delete affects."],
+              ["isNumberCell / isTableName", "What a cell and a table name may hold."],
+              ["dotFor(doc)", "The model as Graphviz DOT, left to right, shaped and "
+               "labelled by block type."],
+              ["parsePlain(text) / drawAscii(layout)", "dot's plain layout read, and drawn "
+               "in characters."],
+              ["findDot() / runDot(...)", "Where Graphviz is, and running it to a file in "
+               "any format it supports."],
+              ["flowImagePath(model)", "<model's folder>/images/<model>-flow.png."],
+              ["flowViewportFor(state, layout)", "Which part of the graph is in view, and "
+               "where its sliders are."],
+              ["maximizeOwnWindow()", "Maximizes the program's window when it has one of "
+               "its own -- the owning Windows Terminal window, or the classic console."],
+              ["tabView / tabLabel", "The tabs in order, and each one's label with any "
+               "error count."],
+              ["tableGridFor(state, layout)", "The current table's grid geometry, shared by "
+               "the renderer and the mouse."],
+              ["resolveModelName(typed, dir)", "What a typed model name means: a bare name "
+               "in the models folder, a path as given, .des added when there is no "
+               "extension; blank comes back empty."]],
     [0.58, 0.42]),
+   ("h3", "Time and reporting"),
+   ("table", [["Function", "Does"],
+              ["timeUnitFrom(text, out)", "Seconds, Minutes, Hours or Days, from the "
+               "spelling a document uses."],
+              ["unitsPer(from, to)", "How many of one unit make another: unitsPer(Hours, "
+               "Minutes) is 60."],
+              ["reportNamedStatistics(os, perRep)", "Every named statistic, mean and 95% "
+               "half-width across replications; nothing when there are none."]],
+    [0.52, 0.48]),
    ("h3", "The expression layer"),
    ("table", [["Function", "Does"],
               ["tokenise(text)", "Text to tokens with spans. Never throws."],
               ["parseExpression(text)", "Tokens to a tree plus diagnostics. Never throws."],
               ["expr(text)", "The same, but throws. For C++ callers."],
+              ["parseExpression(text, arrays)", "The same, knowing which names are array "
+               "Variables, so T(1, 2) reads a cell. expr has the same overload."],
               ["isBuiltinFunction(name)", "Whether a name is in the call table."],
               ["isNumber / isText", "Which half of a Value is present."],
               ["asNumber / asText", "Reads a Value, throwing rather than coercing."],
@@ -968,7 +1079,8 @@ CHAPTERS = [
     [0.40, 0.60]),
    ("h3", "Grammar functions"),
    ("text", "Usable inside any expression field. Distributions: EXPO, CONS, UNIF, TRIA, "
-            "NORM, LOGN, WEIB, ERLA, POIS, DISC. Model state: NQ(block), NR(name), "
+            "NORM, LOGN, WEIB, ERLA, POIS, DISC. Array Variables: Name(i), Name(i, j). "
+            "Model state: NQ(block or Match lane), NR(name), "
             "MR(name), WIP(), and the constant TNOW. Maths: MIN, MAX, ABS, ROUND, TRUNC, "
             "SQRT, LN, EXP, MOD."),
    ("text", "<b>Three traps.</b> EXPO is the exponential distribution while EXP is e to the "
@@ -982,6 +1094,50 @@ CHAPTERS = [
 
 # The members the derived-accessor fallback cannot honestly describe.
 MEMBER_DOC.update({
+    "VariableStore::rowsOf": "How many rows an array has; 0 for a name that is not an array.",
+    "VariableStore::columnsOf": "How many columns an array has; 0 for a name that is not an array.",
+    "VariableStore::element": "One cell, 1-based and rounded. Outside the table is a ModelError naming the cell and the table's size, never a read of whatever is next in memory.",
+    "TuiState::stepRunField": "Moves between the Runs form's fields. Clamps rather than wraps.",
+    "TuiState::typeRunField": "One character into the field being edited. Nothing reaches the text until the edit is committed.",
+    "TuiState::commitRunFieldEdit": "Writes the edited field into the [Run] block. A value the compiler would reject is refused with its message, and the edit stays open to be fixed.",
+    "TuiState::deleteRun": "Removes a [Run] block and the comment directly above it, as one undo step. The last block in a file takes its separating blank lines with it.",
+    "TuiState::openPrompt": "Opens the one-line name prompt, for a new model or for naming an unnamed one.",
+    "TuiState::typePrompt": "One character into the name being typed.",
+    "TuiState::answerConfirm": "Answers the NewFile and OpenExisting questions: save first, discard, or cancel; open the existing file, or go back to the name.",
+    "TuiState::newBlankModel": "Replaces the model with an empty one at a path, clean and with nothing to undo.",
+    "Model::perArrival": "Per Arrival as an expression, worked out at each arrival -- so a fleet size can live in a Variable.",
+    "Model::stationBlock": "A Station, named for the Routes that send entities to it.",
+    "Model::routeBlock": "A Route with its route time. Its Destination is set by routeTo(), once the Station exists.",
+    "Model::routeTo": "Where a Route delivers. Refuses anything that is not a Station.",
+    "TimeLimit::stopTime": "Its own limit. Known before the run starts, so the engine puts it on the event list and the clock stops exactly on it rather than on the first event after it.",
+    "AnyOf::stopTime": "The earliest deadline any child knows -- the composite is met when its FIRST child is, so the first knowable time is the one the clock must stop on. A child that cannot say may still end the run sooner.",
+    "TuiState::saveFlowPicture": "P on the Flow tab: dot renders the PNG into images/ beside the model, and the opener the terminal layer installed shows it. Says why when Graphviz is missing or fails.",
+    "Table::at": "One cell, by row and column, counting from 0.",
+    "Table::resize": "A new shape. New cells are 0; cells that no longer fit are dropped -- which is why the tab asks resizeLoses() first.",
+    "Table::resizeLoses": "Whether a new shape would drop a cell that is not zero.",
+    "TuiState::stepKind": "Moves among the four kinds on the left.",
+    "TuiState::stepTable": "Moves among the tables in the list.",
+    "TuiState::selectTable": "Shows a table in the editor, with the cursor on its Name.",
+    "TuiState::headerValue": "A header field's value as the editor shows it: the name, a size, or the Time Units.",
+    "TuiState::moveTableCursor": "Moves through the header fields and on into the grid. Keeps any edit in progress first, and stays put if the edit is refused.",
+    "TuiState::beginTableEdit": "Starts editing the field or cell under the cursor, with its value or empty. Time Units opens a list instead.",
+    "TuiState::typeTable": "One character into the field or cell; typing on a cell that is not being edited starts a fresh edit, as a spreadsheet does.",
+    "TuiState::commitTableEdit": "Keeps the edit. A cell refuses anything but a number and a Name anything but a new identifier, each saying why and leaving the edit open; a rename or a shrink that loses numbers asks first.",
+    "TuiState::pasteIntoTable": "A block from the clipboard, from the cursor on. It grows an array or schedule downwards and a matrix both ways, and refuses a block holding anything but numbers.",
+    "Model::match": "A Match; an empty attribute means Any. Kept out of the default entry, since nothing enters a Match by its own name.",
+    "Model::matchLane": "Adds a lane to a Match, in lane order. The lane is a block other blocks route to by name.",
+    "MatchNode::addLane": "Registers a lane, in order. Model::matchLane is the way to call it.",
+    "MatchNode::tryMatch": "Releases every match now possible -- normally none or one. All matched entities are taken before any is routed, and an arrival that routing causes only queues: the loop already running looks again.",
+    "MatchNode::lane": "The i-th lane, in lane order.",
+    "MatchLaneNode::take": "Removes the i-th waiting entity and counts its wait. Only the Match calls it.",
+    "MatchLaneNode::averageWaiting": "The time-average number waiting since the start, or since the warm-up ended.",
+    "RouteNode::timeExpression": "The route time, mutable so the engine can give it its own random stream.",
+    "RouteNode::averageInTransit": "The time-average number on this Route -- the share of the fleet that is driving rather than waiting.",
+    "LevelIntegral::change": "Closes the rectangle up to now at the old level, then moves the level.",
+    "LevelIntegral::restart": "Warm-up: forgets the area and keeps the level, because whoever is waiting still is.",
+    "LevelIntegral::average": "The time-average up to now, closing the last rectangle without changing anything.",
+    "ArrivalSchedule::rateAt": "The rate at a time, repeating after the last row.",
+    "ArrivalSchedule::nextArrival": "The first arrival after now, by thinning. Exact for any schedule, including hours with no arrivals at all.",
     "Entity::addMember": "Adds an entity to this one's batch. A batch representative carries its members until a Separate splits them out.",
     "Entity::members": "The entities this batch representative is carrying.",
     "Entity::isBatch": "Whether this entity is carrying members.",

@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1383/1383 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1740/1740 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -51,6 +51,17 @@ with the mouse working throughout. The buffer is the source of truth and
 everything else is derived from it after every keystroke, so what you save is
 what you typed. `[Run]` records can be named and kept side by side, and the
 Results tab remembers which one produced what.
+
+**v16: an Arena model from a real course, built here.** Group 9's multi-zone
+ride-hailing model — riders and cars as moving entities, paired by a **Match**
+on their zone, cars carried by **Routes** to the **Stations** their trips end
+at, riders arriving by hourly **Schedules** with an 8–9am spike — is
+`examples/models/ride_hailing.des`. Over 100 replications it reproduces the
+report's findings: Suburb riders wait 33.3 ± 4.9 min (Arena: 36.74 ± 6.03),
+Downtown riders none, 87% served within 5 minutes. Array Variables
+(`TravelTime(myZone, 2)`), Records into named counters and tallies, and a
+statistics table with half-widths came with it. The Runs tab is a form now,
+and new models ask for their name.
 
 ```cpp
 #include "des.hpp"
@@ -330,7 +341,9 @@ spacing and ordering survive because nothing rewrites them.
 | `^L` | list the values a field allows — Arena's drop-down |
 | `^J` | jump to the first error |
 | `^T` | write a working model into an empty file |
-| `^R` | run it; `^N` on the Runs tab adds another `[Run]` |
+| `^R` | run it; on the Runs tab `A` adds a `[Run]` and `Del` deletes one |
+| `^N` | a new model — it asks for the name |
+| `^D` | the Tables tab: variables, arrays, matrices and schedules |
 | `^W` | save the results |
 | `^S` `^Z` `^Y` `^X` `^C` `^V` `^A` | save, undo, redo, cut, copy, paste, select all |
 | `^Q` | quit — and it **asks** if there is unsaved work |
@@ -381,17 +394,74 @@ A diagnostic names a *cell*; `lineOf()` turns that back into a line, and `^J`
 takes you to the first one. Pressing `^R` on a model that does not compile
 names the actual problem rather than saying it will not run.
 
-**Many `[Run]` records, chosen by name.** Arena keeps one Run Setup and makes
-you edit it to try a longer horizon; a file can hold several:
+**Many `[Run]` records, chosen by name, changed in a form.** Arena keeps one
+Run Setup and makes you edit it to try a longer horizon; a file can hold
+several, and the Runs tab edits them without finding their text:
 
 ```
 +-- runs --------------------------------------------------------------+
-|  name              length   warm-up   reps   seed                    |
-|> Short             50       0         1      12345                   |
-|  Long              5000     500       20     12345                   |
+|  run           length  reps     | run Long                           |
+|  Short         50      1        |> Name              Long            |
+|> Long          5000    20       |  Length            5000            |
+|                                 |  Warm-up           500             |
+|                                 |  Replications      20              |
+|                                 |  Base Seed         12345  (default)|
 +----------------------------------------------------------------------+
-Up/Down choose   Enter runs it   ^N adds one   F1 keys
+Up/Down field   Enter change   ? explain   Tab list   F1 keys
 ```
+
+`Tab` moves into the form; `Enter` changes a field (yes/no fields open a list);
+every change rewrites one line of that run's `[Run]` block, is refused if the
+compiler would reject it, and is one `^Z`. `A` adds a run and `Del` deletes
+one, after asking — with the comment above it.
+
+**The Flow tab is a graph.** Graphviz lays the model out and the tab draws it
+in characters -- the chosen block highlighted, the view following it as
+Up/Down walks the blocks:
+
+```
+ +---------------------+     +-------------------+
+ ( Create_Pax_Downtown )     |Stamp_Pax_Downtown |
+ |                     |---> |                   |
+ +---------------------+     +-------------------+
+                                             \---
+                                               \--->  +--------------+
+                                                      |Riders_Waiting|
+```
+
+Left/Right pan a graph wider than the window, with a slider along the bottom
+edge showing which slice is in view (and one down the right for a tall graph);
+Home comes back to the chosen block, and clicking a box chooses it. `L`
+switches to the list. `P` saves it as a PNG in an `images` folder beside the
+model and opens it. Double-clicking a `.des` file opens the program maximized. Graphviz is needed for the graph; the installer offers
+to install it (`winget install Graphviz.Graphviz` by hand), and without it the
+tab shows the list.
+
+**Tables have their own tab.** Variables, arrays, matrices and schedules are
+edited as grids on the Tables tab (`^D`), and the Model tab's text keeps only
+the rest of the model, which uses a table by its name:
+
+```
++- new ----+- Sched_Suburb  (Schedule) --------------+- tables ------------+
+| Variable | Name        Sched_Suburb                | Num_CV        var   |
+| Array    | Rows        8                           | TravelTime    3x3   |
+| Matrix   | Time Units  Hours                       | Sched_Suburb  sched |
+| Schedule |            Value   Duration             |                     |
+|          | 1              4          1             |                     |
+|          | 3             23          1             |                     |
+|          | used by: Create Create_Pax_Suburb       |                     |
++----------+-----------------------------------------+---------------------+
+```
+
+A cell takes a number; Enter keeps it and moves down, Tab keeps it and moves
+right, so a block copied from Excel and pasted into the window lands as it
+looked there. Typing past the last row of a schedule adds one. They are still
+saved in the one `.des` file, in a marked section at the end.
+
+**New models have names.** `^N` asks for one (a bare name goes in
+`Documents\DES Models` and gets `.des`), asking first about unsaved work, and
+offering to open a file that already exists. Double-clicking the program still
+opens a scratch model, but its first `^S` asks what to call it.
 
 **Results are a tab**, dimmed until there are any, and the run lands on them
 when it finishes. `^W` writes the report beside the model, carrying which run
@@ -587,6 +657,7 @@ Actions tab builds a version without publishing it.
 | `V13_READLOG.md` | The terminal UI, and the v11 guarantee it proved false |
 | `V14_READLOG.md` | Building a model from nothing: pick lists, the starter model, and four bugs only looking found |
 | `V15_READLOG.md` | The grid becomes a text editor, and the assert that had been one keystroke away since v11 |
+| `V16_READLOG.md` | The ride-hailing model: Match, schedules, routes, arrays, and Arena's Max Arrivals |
 | `ARENA_MAP.md` | Arena module → this engine, and where the two differ |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
@@ -599,7 +670,7 @@ sim/
 ├── cli/             the des command: check, run and regress
 ├── tui/             des_tui: the terminal UI, and the only platform code
 ├── examples/models/ hand-written .des models
-├── tests/           1383 unit checks
+├── tests/           1740 unit checks
 ├── include/         50 headers
 └── src/             42 sources
 ```
@@ -724,5 +795,5 @@ two and every time-average goes quietly wrong with no error.
 
 Config-file input, item 4 on the v9 list, is what v11 turned out to be. The
 module palette, item 1 on the v14 list, turned out not to need a picker or an
-answer to "where does it go in file order": `^N` on a tab already appends, and
+answer to "where does it go in file order": appending to the file already did, and
 the question was only ever which *type* — which the tab bar already answers.

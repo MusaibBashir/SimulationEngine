@@ -249,6 +249,25 @@ void reportReplicationSummary(std::ostream& os,
     line(os, "utilisation (rho)",    columnOf(results, &ReplicationResult::utilisation));
 }
 
+void reportNamedStatistics(std::ostream& os,
+                           const std::vector<std::vector<NamedStatistic>>& perReplication) {
+    if (perReplication.empty() || perReplication.front().empty()) return;
+    os << std::fixed << std::setprecision(4);
+    os << "\n  " << std::setw(36) << std::left << "statistic" << std::right
+       << std::setw(12) << "mean" << "      95% half-width\n";
+    os << "  ---------------------------------------------------------------------\n";
+    const std::vector<NamedStatistic>& first = perReplication.front();
+    for (std::size_t i = 0; i < first.size(); ++i) {
+        std::vector<double> xs;
+        for (const auto& rep : perReplication)
+            if (i < rep.size()) xs.push_back(rep[i].value);
+        os << "  " << std::setw(36) << std::left << first[i].label << std::right
+           << std::setw(12) << Summary::mean(xs);
+        if (xs.size() > 1) os << "  +/- " << std::setw(10) << Summary::halfWidth95(xs);
+        os << "\n";
+    }
+}
+
 Experiment::Comparison Experiment::compare(Experiment& a, Experiment& b,
                                            double ReplicationResult::* field) {
     Comparison c;

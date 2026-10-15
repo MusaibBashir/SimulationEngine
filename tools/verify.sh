@@ -21,8 +21,15 @@
 #
 # So the gate is: warnings clean under two independent front ends,
 # AddressSanitizer clean under MSVC, and ASan + UBSan clean under WSL. The
-# Windows-side UBSan gap is real and is worked around, not ignored -- if WSL is
-# missing the leg SKIPS loudly rather than passing silently.
+# Windows-side UBSan gap is real and is worked around, not ignored.
+#
+# A LEG THAT DID NOT RUN FAILS THE GATE (v16.2). A leg that cannot start --
+# no compiler, no WSL, a distro that would not come up -- used to print SKIP
+# and leave the verdict CLEAN, which is how a run whose WSL distro was merely
+# Stopped reported VERIFY CLEAN having checked nothing under UBSan. Now it is a
+# failure unless it is named in VERIFY_ALLOW_SKIP (for example
+# VERIFY_ALLOW_SKIP=sanitisers, or =all), and the RESULT block says which legs
+# ran, which failed and which were skipped, and why.
 #
 # WHY IT NO LONGER TAKES TWENTY-FIVE MINUTES (v15.2). Each figure here was
 # measured on this machine -- a Ryzen 5 7235HS, 4 cores and 8 threads -- because
@@ -131,6 +138,12 @@ FAILED=0
 # with no toolchain reports the same result as a clean one. A gate that
 # measured nothing has not passed; it has not run.
 RAN=0
+
+# The WSL distro the sanitiser leg runs in. A variable so a sabotage run can
+# point it at one that does not exist and watch the gate go red.
+WSL_DISTRO="${VERIFY_WSL_DISTRO:-Ubuntu}"
+# Legs allowed not to run: a comma-separated list, or "all".
+VERIFY_ALLOW_SKIP="${VERIFY_ALLOW_SKIP:-}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -288,13 +301,24 @@ asan() {
     ' > "$full" 2>&1
     rc=$?
     tail -6 "$full"
-    CHECKS="$(grep -o '[0-9]* / [0-9]* checks passed' "$full" | tail -1 | awk '{print $3}')"
+    CHECKS="$(accounted "$(cat "$full")")"
     if [ "$rc" -ne 0 ]; then
         printf 'ASan: FAILED\n'; FAILED=1
     else
         printf 'ASan: clean\n'
         RAN=$((RAN + 1))
     fi
+}
+
+# Checks a suite ACCOUNTED for: those it ran plus those it skipped and said
+# so. A leg without Graphviz skips the checks that run dot; it must still
+# account for the same suite as a leg that has it, or it ran less of it.
+accounted() {
+    local ran skipped
+    ran="$(printf '%s' "$1" | grep -o '[0-9]* / [0-9]* checks passed' | tail -1 | awk '{print $3}')"
+    skipped="$(printf '%s' "$1" | grep -o '^[0-9]* checks skipped' | tail -1 | awk '{print $1}')"
+    [ -z "$ran" ] && return
+    printf '%s' "$((ran + ${skipped:-0}))"
 }
 
 # --- WSL ASan + UBSan --------------------------------------------------------
@@ -311,20 +335,31 @@ sanitisers() {
     if ! command -v wsl.exe > /dev/null 2>&1; then
         printf 'SKIP: no wsl.exe on PATH\n'; return
     fi
-    if ! wsl.exe -d Ubuntu -e bash -lc 'command -v g++' > /dev/null 2>&1; then
-        printf 'SKIP: no Ubuntu distro with g++ (wsl -l -v to check)\n'; return
+    # START THE DISTRO FIRST, and give it time. A Stopped distro takes several
+    # seconds to boot, and the first probe of a cold one could fail where the
+    # same probe a minute later passed -- which is how this leg once skipped
+    # itself on a machine that had everything it needed.
+    if ! MSYS_NO_PATHCONV=1 timeout 180 wsl.exe -d "$WSL_DISTRO" -e /bin/true > /dev/null 2>&1; then
+        printf 'SKIP: the WSL distro "%s" would not start (wsl -l -v to check)\n' "$WSL_DISTRO"
+        return
+    fi
+    # By ABSOLUTE path: a bare g++ can resolve through WSL's interop PATH to a
+    # WINDOWS compiler, which would pass this probe and fail the build.
+    if ! MSYS_NO_PATHCONV=1 timeout 60 wsl.exe -d "$WSL_DISTRO" -e /usr/bin/test -x /usr/bin/g++ > /dev/null 2>&1; then
+        printf 'SKIP: the WSL distro "%s" has no /usr/bin/g++ (sudo apt install g++)\n' "$WSL_DISTRO"
+        return
     fi
     local wslroot out
-    wslroot="$(MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu -e wslpath -a "$(cygpath -w "$ROOT")" 2>/dev/null | tr -d '\r\000')"
+    wslroot="$(MSYS_NO_PATHCONV=1 wsl.exe -d "$WSL_DISTRO" -e wslpath -a "$(cygpath -w "$ROOT")" 2>/dev/null | tr -d '\r\000')"
     if [ -z "$wslroot" ]; then
         printf 'Sanitisers: INCONCLUSIVE -- WSL could not translate %s\n' "$ROOT"; FAILED=1
         return
     fi
     out="$(tr -d '\r' < tools/verify_wsl.sh \
-           | MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu -e bash -s -- "$wslroot" "$JOBS" "$SUITE_TIMEOUT" 2>&1 \
+           | MSYS_NO_PATHCONV=1 wsl.exe -d "$WSL_DISTRO" -e bash -s -- "$wslroot" "$JOBS" "$SUITE_TIMEOUT" 2>&1 \
            | tr -d '\000')"
     printf '%s\n' "$out"
-    CHECKS="$(printf '%s' "$out" | grep -o '[0-9]* / [0-9]* checks passed' | tail -1 | awk '{print $3}')"
+    CHECKS="$(accounted "$out")"
     if printf '%s' "$out" | grep -qE 'runtime error|ERROR: |FAIL'; then
         printf 'Sanitisers: FAILED\n'; FAILED=1
     elif printf '%s' "$out" | grep -q 'checks passed'; then
@@ -370,17 +405,33 @@ run_legs() {
         [ "$remaining" -gt 0 ] && sleep 1
     done
 
-    local counts=()
+    local counts=() why
     for leg in "${legs[@]}"; do
         cat "$WORK/$leg.out"
         if [ -f "$WORK/$leg.status" ]; then
             read -r f r c s < "$WORK/$leg.status"
-            [ "$f" -ne 0 ] && FAILED=1
-            RAN=$((RAN + r))
             [ "$c" != "-" ] && counts+=("$leg=$c")
+            if [ "$f" -ne 0 ]; then
+                FAILED=1
+                OUTCOMES+=("$leg: FAILED")
+            elif [ "$r" -gt 0 ]; then
+                RAN=$((RAN + r))
+                OUTCOMES+=("$leg: ran")
+            else
+                # Neither failed nor ran: it could not start. Say why, and
+                # fail unless this leg was explicitly allowed to be missing.
+                why="$(grep -m1 '^SKIP:' "$WORK/$leg.out" | sed 's/^SKIP: //')"
+                if skip_allowed "$leg"; then
+                    OUTCOMES+=("$leg: skipped, allowed by VERIFY_ALLOW_SKIP -- ${why:-no reason given}")
+                else
+                    FAILED=1
+                    OUTCOMES+=("$leg: DID NOT RUN -- ${why:-no reason given}")
+                fi
+            fi
         else
             printf '%s: stopped without a verdict\n' "$leg"
             FAILED=1
+            OUTCOMES+=("$leg: stopped without a verdict")
         fi
     done
 
@@ -392,7 +443,7 @@ run_legs() {
         local first="${counts[0]#*=}" x
         for x in "${counts[@]}"; do
             if [ "${x#*=}" != "$first" ]; then
-                printf '\nThe legs ran different numbers of checks: %s\n' "${counts[*]}"
+                printf '\nThe legs accounted for different numbers of checks (ran + skipped): %s\n' "${counts[*]}"
                 FAILED=1
                 break
             fi
@@ -400,6 +451,15 @@ run_legs() {
     fi
 }
 
+# Whether a leg is named in VERIFY_ALLOW_SKIP.
+skip_allowed() {
+    case ",$VERIFY_ALLOW_SKIP," in
+        *",all,"*|*",$1,"*) return 0 ;;
+    esac
+    return 1
+}
+
+OUTCOMES=()
 SECONDS=0
 case "${1:-all}" in
     warnings|asan|sanitisers) run_legs "$1" ;;
@@ -413,6 +473,7 @@ esac
 # found. The sabotage runs that proved the gate catches a warning and a broken
 # build both printed that.
 banner "RESULT"
+for o in "${OUTCOMES[@]}"; do printf '  %s\n' "$o"; done
 if [ "$FAILED" -ne 0 ]; then
     printf 'VERIFY FAILED (%ss)\n' "$SECONDS"
     exit 1

@@ -107,6 +107,14 @@ public:
     void schedule(EventNotice e);
     EventNotice popImminent();
     SimTime nextEventTime() const;
+
+    // v16: the imminent event WITHOUT consuming it. nextEventTime() already
+    // published half of it; the engine now needs the other half, to tell a
+    // list holding real work from one holding nothing but the run's own
+    // deadline. Const reference into the heap, so it is valid only until the
+    // next schedule() or popImminent() -- read it, do not keep it.
+    // Undefined when empty, same precondition as nextEventTime().
+    const EventNotice& peekImminent() const;
 };
 
 }  // namespace des

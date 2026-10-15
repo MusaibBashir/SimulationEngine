@@ -13,10 +13,14 @@ namespace des_test {
 
 extern int g_checks;
 extern int g_failures;
+extern int g_skipped;
 
 void check(bool condition, const std::string& what);
 void checkClose(double got, double want, double tol, const std::string& what);
 void section(const char* name);
+// v16.2: `n` checks that could not run here, and why -- counted apart from the
+// ones that ran, so a skip is visible rather than a quietly shorter suite.
+void skip(int n, const std::string& why);
 
 // Where the shipped .des models are. Compiled in rather than assumed
 // relative to the working directory: the suite is run from the repository

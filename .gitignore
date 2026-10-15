@@ -111,3 +111,6 @@ dist/
 # The README that ships inside the package. The *.txt rule above is for
 # trace output; without this line a fresh clone could not build a package.
 !packaging/README.txt
+
+# v16.2: pictures the Flow tab saves beside a model (P).
+examples/models/images/

@@ -298,4 +298,17 @@ void TextBuffer::insertLines(const std::vector<std::string>& block) {
     clampCaret();
 }
 
+void TextBuffer::replaceLines(std::size_t first, std::size_t count,
+                              const std::vector<std::string>& with) {
+    if (first > m_lines.size()) first = m_lines.size();
+    count = std::min(count, m_lines.size() - first);
+    pushUndo();
+    m_lines.erase(m_lines.begin() + static_cast<long>(first),
+                  m_lines.begin() + static_cast<long>(first + count));
+    m_lines.insert(m_lines.begin() + static_cast<long>(first), with.begin(), with.end());
+    m_caret  = Caret{first, 0};
+    m_anchor = m_caret;
+    clampCaret();
+}
+
 }  // namespace des

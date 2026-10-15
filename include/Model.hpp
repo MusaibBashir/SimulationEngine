@@ -19,6 +19,9 @@
 #include "Node.hpp"
 #include "Nodes.hpp"
 #include "Create.hpp"
+#include "Transfer.hpp"
+#include "Match.hpp"
+#include "Schedule.hpp"
 #include "Station.hpp"
 #include "Distribution.hpp"
 #include "ModelError.hpp"
@@ -68,6 +71,9 @@ private:
 
     INode* add(std::unique_ptr<INode> node);
     AssignNode& assignBlock(const std::string& name);
+    // Every expression a Model builds is parsed knowing its array variables,
+    // which is why arrays must be declared before the blocks that read them.
+    ExpressionPtr ex(const std::string& text) const;
     void requireUnique(const std::string& name) const;
 
 public:
@@ -104,6 +110,15 @@ public:
     //
     // Turning this on says you know. The report then says so too, so the numbers
     // are never quietly presented as steady-state results.
+    // v16: Per Arrival as an expression, worked out at each arrival -- so a
+    // fleet size can live in a Variable.
+    Model& perArrival(const std::string& createName, const std::string& text);
+    // v16: a Create whose arrivals follow a schedule (a non-stationary Poisson
+    // stream) instead of an interarrival expression.
+    Model& scheduledSource(const std::string& name, const std::string& entityType,
+                           const std::string& scheduleName, ArrivalSchedule schedule,
+                           long long maxArrivals = -1, SimTime firstAt = 0.0,
+                           int entitiesPerArrival = 1);
     Model& allowOverload(bool on = true);
     bool overloadAllowed() const { return m_allowOverload; }
     void setInterarrival(std::unique_ptr<IDistribution> d) { arrivals(std::move(d)); }
@@ -111,6 +126,9 @@ public:
     // block -- the thing an attribute cannot say, because an attribute travels
     // with one entity and this belongs to the system.
     Model& variable(const std::string& name, double initialValue = 0.0);
+    // v16: rows x columns numbers under one name, read as Name(i, j).
+    Model& variableArray(const std::string& name, int rows, int columns,
+                         const std::vector<double>& initial);
     VariableStore&       variables()       { return m_variables; }
     const VariableStore& variables() const { return m_variables; }
 
@@ -211,7 +229,21 @@ public:
     Model& record(const std::string& name);                              // count
     Model& recordAttribute(const std::string& name, const std::string& attributeName);
     Model& recordTimeInSystem(const std::string& name);
+    // v16: the document's Record. `valueText` may be empty; `statistic` is the
+    // name it is reported under.
+    Model& recordNamed(const std::string& name, RecordNode::What what,
+                       const std::string& attribute, const std::string& valueText,
+                       const std::string& statistic);
     Model& dispose(const std::string& name);
+    // v16: Arena's Station and Route. A Route goes to its destination Station
+    // after the route time; it has no Next.
+    Model& stationBlock(const std::string& name);
+    Model& routeBlock(const std::string& name, const std::string& timeText);
+    Model& routeTo(const std::string& routeName, const std::string& stationName);
+    // v16: Arena's Match. `attribute` empty means Any. Lanes are blocks of
+    // their own, added in lane order; other blocks route to a lane by name.
+    Model& match(const std::string& name, const std::string& attribute);
+    Model& matchLane(const std::string& matchName, const std::string& laneName);
 
     // --- wiring ---
     Model& route(const std::string& from, const std::string& to);

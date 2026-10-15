@@ -59,6 +59,15 @@ struct StationResults {
     double utilisation{0.0};
 };
 
+// v16: one number a model asked to have reported -- a Record's counter or
+// tally, a Match lane's queue, a Route's traffic -- named the way the report
+// prints it. A flat list, so a study can average it across replications
+// without knowing what kind of block each came from.
+struct NamedStatistic {
+    std::string label;
+    double      value{0.0};
+};
+
 struct RunResults {
     SimTime simulatedTime{0.0};
     SimTime warmUpDiscarded{0.0};
@@ -251,6 +260,9 @@ public:
     // and results() is the numbers report() prints, returned instead of printed.
     SimulationSystem& execute();
     RunResults results() const;
+    // In block order. Empty for a model with no named Record, Match or Route,
+    // which is every model written before v16.
+    std::vector<NamedStatistic> namedStatistics() const;
     const std::map<std::string, TypeStats>& byType() const { return m_byType; }
 
     // Chaining versions of the setters, so a whole study reads as one statement.

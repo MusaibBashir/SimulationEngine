@@ -79,8 +79,17 @@ std::vector<ModuleSchema> buildSchemas() {
                      "cannot.",
                      {ident("Name", "What expressions call it, for example "
                                     "Rejected in \"Rejected + 1\"."),
-                      real("Initial Value", "0",
-                           "Its value at the start of every replication.")}));
+                      text("Initial Value",
+                           "Its value at the start of every replication. For an "
+                           "array, every cell row by row, separated by commas "
+                           "-- or one value for all of them.", false, "0"),
+                      integer("Rows", "",
+                              "Make it an array with this many rows, read as "
+                              "Name(row) or Name(row, column). Blank means one "
+                              "number."),
+                      integer("Columns", "",
+                              "With Rows, a table: Name(row, column). Blank "
+                              "means one column.")}));
 
     s.push_back(make("Entity", ModuleKind::Data,
                      "A named kind of entity, so results can be reported per "
@@ -138,10 +147,31 @@ std::vector<ModuleSchema> buildSchemas() {
                               "so changing a service time does not shift the "
                               "arrival pattern. Needed for common random "
                               "numbers."),
+                      enumeration("Time Units", {"Seconds", "Minutes", "Hours", "Days"},
+                                  "Minutes",
+                                  "What one unit of time in this model is -- "
+                                  "Arena's Base Time Units. Only a Schedule reads "
+                                  "it, to convert its own units."),
                       boolean("Antithetic", "false",
                               "Run each replication twice, the second time with "
                               "every random draw mirrored, and average the "
                               "pair. Lower variance for the same compute.")}));
+
+    s.push_back(make("Schedule", ModuleKind::Data,
+                     "Arrival rates that change over time. Arena's Schedule data "
+                     "module, Type Arrival. The rows are ScheduleRow records, in "
+                     "order; after the last one it starts again. A Create uses it "
+                     "by naming it in its Schedule column.",
+                     {ident("Name", "What a Create's Schedule column names."),
+                      text("Type",
+                           "Arrival: each row's Value is arrivals per Time Unit. "
+                           "The only type in this version; Capacity schedules "
+                           "come later.", false, "Arrival"),
+                      enumeration("Time Units", {"Seconds", "Minutes", "Hours", "Days"},
+                                  "Hours",
+                                  "The unit of every row's Duration, and the "
+                                  "\"per\" in its Value: 90 with Hours is 90 "
+                                  "arrivals an hour.")}));
 
     // Read-only, and the reason is worth stating where somebody will read it:
     // this engine has no queue object apart from its Process. A discipline is
@@ -173,14 +203,21 @@ std::vector<ModuleSchema> buildSchemas() {
                           "per type."),
                       expression("Interarrival",
                                  "Time between arrivals, for example EXPO(1.0). "
-                                 "A mean of 1.0 is one arrival per time unit."),
+                                 "A mean of 1.0 is one arrival per time unit. "
+                                 "Leave blank when Schedule is set.", false),
+                      ref("Schedule", "Schedule",
+                          "Arrive by a Schedule instead -- a rate that changes "
+                          "over the day. Leave Interarrival blank."),
                       integer("Max Arrivals", "-1",
-                              "Stop after this many arrivals. -1 means never "
+                              "Stop after this many arrivals. Each arrival "
+                              "brings Per Arrival entities. -1 means never "
                               "stop."),
                       real("First At", "0",
                            "When the first arrival happens."),
-                      integer("Per Arrival", "1",
-                              "How many entities arrive together each time."),
+                      expression("Per Arrival",
+                                 "How many entities arrive together each time. "
+                                 "May name a Variable, so a fleet size can be "
+                                 "changed in one place.", false, "1"),
                       ref("Next", "Block",
                           "Where entities go from here. THIS IS THE "
                           "CONNECTION: Arena draws a line, this engine names "
@@ -310,18 +347,65 @@ std::vector<ModuleSchema> buildSchemas() {
                      "Arena's Record module.",
                      {ident("Name", "This block's name, and the name the "
                                     "statistic is reported under."),
-                      enumeration("What", {"Count", "Attribute", "TimeInSystem"},
+                      enumeration("What", {"Count", "TimeInterval", "Expression",
+                                           "Attribute", "TimeInSystem"},
                                   "Count",
-                                  "Count tallies entities passing. Attribute "
-                                  "records the value of Attribute. TimeInSystem "
+                                  "Count adds Value (1 unless set) for each entity "
+                                  "passing. TimeInterval records TNOW minus "
+                                  "Attribute -- how long since that time was "
+                                  "stamped. Expression records Value. Attribute "
+                                  "records the attribute itself. TimeInSystem "
                                   "records how long the entity has been in the "
                                   "model."),
                       text("Attribute",
-                           "Which attribute to record. Only used when What is "
-                           "Attribute."),
+                           "Which attribute. Used by TimeInterval (the time it "
+                           "holds) and Attribute (its value)."),
+                      expression("Value",
+                                 "Count: how much to add, 1 if blank. "
+                                 "Expression: the value to record, for example "
+                                 "metSLA.", false),
+                      text("Statistic",
+                           "The name it is reported under -- Arena's Counter "
+                           "Name or Tally Name. Several Records may share one. "
+                           "Blank means this block's Name."),
                       ref("Next", "Block",
                           "Where entities go next. Blank means they leave the "
                           "system.")}));
+
+    s.push_back(make("Match", ModuleKind::Flowchart,
+                     "Hold entities in 2 to 5 lanes until each lane has one -- "
+                     "or, by attribute, one with the same value -- then release "
+                     "one from every lane at once. Arena's Match module. The "
+                     "lanes are MatchLane rows; route entities to a lane's name.",
+                     {ident("Name", "This block's name. MatchLane rows name it."),
+                      enumeration("Type", {"Any", "Attribute"}, "Any",
+                                  "Any matches whoever is at the head of each "
+                                  "lane. Attribute only matches entities that "
+                                  "agree on Attribute."),
+                      text("Attribute",
+                           "Which attribute must agree, for example myZone. "
+                           "Only used when Type is Attribute.")}));
+
+    s.push_back(make("Station", ModuleKind::Flowchart,
+                     "A place entities arrive at. Arena's Station module. A "
+                     "Route sends entities here by name, with no line drawn; "
+                     "from here they carry on to Next. Takes no time.",
+                     {ident("Name", "The station's name, which a Route's "
+                                    "Destination names."),
+                      ref("Next", "Block",
+                          "Where arriving entities go. Blank means they leave "
+                          "the system.")}));
+
+    s.push_back(make("Route", ModuleKind::Flowchart,
+                     "Travel to a Station. Arena's Route module. The entity is "
+                     "away for Route Time, then arrives at Destination. A Route "
+                     "has no Next -- its Destination is where it goes.",
+                     {ident("Name", "This block's name."),
+                      expression("Route Time",
+                                 "How long the trip takes, for example "
+                                 "TravelTime(myZone, 1) * UNIF(0.85, 1.15)."),
+                      ref("Destination", "Station",
+                          "The Station it arrives at.", true)}));
 
     s.push_back(make("Dispose", ModuleKind::Flowchart,
                      "Where entities leave the model. Arena's Dispose module. "
@@ -350,6 +434,32 @@ std::vector<ModuleSchema> buildSchemas() {
                       ref("To", "Block",
                           "Where an entity taking this branch goes.")},
                      /*readOnly=*/false, /*parent=*/"Decide"));
+
+    s.push_back(make("MatchLane", ModuleKind::Child,
+                     "One lane of a Match: a queue other blocks route to by this "
+                     "row's Name, and the exit its matched entity leaves by. "
+                     "Arena draws these as a Match's numbered inputs and "
+                     "outputs. ROW ORDER is lane order.",
+                     {ref("Match", "Match", "Which Match this lane belongs to.", true),
+                      ident("Name", "The lane's name. Other blocks' Next names "
+                                    "it, and the report lists its queue under it."),
+                      ref("Next", "Block",
+                          "Where this lane's matched entity goes. Blank means "
+                          "it leaves the system.")},
+                     /*readOnly=*/false, /*parent=*/"Match"));
+
+    s.push_back(make("ScheduleRow", ModuleKind::Child,
+                     "One period of a Schedule: a rate and how long it lasts. "
+                     "ROW ORDER IS TIME ORDER.",
+                     {ref("Schedule", "Schedule", "Which Schedule this row belongs to.",
+                          true),
+                      real("Value", "",
+                           "Arrivals per the Schedule's Time Unit during this "
+                           "period. 0 means none.", true),
+                      real("Duration", "",
+                           "How long this period lasts, in the Schedule's Time "
+                           "Units.", true)},
+                     /*readOnly=*/false, /*parent=*/"Schedule"));
 
     s.push_back(make("AssignField", ModuleKind::Child,
                      "One field an Assign sets. Arena puts these in a grid "

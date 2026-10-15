@@ -108,6 +108,8 @@ void SimulationSystem::assignStreams() {
                              "decide:" + dec->name() + ":" + std::to_string(b));
                 }
             }
+        } else if (auto* rt = dynamic_cast<RouteNode*>(&n)) {
+            giveExpr(&rt->timeExpression(), "route:" + rt->name());
         } else if (auto* a = dynamic_cast<AssignNode*>(&n)) {
             for (std::size_t r = 0; r < a->rules().size(); ++r) {
                 giveExpr(a->rules()[r].value.get(),
@@ -217,7 +219,10 @@ void NodeContext::destroy(Entity* e) { m_sim.destroyEntity(e->id()); }
 double SimulationSystem::queueLength(const std::string& blockName) const {
     if (const Station* s = m_model.station(blockName))
         return static_cast<double>(s->queue().length());
-    throw ModelError("NQ(" + blockName + "): no Process block named '" + blockName + "'");
+    if (const auto* l = dynamic_cast<const MatchLaneNode*>(m_model.node(blockName)))
+        return static_cast<double>(l->waiting());
+    throw ModelError("NQ(" + blockName + "): no Process block or Match lane named '" +
+                     blockName + "'");
 }
 
 double SimulationSystem::resourceBusy(const std::string& name) const {
@@ -312,9 +317,14 @@ void SimulationSystem::refreshState() {
     // reported a queue length and a WIP of exactly zero while 32 balls sat
     // waiting. A statistic that is silently zero is worse than one that is
     // missing, because it gets copied into an answer.
-    for (std::size_t i = 0; i < m_model.nodeCount(); ++i)
+    for (std::size_t i = 0; i < m_model.nodeCount(); ++i) {
         if (auto* b = dynamic_cast<const BatchNode*>(&m_model.nodeAt(i)))
             queued += static_cast<int>(b->waitingForBatch());
+        // v16: the same reasoning for a Match lane -- riders waiting for a car
+        // are waiting, whatever the block is called.
+        if (auto* l = dynamic_cast<const MatchLaneNode*>(&m_model.nodeAt(i)))
+            queued += static_cast<int>(l->waiting());
+    }
 
     // WIP is every entity the system is holding, wherever it is -- in service,
     // in a queue, on a conveyor, waiting for a batch. Counting only queues and
@@ -407,6 +417,35 @@ void SimulationSystem::initialise() {
         m_trace.note(os.str());
     }
 
+    // *** THE RUN'S DEADLINE GOES ON THE EVENT LIST, FIRST. ***
+    //
+    // v16 fix. canStep() asks the termination rule between events, so a
+    // TimeLimit could only ever be noticed AFTER the clock had already jumped
+    // past it: `sim.stopAt(45)` with the next event at t=50 processed that
+    // event and ended with now() == 50. Every time average then divided by a
+    // run length nobody asked for, and the counts included an arrival five
+    // minutes after the configured Length. A between-events test cannot fix
+    // that, because by the time it can see the overshoot the overshoot has
+    // happened.
+    //
+    // A deadline that is known in advance is an EVENT, and the FEL is the one
+    // thing in this engine that can land the clock exactly on a time. So ask
+    // the rule for its stopTime() and schedule it. stepOnce() then closes the
+    // integrals at the limit, advances the clock to the limit, and stops --
+    // the same three lines every other event goes through, which is the point.
+    //
+    // SCHEDULED BEFORE THE SOURCES, deliberately. The FEL breaks time ties by
+    // sequence number, so going first makes the deadline beat anything else
+    // dated at exactly the limit, whether it was scheduled here or during the
+    // run. The run therefore covers [0, limit) with the clock stopping ON the
+    // limit -- one rule, no dependence on which order a model happened to be
+    // described in. It also matches what TimeLimit::isMet already said, since
+    // `now >= maxTime` is met the instant the clock reaches the limit.
+    if (m_termination) {
+        if (const std::optional<SimTime> deadline = m_termination->stopTime())
+            scheduleEvent(EventType::EndSimulation, *deadline);
+    }
+
     // v9: one Arrival event per SOURCE. There is no special arrival handling
     // left in the engine -- a Create is a block like any other, and its callback
     // makes the entity and reschedules itself.
@@ -464,8 +503,22 @@ bool SimulationSystem::canStep() const {
     // Deliberately does NOT test m_initialised. Being initialised is a
     // precondition, asserted by both callers; folding it in here would turn
     // "you forgot to initialise" into a run that silently does nothing.
-    return !m_stopped && !m_fel.isEmpty()
-           && !(m_termination && m_termination->isMet(*this));
+    if (m_stopped || m_fel.isEmpty()) return false;
+    // THE DEADLINE IS NOT WORK. v16 puts an EndSimulation event on the list so
+    // the clock can stop exactly on a TimeLimit, and that event would
+    // otherwise keep a drained model "running" to the limit with nothing left
+    // to do: a model whose last arrival is at t=188 under a 480-minute Length
+    // ended at 188 before, and every average divided by 188. Counting the
+    // engine's own bookkeeping as a pending event would silently have changed
+    // that to 480 -- a different question than the one this fix was asked, and
+    // four regression expectations' worth of different answer.
+    //
+    // So: a list holding nothing but the deadline is an EMPTY list, and the
+    // run ends where the model ran out of things to do. `size() == 1` is
+    // enough because exactly one deadline is ever scheduled.
+    if (m_fel.size() == 1 &&
+        m_fel.peekImminent().type() == EventType::EndSimulation) return false;
+    return !(m_termination && m_termination->isMet(*this));
 }
 
 bool SimulationSystem::stepOnce() {
@@ -503,7 +556,19 @@ bool SimulationSystem::stepOnce() {
         // That event ENDS the run rather than advancing it, so it reports
         // false. run() used to `return` here, which a caller-owned loop has no
         // way to observe.
-        case EventType::EndSimulation: m_stopped = true; return false;
+        case EventType::EndSimulation:
+            // v16: the run's deadline, scheduled by initialise(). The clock has
+            // already been advanced to it and the integrals already closed on
+            // it by the three lines above -- the deadline goes through exactly
+            // the same arithmetic as every other event, which is the reason it
+            // is an event at all. Nothing else to do but stop.
+            if (m_trace.isOn()) {
+                m_trace.event(m_clock.now(), "EndSimulation", 0, "-",
+                              "the run reached its time limit; the clock stops here",
+                              0, m_state.numberInSystem());
+            }
+            m_stopped = true;
+            return false;
         case EventType::WarmUpEnd:     handleWarmUpEnd();       break;
         case EventType::Observe:       handleObservation();     break;
         case EventType::Renege: {
@@ -645,6 +710,46 @@ RunResults SimulationSystem::results() const {
     return r;
 }
 
+std::vector<NamedStatistic> SimulationSystem::namedStatistics() const {
+    std::vector<NamedStatistic> out;
+    const SimTime now = m_clock.now();
+
+    // Records sharing a statistic are POOLED: a counter is their sum, a tally
+    // the mean of every value any of them recorded -- not a mean of means.
+    struct Pool { bool counter{false}; double total{0.0}; long long count{0}; };
+    std::vector<std::string> order;
+    std::map<std::string, Pool> pools;
+    for (std::size_t i = 0; i < m_model.nodeCount(); ++i) {
+        const auto* r = dynamic_cast<const RecordNode*>(&m_model.nodeAt(i));
+        if (r == nullptr || r->statistic().empty()) continue;
+        auto it = pools.find(r->statistic());
+        if (it == pools.end()) {
+            order.push_back(r->statistic());
+            it = pools.emplace(r->statistic(), Pool{r->isCounter(), 0.0, 0}).first;
+        }
+        it->second.total += r->total();
+        it->second.count += r->count();
+    }
+    for (const std::string& name : order) {
+        const Pool& p = pools[name];
+        if (p.counter) out.push_back({name + " (counter)", p.total});
+        else out.push_back({name + " (tally)",
+                            p.count ? p.total / static_cast<double>(p.count) : 0.0});
+    }
+
+    for (std::size_t i = 0; i < m_model.nodeCount(); ++i) {
+        const INode& n = m_model.nodeAt(i);
+        if (const auto* l = dynamic_cast<const MatchLaneNode*>(&n)) {
+            out.push_back({l->name() + " avg number", l->averageWaiting(now)});
+            out.push_back({l->name() + " avg wait", l->averageWait()});
+            out.push_back({l->name() + " at end", static_cast<double>(l->waiting())});
+        } else if (const auto* rt = dynamic_cast<const RouteNode*>(&n)) {
+            out.push_back({rt->name() + " avg in transit", rt->averageInTransit(now)});
+        }
+    }
+    return out;
+}
+
 void SimulationSystem::reportArenaStyle(std::ostream& os) const {
     const RunResults r = results();
     const SimTime T = r.measuredTime;
@@ -780,6 +885,14 @@ void SimulationSystem::report(std::ostream& os) const {
                   << std::setw(8)  << s.utilisation
                   << std::setw(7)  << s.maxQueueLength
                   << "\n";
+    }
+    const std::vector<NamedStatistic> named = namedStatistics();
+    if (!named.empty()) {
+        os << "\n  statistic                                       value\n";
+        os << "  -----------------------------------------------------------------\n";
+        for (const NamedStatistic& n : named)
+            os << "  " << std::setw(40) << std::left << n.label << std::right
+               << std::setw(14) << n.value << "\n";
     }
     os << "===========================================================\n";
 }

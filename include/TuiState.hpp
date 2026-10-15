@@ -13,14 +13,17 @@
 // had to work to keep comments alive. Here what is saved is what was typed.
 
 #pragma once
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 #include "Compiler.hpp"
 #include "Diagnostic.hpp"
+#include "FlowGraph.hpp"
 #include "ModelDocument.hpp"
 #include "ModuleSchema.hpp"
 #include "RunController.hpp"
+#include "TableStore.hpp"
 #include "TextBuffer.hpp"
 
 namespace des {
@@ -28,7 +31,7 @@ namespace des {
 // What fills the body of the window. Each is reachable from the bar across the
 // top and from one control key, because a bar you can only reach with a mouse
 // is a bar half the people using it cannot reach at all.
-enum class View { Model, Flow, Runs, Results };
+enum class View { Model, Tables, Flow, Runs, Results };
 
 // Which half of the Model view has the keyboard.
 enum class Pane { Palette, Editor };
@@ -36,7 +39,38 @@ enum class Pane { Palette, Editor };
 // Something drawn OVER the view, which takes every key until it closes. Modal
 // on purpose: a list of choices that let you edit underneath it would be
 // answering a question about text that had moved.
-enum class Overlay { None, Help, Picker, Confirm, Running };
+enum class Overlay { None, Help, Picker, Confirm, Running, Prompt };
+
+// One Confirm overlay asks several questions; this says which, so a 'd' that
+// means "discard and quit" can never be read as "discard and open a new file".
+enum class ConfirmFor { Quit, NewFile, DeleteRun, OpenExisting,
+                        ResizeTable, DeleteTable, RenameTable };
+
+// What the one-line Prompt is asking for.
+enum class PromptFor { None, NewFile, SaveAs };
+
+// Which half of the Runs tab has the keyboard.
+enum class RunsFocus { List, Form };
+
+// Which field a Picker writes into: the editor's current line, or the Runs
+// form's selected field.
+enum class PickerFor { Editor, RunField, TableUnits };
+
+// v16.1: which of the Tables tab's three panels has the keyboard.
+enum class TablesFocus { Kinds, Editor, List };
+
+// A compiler diagnostic that landed in the tables section, put on the table
+// (and, where it can say, the grid row) it is about.
+struct TableIssue {
+    std::size_t table{0};
+    Severity    severity{Severity::Error};
+    std::string message;
+};
+
+// v16: a typed model name becomes a path. A bare name goes in `defaultDir`, a
+// name with a folder in it is used as given, and ".des" is added when there is
+// no extension. Blank comes back empty, which the caller refuses.
+std::string resolveModelName(const std::string& typed, const std::string& defaultDir);
 
 // A working M/M/1: arrivals, one server, an exit, and a Run row. Somebody who
 // has used Arena knows what a model looks like and not what THIS one looks
@@ -166,6 +200,49 @@ public:
     void stopRun();
     const RunController* running() const { return m_run.get(); }
 
+    // v16: the Runs tab's form. Every edit rewrites one `key = value` line of
+    // that run's [Run] block, so the text stays the only copy of the model.
+    RunsFocus runsFocus() const { return m_runsFocus; }
+    void setRunsFocus(RunsFocus f);
+    const std::vector<std::string>& runFields() const { return m_runFields; }
+    std::size_t runField() const { return m_runField; }
+    void stepRunField(long long delta);
+    void setRunField(std::size_t i);
+    bool editingRunField() const { return m_editingRunField; }
+    const std::string& runFieldDraft() const { return m_runDraft; }
+    void beginRunFieldEdit();       // Yes/no and Enum fields open the picker
+    void typeRunField(char c);
+    void backspaceRunField();
+    bool commitRunFieldEdit();      // false, with the reason, when refused
+    void cancelRunFieldEdit();
+    void showRunFieldHelp();
+    // Blank removes the line. Refused -- text untouched -- when the value
+    // would be an error in that cell.
+    bool setRunValue(std::size_t run, const std::string& column, const std::string& value);
+    void requestDeleteRun();        // asks first
+    bool deleteRun(std::size_t run);
+
+    // v16: new files have names. ^N asks for one (after asking about unsaved
+    // work), and a model opened with no file asks on its first ^S rather than
+    // quietly becoming untitled.des.
+    void requestNewFile();
+    void openPrompt(PromptFor why);
+    PromptFor promptFor() const { return m_promptFor; }
+    const std::string& promptText() const { return m_promptText; }
+    void typePrompt(char c) { m_promptText.push_back(c); }
+    void backspacePrompt() { if (!m_promptText.empty()) m_promptText.pop_back(); }
+    void commitPrompt();
+    void cancelPrompt();
+    void answerConfirm(char c);     // NewFile and OpenExisting
+    bool unnamed() const { return m_unnamed; }
+    void setUnnamed(bool on) { m_unnamed = on; }
+    void setDefaultDirectory(std::string dir) { m_defaultDir = std::move(dir); }
+    void newBlankModel(const std::string& path);
+
+    ConfirmFor confirmFor() const { return m_confirmFor; }
+    PickerFor  pickerFor()  const { return m_pickerFor; }
+    const std::string& pickerTitle() const { return m_pickerTitle; }
+
     // --- results -------------------------------------------------------------
     const std::string& results()     const { return m_results; }
     const std::string& resultsOf()   const { return m_resultsOf; }
@@ -179,6 +256,77 @@ public:
     std::size_t flowCursor() const { return m_flowCursor; }
     void stepFlow(long long delta);
     void gotoFlowBlock();           // jumps the text cursor to that record
+
+    // v16.2: the flow as a graph, laid out by Graphviz and drawn in ASCII.
+    // Built on demand and kept until the model changes, so dot runs once per
+    // change rather than once per frame. Null when dot is missing or failed;
+    // flowGraphError() then says why and the tab shows the list instead.
+    const AsciiGraph* flowGraph() const;
+    const std::string& flowGraphError() const { return m_flowError; }
+    bool flowAsList() const { return m_flowAsList; }
+    // Where the graph's view is, when somebody has moved it. Until then -- and
+    // again after Up/Down or Home -- it follows the chosen block.
+    bool flowViewPinned() const { return m_flowPinned; }
+    int  flowViewX() const { return m_flowViewX; }
+    int  flowViewY() const { return m_flowViewY; }
+    void setFlowView(int x, int y) { m_flowViewX = x; m_flowViewY = y; m_flowPinned = true; }
+    void followFlowCursor() { m_flowPinned = false; }
+    void setFlowAsList(bool on) { m_flowAsList = on; }
+    // P: <model's folder>/images/<model>-flow.png, then opened.
+    bool saveFlowPicture();
+    // How a file is opened with its default program. The terminal layer
+    // installs it; tests install one that records the path.
+    void setOpener(std::function<bool(const std::string&)> open) { m_opener = std::move(open); }
+
+    // --- the Tables tab (v16.1) ---------------------------------------------
+    // Variables, arrays, matrices and schedules, edited as tables. They are
+    // saved in the same file but are not in buffer(): the model that compiles
+    // and runs is joinedText().
+    const std::vector<Table>& tables() const { return m_tables; }
+    std::string joinedText() const;
+    const std::vector<TableIssue>& tableIssues() const { return m_tableIssues; }
+    std::size_t tableErrorCount() const;
+
+    TablesFocus tablesFocus() const { return m_tablesFocus; }
+    void setTablesFocus(TablesFocus f);
+    std::size_t kindIndex() const { return m_kindIndex; }
+    void stepKind(long long delta);
+    void setKindIndex(std::size_t i);
+    void createTable();                       // of the selected kind
+    std::size_t tableIndex() const { return m_tableIndex; }
+    void stepTable(long long delta);
+    void selectTable(std::size_t i);
+    const Table* currentTable() const;
+
+    // The editor's cursor: a header field (0 .. headerFields().size() - 1) or
+    // the grid (field == headerFields().size(), at cellRow/cellColumn).
+    std::vector<std::string> headerFields() const;   // of the current table
+    std::string headerValue(std::size_t field) const;
+    std::size_t tableField() const { return m_tableField; }
+    bool onGrid() const;
+    std::size_t cellRow() const { return m_cellRow; }
+    std::size_t cellColumn() const { return m_cellColumn; }
+    void moveTableCursor(long long rows, long long columns);
+    void setTableCursor(std::size_t field, std::size_t row, std::size_t column);
+    bool editingTable() const { return m_editingTable; }
+    const std::string& tableDraft() const { return m_tableDraft; }
+    void beginTableEdit(bool keepValue);
+    void typeTable(char c);
+    void backspaceTable();
+    bool commitTableEdit();
+    void cancelTableEdit();
+    // Keeps the edit, then moves -- how a block pasted into the terminal
+    // (cells separated by Tab, rows by Enter) lands as it looked in Excel.
+    void tableTab();
+    void tableEnter();
+    void insertTableRow();                    // after the cursor
+    void deleteTableRow();
+    void pasteIntoTable(const std::string& block);
+    void requestDeleteTable();
+    void undoTables();
+    void redoTables();
+    void showTableHelp();
+    std::vector<std::string> tableUsers() const;     // of the current table
 
     // --- quitting ------------------------------------------------------------
     bool wantsQuit() const { return m_quit; }
@@ -212,6 +360,20 @@ private:
 
     std::vector<std::string> m_runs;
     std::size_t              m_runIndex{0};
+    RunsFocus                m_runsFocus{RunsFocus::List};
+    std::vector<std::string> m_runFields;
+    std::size_t              m_runField{0};
+    bool                     m_editingRunField{false};
+    std::string              m_runDraft;
+
+    ConfirmFor  m_confirmFor{ConfirmFor::Quit};
+    PromptFor   m_promptFor{PromptFor::None};
+    std::string m_promptText;
+    std::string m_pendingPath;      // the name OpenExisting is asking about
+    bool        m_unnamed{false};
+    std::string m_defaultDir{"."};
+    PickerFor   m_pickerFor{PickerFor::Editor};
+    std::string m_pickerTitle;
 
     std::string m_clip;
 
@@ -224,6 +386,40 @@ private:
     std::size_t m_resultsScroll{0};
 
     std::size_t m_flowCursor{0};
+    bool        m_flowAsList{false};
+    bool        m_flowPinned{false};
+    int         m_flowViewX{0};
+    int         m_flowViewY{0};
+    // The layout is a CACHE of the document, so filling it from a const
+    // renderer is not a change anybody can see.
+    mutable std::string m_flowDot;
+    mutable AsciiGraph  m_flowGraph;
+    mutable bool        m_flowReady{false};
+    mutable std::string m_flowError;
+    std::function<bool(const std::string&)> m_opener;
+
+    std::vector<Table>              m_tables;
+    std::vector<TableIssue>         m_tableIssues;
+    std::vector<std::vector<Table>> m_tableUndo;
+    std::vector<std::vector<Table>> m_tableRedo;
+    TablesFocus m_tablesFocus{TablesFocus::List};
+    std::size_t m_kindIndex{0};
+    std::size_t m_tableIndex{0};
+    std::size_t m_tableField{0};
+    std::size_t m_cellRow{0};
+    std::size_t m_cellColumn{0};
+    std::size_t m_entryColumn{0};     // where Enter returns to, after Tabs
+    bool        m_editingTable{false};
+    std::string m_tableDraft;
+    // What a Confirm about a table is waiting to do.
+    std::size_t m_pendingRows{0}, m_pendingColumns{0};
+    std::string m_pendingName;
+
+    void tablesChanging();            // snapshot for ^Z, before a change
+    void tablesChanged();             // dirty, and re-read the joined model
+    bool setHeaderField(std::size_t field, const std::string& value);
+    void applyRename(const std::string& to, bool references);
+    void clampTableCursor();
 };
 
 }  // namespace des

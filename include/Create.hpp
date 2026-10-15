@@ -31,8 +31,15 @@ private:
     SimTime   m_firstAt{0.0};
     long long m_maxArrivals{-1};      // -1 means "keep going until time runs out"
     long long m_created{0};
+    long long m_arrivals{0};          // v16: arrival EVENTS; Max Arrivals counts these
     int       m_perArrival{1};        // entities per arrival event (Arena's
                                       // "Entities per Arrival")
+    ExpressionPtr m_perArrivalExpr;   // v16: when set, evaluated at each arrival
+    // v16: following an arrival schedule. The event at First At then only
+    // STARTS the stream -- an arrival exactly at the start of every
+    // replication would be one more than the schedule says.
+    bool      m_scheduled{false};
+    bool      m_started{false};
 
 public:
     CreateNode(std::string name, std::string entityType,
@@ -57,9 +64,16 @@ public:
     long long created() const { return m_created; }
     long long maxArrivals() const { return m_maxArrivals; }
     int entitiesPerArrival() const { return m_perArrival; }
+    void setPerArrival(ExpressionPtr e) { m_perArrivalExpr = std::move(e); }
+    const IExpression* perArrivalExpression() const { return m_perArrivalExpr.get(); }
+    long long arrivals() const { return m_arrivals; }
     IExpression& interarrival() { return *m_interarrival; }
     const IExpression& interarrival() const { return *m_interarrival; }
-    bool exhausted() const { return m_maxArrivals >= 0 && m_created >= m_maxArrivals; }
+    // v16: Max Arrivals counts arrival EVENTS, as Arena's does. Per Arrival =
+    // 20 with Max Arrivals = 1 is twenty entities at once -- how a fleet is
+    // put into the world -- where counting entities made it one.
+    bool scheduled() const { return m_scheduled; }
+    bool exhausted() const { return m_maxArrivals >= 0 && m_arrivals >= m_maxArrivals; }
 };
 
 }  // namespace des

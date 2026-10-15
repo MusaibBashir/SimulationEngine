@@ -6,6 +6,7 @@
 #include "Parser.hpp"
 #include "QueueRule.hpp"
 #include <cassert>
+#include <map>
 #include <set>
 #include <sstream>
 
@@ -43,7 +44,7 @@ Model& Model::source(const std::string& name, const std::string& entityType,
                      const std::string& interarrivalText, long long maxArrivals,
                      SimTime firstAt, int entitiesPerArrival) {
     requireUnique(name);
-    auto c = std::make_unique<CreateNode>(name, entityType, expr(interarrivalText),
+    auto c = std::make_unique<CreateNode>(name, entityType, ex(interarrivalText),
                                           maxArrivals, firstAt, entitiesPerArrival);
     CreateNode* raw = c.get();
     m_nodes.push_back(std::move(c));
@@ -69,6 +70,25 @@ Model& Model::arrivals(std::unique_ptr<IDistribution> d) {
 }
 
 Model& Model::allowOverload(bool on) { m_allowOverload = on; return *this; }
+
+Model& Model::scheduledSource(const std::string& name, const std::string& entityType,
+                              const std::string& scheduleName, ArrivalSchedule schedule,
+                              long long maxArrivals, SimTime firstAt, int entitiesPerArrival) {
+    requireUnique(name);
+    auto c = std::make_unique<CreateNode>(
+        name, entityType,
+        ExpressionPtr(std::make_unique<ScheduledGapExpression>(scheduleName, std::move(schedule))),
+        maxArrivals, firstAt, entitiesPerArrival);
+    CreateNode* raw = c.get();
+    m_nodes.push_back(std::move(c));
+    m_sources.push_back(raw);
+    return *this;
+}
+
+Model& Model::perArrival(const std::string& createName, const std::string& text) {
+    nodeAs<CreateNode>(createName).setPerArrival(ex(text));
+    return *this;
+}
 
 Model& Model::batchBySameAttribute(const std::string& name, std::size_t size,
                                    const std::string& attribute, bool permanent) {
@@ -111,6 +131,19 @@ Model& Model::variable(const std::string& name, double initialValue) {
     return *this;
 }
 
+Model& Model::variableArray(const std::string& name, int rows, int columns,
+                            const std::vector<double>& initial) {
+    std::vector<std::string> attributeNames;
+    for (const ArrivalAttribute& a : m_arrivalAttributes) attributeNames.push_back(a.name);
+    m_variables.noteAttributeNames(std::move(attributeNames));
+    m_variables.declareArray(name, rows, columns, initial);
+    return *this;
+}
+
+ExpressionPtr Model::ex(const std::string& text) const {
+    return expr(text, m_variables.arrayNames());
+}
+
 Model& Model::resource(const std::string& name, int capacity) {
     if (resourceNamed(name) != nullptr)
         throw ModelError("a resource named '" + name + "' already exists");
@@ -141,7 +174,7 @@ Model& Model::station(const std::string& name, int capacity,
 
 Model& Model::station(const std::string& name, int capacity,
                       QueueDiscipline discipline, const std::string& serviceText) {
-    return station(name, capacity, discipline, expr(serviceText));
+    return station(name, capacity, discipline, ex(serviceText));
 }
 
 Model& Model::station(const std::string& name, int capacity,
@@ -166,7 +199,7 @@ Model& Model::stationUsing(const std::string& name, const std::string& resourceN
         throw ModelError("process '" + name + "': no resource named '" + resourceName +
                          "' -- declare it with resource() first");
     auto s = std::make_unique<Station>(name, r, units, makeQueueRule(discipline),
-                                       expr(serviceText));
+                                       ex(serviceText));
     Station* raw = s.get();
     add(std::move(s));
     m_processes.push_back(raw);
@@ -208,7 +241,7 @@ Model& Model::renegeAfter(const std::string& processName,
         target = node(renegeTo);
         if (!target) throw ModelError("renegeAfter: no block named '" + renegeTo + "'");
     }
-    nodeAs<Station>(processName).setReneging(expr(patienceText), target);
+    nodeAs<Station>(processName).setReneging(ex(patienceText), target);
     return *this;
 }
 
@@ -261,12 +294,12 @@ Model& Model::branch(const std::string& decideName, ExpressionPtr condition,
 
 Model& Model::branchWhen(const std::string& decideName, const std::string& conditionText,
                          const std::string& to) {
-    return branch(decideName, expr(conditionText), to);
+    return branch(decideName, ex(conditionText), to);
 }
 
 Model& Model::delay(const std::string& name, const std::string& durationText) {
     requireUnique(name);
-    add(std::make_unique<DelayNode>(name, expr(durationText)));
+    add(std::make_unique<DelayNode>(name, ex(durationText)));
     return *this;
 }
 
@@ -298,18 +331,21 @@ Model& Model::assign(const std::string& name) {
 
 Model& Model::assignTo(const std::string& block, const std::string& attributeName,
                        const std::string& valueText) {
-    assignBlock(block).set(AssignTarget::Attribute, attributeName, expr(valueText));
+    assignBlock(block).set(AssignTarget::Attribute, attributeName, ex(valueText));
     return *this;
 }
 
 Model& Model::assignVariable(const std::string& block, const std::string& variableName,
                              const std::string& valueText) {
-    assignBlock(block).set(AssignTarget::Variable, variableName, expr(valueText));
+    if (m_variables.isArray(variableName))
+        throw ModelError("Assign '" + block + "': writing to array '" + variableName +
+                         "' is not supported yet -- arrays are read-only in this version");
+    assignBlock(block).set(AssignTarget::Variable, variableName, ex(valueText));
     return *this;
 }
 
 Model& Model::assignEntityType(const std::string& block, const std::string& typeText) {
-    assignBlock(block).set(AssignTarget::EntityType, "", expr(typeText));
+    assignBlock(block).set(AssignTarget::EntityType, "", ex(typeText));
     return *this;
 }
 
@@ -349,7 +385,7 @@ Model& Model::decideByCondition(const std::string& name, ExpressionPtr condition
 }
 
 Model& Model::decideWhen(const std::string& name, const std::string& conditionText) {
-    return decideByCondition(name, expr(conditionText));
+    return decideByCondition(name, ex(conditionText));
 }
 
 Model& Model::batch(const std::string& name, std::size_t size, bool permanent) {
@@ -385,6 +421,54 @@ Model& Model::recordAttribute(const std::string& name, const std::string& attrib
 Model& Model::recordTimeInSystem(const std::string& name) {
     requireUnique(name);
     add(RecordNode::timeInSystem(name));
+    return *this;
+}
+
+Model& Model::recordNamed(const std::string& name, RecordNode::What what,
+                          const std::string& attribute, const std::string& valueText,
+                          const std::string& statistic) {
+    requireUnique(name);
+    auto r = std::make_unique<RecordNode>(name, what, attribute,
+                                          valueText.empty() ? ExpressionPtr() : ex(valueText));
+    r->setStatistic(statistic.empty() ? name : statistic);
+    add(std::move(r));
+    return *this;
+}
+
+Model& Model::stationBlock(const std::string& name) {
+    requireUnique(name);
+    add(std::make_unique<StationNode>(name));
+    return *this;
+}
+
+Model& Model::routeBlock(const std::string& name, const std::string& timeText) {
+    requireUnique(name);
+    add(std::make_unique<RouteNode>(name, ex(timeText)));
+    return *this;
+}
+
+Model& Model::routeTo(const std::string& routeName, const std::string& stationName) {
+    auto* s = dynamic_cast<StationNode*>(node(stationName));
+    if (s == nullptr)
+        throw ModelError("route '" + routeName + "': '" + stationName + "' is not a Station");
+    nodeAs<RouteNode>(routeName).setDestination(s);
+    return *this;
+}
+
+Model& Model::match(const std::string& name, const std::string& attribute) {
+    requireUnique(name);
+    // Not through add(): nothing enters a Match by its own name, so it must
+    // never become the default entry block.
+    m_nodes.push_back(std::make_unique<MatchNode>(name, attribute));
+    return *this;
+}
+
+Model& Model::matchLane(const std::string& matchName, const std::string& laneName) {
+    requireUnique(laneName);
+    MatchNode& owner = nodeAs<MatchNode>(matchName);
+    auto lane = std::make_unique<MatchLaneNode>(laneName, &owner);
+    owner.addLane(lane.get());
+    add(std::move(lane));
     return *this;
 }
 
@@ -539,7 +623,12 @@ double Model::offeredLoad(const Station& s) const {
     double lambda = 0.0;
     for (const CreateNode* c : m_sources) {
         const auto gap = c->interarrival().meanIfKnown();
-        if (gap && *gap > 0.0) lambda += c->entitiesPerArrival() / *gap;
+        double perArrival = c->entitiesPerArrival();
+        if (const IExpression* n = c->perArrivalExpression()) {
+            const auto m = n->meanIfKnown();
+            perArrival = m ? *m : 0.0;
+        }
+        if (gap && *gap > 0.0) lambda += perArrival / *gap;
     }
     if (lambda <= 0.0) return 0.0;
 
@@ -602,7 +691,10 @@ std::vector<Diagnostic> Model::checkExpressions() const {
     // FieldContext exists.
     ValidationContext noEntity = vc;
     noEntity.field = FieldContext::NoEntity;
-    for (const CreateNode* c : m_sources) c->interarrival().validate(noEntity, problems);
+    for (const CreateNode* c : m_sources) {
+        c->interarrival().validate(noEntity, problems);
+        if (const IExpression* n = c->perArrivalExpression()) n->validate(noEntity, problems);
+    }
 
     for (const std::unique_ptr<INode>& n : m_nodes) {
         if (const auto* st = dynamic_cast<const Station*>(n.get()))
@@ -611,16 +703,23 @@ std::vector<Diagnostic> Model::checkExpressions() const {
             d->durationExpression().validate(vc, problems);
         else if (const auto* a = dynamic_cast<const AssignNode*>(n.get()))
             for (const AssignNode::Rule& r : a->rules()) r.value->validate(vc, problems);
-        else if (const auto* dec = dynamic_cast<const DecideNode*>(n.get()))
+        else if (const auto* dec = dynamic_cast<const DecideNode*>(n.get())) {
             for (const DecideNode::Branch& b : dec->branches())
                 if (b.condition) b.condition->validate(vc, problems);
+        } else if (const auto* rec = dynamic_cast<const RecordNode*>(n.get())) {
+            if (rec->valueExpression()) rec->valueExpression()->validate(vc, problems);
+        } else if (const auto* rt = dynamic_cast<const RouteNode*>(n.get())) {
+            rt->timeExpression().validate(vc, problems);
+        }
     }
     return problems;
 }
 
 bool Model::arrivalRateIsKnown() const {
-    for (const CreateNode* c : m_sources)
+    for (const CreateNode* c : m_sources) {
         if (!c->interarrival().meanIfKnown()) return false;
+        if (c->perArrivalExpression() && !c->perArrivalExpression()->meanIfKnown()) return false;
+    }
     return true;
 }
 
@@ -659,7 +758,29 @@ std::vector<Diagnostic> Model::checkStructure() const {
     };
 
     if (m_nodes.empty())    fail("model has no blocks");
+
+    // One name, one kind: a total and an average cannot be pooled into one
+    // number that means anything.
+    {
+        std::map<std::string, const RecordNode*> firstOf;
+        for (const auto& n : m_nodes) {
+            const auto* r = dynamic_cast<const RecordNode*>(n.get());
+            if (r == nullptr || r->statistic().empty()) continue;
+            const auto it = firstOf.find(r->statistic());
+            if (it == firstOf.end()) { firstOf.emplace(r->statistic(), r); continue; }
+            if (it->second->isCounter() != r->isCounter())
+                fail("statistic '" + r->statistic() + "' is written by '" + it->second->name() +
+                     "' as a " + (it->second->isCounter() ? "counter" : "tally") + " and by '" +
+                     r->name() + "' as a " + (r->isCounter() ? "counter" : "tally") +
+                     " -- a count and an average cannot share one name");
+        }
+    }
     if (m_sources.empty())  fail("model has no arrival source -- call arrivals() or source()");
+    for (const auto& n : m_nodes)
+        if (const auto* m = dynamic_cast<const MatchNode*>(n.get()))
+            if (m->laneCount() < 2 || m->laneCount() > 5)
+                fail("match '" + m->name() + "' has " + std::to_string(m->laneCount()) +
+                     " lane(s); a Match needs 2 to 5 [MatchLane] rows");
     if (m_entry == nullptr) fail("model has no entry block -- call entryAt()");
     for (const CreateNode* c : m_sources)
         if (c->next() == nullptr)
@@ -674,6 +795,10 @@ std::vector<Diagnostic> Model::checkStructure() const {
             static void dfs(const INode* n, std::set<const INode*>& visiting,
                             std::set<const INode*>& done, std::string& loopAt) {
                 if (!n || done.count(n) || !loopAt.empty()) return;
+                // v16: a loop back into a Match lane is a POPULATION waiting
+                // for partners -- cars returning to wait for riders -- not
+                // entities that can never leave. Arena allows it; so does this.
+                if (dynamic_cast<const MatchLaneNode*>(n)) { done.insert(n); return; }
                 if (!visiting.insert(n).second) { loopAt = n->name(); return; }
                 if (auto* d = dynamic_cast<const DecideNode*>(n))
                     dfs(d->trueBranch(), visiting, done, loopAt);

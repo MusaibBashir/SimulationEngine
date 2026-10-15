@@ -1,4 +1,5 @@
 #include "Parser.hpp"
+#include <algorithm>
 #include <utility>
 #include "Functions.hpp"
 #include "Lexer.hpp"
@@ -179,12 +180,23 @@ private:
             } while (match(TokenKind::Comma));
         }
         if (!match(TokenKind::RParen)) error("expected ')'");
+        if (m_arrays != nullptr &&
+            std::find(m_arrays->begin(), m_arrays->end(), name.text) != m_arrays->end()) {
+            if (args.empty() || args.size() > 2) {
+                error(name.text + " takes one or two indices", name.span);
+                return recover();
+            }
+            return std::make_unique<ArrayReadExpression>(name.text, std::move(args), name.span);
+        }
         return buildCall(name.text, std::move(args), argSpans, name.span, *m_diagnostics);
     }
 
+    const std::vector<std::string>* m_arrays{nullptr};
+
 public:
-    Parser(std::vector<Token> tokens, std::vector<Diagnostic>* diagnostics)
-        : m_tokens(std::move(tokens)), m_diagnostics(diagnostics) {}
+    Parser(std::vector<Token> tokens, std::vector<Diagnostic>* diagnostics,
+           const std::vector<std::string>* arrays = nullptr)
+        : m_tokens(std::move(tokens)), m_diagnostics(diagnostics), m_arrays(arrays) {}
 
     ExpressionPtr run() {
         ExpressionPtr e = parseOr();
@@ -198,16 +210,25 @@ public:
 }  // namespace
 
 ParseResult parseExpression(const std::string& source) {
+    return parseExpression(source, std::vector<std::string>());
+}
+
+ParseResult parseExpression(const std::string& source,
+                            const std::vector<std::string>& arrayNames) {
     ParseResult result;
     LexResult lexed = tokenise(source);
     result.diagnostics = std::move(lexed.diagnostics);
-    Parser parser(std::move(lexed.tokens), &result.diagnostics);
+    Parser parser(std::move(lexed.tokens), &result.diagnostics, &arrayNames);
     result.expr = parser.run();
     return result;
 }
 
 ExpressionPtr expr(const std::string& source) {
-    ParseResult r = parseExpression(source);
+    return expr(source, std::vector<std::string>());
+}
+
+ExpressionPtr expr(const std::string& source, const std::vector<std::string>& arrayNames) {
+    ParseResult r = parseExpression(source, arrayNames);
     if (hasErrors(r.diagnostics))
         throw ModelError("cannot parse expression \"" + source + "\":\n" +
                          formatDiagnostics(r.diagnostics));

@@ -21,6 +21,12 @@ A translation table, for when the coursework is written in Arena's vocabulary.
 | **Separate**, Split Existing Batch | `separate(name)` | Only works on a *temporary* batch. |
 | **Separate**, Duplicate Original | `duplicate(name, copies)` | `route()` is the **Original** exit, `routeDuplicate()` the **Duplicate** exit. |
 | **Record** | `record(name)` / `recordAttribute(name, attr)` / `recordTimeInSystem(name)` | |
+| **Record**, Count / Time Interval / Expression into a named Counter or Tally | `recordNamed(name, What, attr, "value", statistic)` | v16. Records sharing a name are pooled. |
+| **Match** (Advanced Process) | `match(name, attr)` + `matchLane(match, lane)` | v16. Each lane is a block other blocks route to by name; `attr` empty is Any. |
+| **Station** (Advanced Transfer) | `stationBlock(name)` | v16. One name: Arena's block name and station name are the same here. |
+| **Route** (Advanced Transfer) | `routeBlock(name, "time")` + `routeTo(route, station)` | v16. No Next — the Destination is where it goes. |
+| **Create**, Type = Schedule | `scheduledSource(name, type, schedName, ArrivalSchedule, ...)` | v16. Non-stationary Poisson, by thinning. |
+| **Create**, Entities per Arrival from a Variable | `perArrival(create, "Num_CV")` | v16. Max Arrivals counts arrivals, as in Arena. |
 | **Resource** | `resource(name, capacity)` | |
 | **Queue** with a discipline | 4th argument of `station` | `FIFO`, `LIFO`, `PRIORITY`, `SPT`, `EDD`, `RANDOM` |
 | **Entity type / Picture** | 2nd argument of `source` | Pictures are a GUI thing; the type name is what matters. |
@@ -47,6 +53,10 @@ spreadsheets written down — see **A model as a file** in `README.md`.
 | **Resource** | `[Resource]` | Name, Capacity |
 | **Expression** | `[Expression]` | Name, Value |
 | **Queue** | `[Queue]` | Name, Process, Discipline — **read-only** |
+| **Variable** with Rows / Columns | `[Variable]` | Name, Initial Value (a list), Rows, Columns — read as `Name(i, j)` |
+| **Schedule**, Type Arrival | `[Schedule]` + `[ScheduleRow]` | Name, Type, Time Units; rows: Value, Duration |
+| **Match** | `[Match]` + `[MatchLane]` | Name, Type (Any / Attribute), Attribute; lanes: Match, Name, Next |
+| **Station** / **Route** | `[Station]` / `[Route]` | Name, Next / Name, Route Time, Destination |
 
 The flowchart modules each have a table too — `[Create]`, `[Process]`,
 `[Delay]`, `[Assign]`, `[Decide]`, `[Batch]`, `[Separate]`, `[Record]`,
@@ -56,7 +66,7 @@ The flowchart modules each have a table too — `[Create]`, `[Process]`,
 
 | Arena | Here | Columns |
 |---|---|---|
-| **Run Setup** → Replication Parameters | `[Run]` | Name, Length, Warm-up, Replications, Base Seed, Stop When Drained, Max Entities, Separate Streams, Antithetic |
+| **Run Setup** → Replication Parameters | `[Run]` | Name, Length, Warm-up, Replications, Base Seed, Stop When Drained, Max Entities, Separate Streams, Time Units, Antithetic |
 
 At most one row, as Arena has one Run Setup. A `[Run]` naming no stopping
 condition at all is a **warning** rather than an error: a Create with

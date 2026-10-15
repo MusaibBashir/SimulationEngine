@@ -52,6 +52,11 @@ DisableProgramGroupPage=yes
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "associate"; Description: "Open .des model files with {#AppName} when double-clicked"; GroupDescription: "File types:"
+; v16.2: the Flow tab draws the model with Graphviz. Offered only when it is not
+; already installed and winget is there to fetch it; Graphviz's own installer
+; asks for administrator permission, and if it is refused or offline the
+; program still works and shows the flow as a list.
+Name: "graphviz"; Description: "Install Graphviz, which draws the Flow tab's graph (downloads it with winget)"; GroupDescription: "Also install:"; Check: OfferGraphviz
 
 [Files]
 Source: "{#SourceDir}\{#AppExe}";      DestDir: "{app}";          Flags: ignoreversion
@@ -79,4 +84,22 @@ Root: HKA; Subkey: "Software\Classes\DESSimulator.Model\DefaultIcon"; ValueType:
 Root: HKA; Subkey: "Software\Classes\DESSimulator.Model\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: associate
 
 [Run]
+Filename: "{code:WingetPath}"; Parameters: "install --id Graphviz.Graphviz -e --silent --accept-package-agreements --accept-source-agreements"; StatusMsg: "Installing Graphviz -- downloading it with winget..."; Flags: waituntilterminated runhidden; Tasks: graphviz
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; WorkingDir: "{userdocs}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function WingetPath(Param: String): String;
+begin
+  Result := ExpandConstant('{localappdata}\Microsoft\WindowsApps\winget.exe');
+end;
+
+function GraphvizInstalled(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{commonpf64}\Graphviz\bin\dot.exe')) or
+            FileExists(ExpandConstant('{commonpf32}\Graphviz\bin\dot.exe'));
+end;
+
+function OfferGraphviz(): Boolean;
+begin
+  Result := (not GraphvizInstalled()) and FileExists(WingetPath(''));
+end;

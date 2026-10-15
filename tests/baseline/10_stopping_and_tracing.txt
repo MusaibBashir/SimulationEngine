@@ -1,5 +1,5 @@
 --- termination rules ---------------------------------------
-  TimeLimit(500)                    stopped at t=    500.55 after    227 served
+  TimeLimit(500)                    stopped at t=    500.00 after    226 served
   EntityLimit(100)                  stopped at t=    207.73 after    100 served
   AnyOf[Drained | TimeLimit(10000)] stopped at t=      0.05 after      1 served
   AnyOf[TimeLimit(500) | Entity(50)]stopped at t=     97.02 after     50 served

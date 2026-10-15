@@ -128,7 +128,6 @@ bool RunController::startRun() {
 
 void RunController::finishRun() {
     if (!m_sim) return;
-    const Station& entry    = m_sim->model().stationAt(0);
     const SimTime  measured = m_sim->measuredTime();
 
     ReplicationResult res;
@@ -138,7 +137,13 @@ void RunController::finishRun() {
     res.averageTimeInSystem = m_sim->statistics().averageTimeInSystem();
     res.Lq                  = m_sim->statistics().timeAverageA(measured);
     res.L                   = m_sim->statistics().timeAverageB(measured);
-    res.utilisation         = entry.stats().utilisation(measured, entry.resource().capacity());
+    // A model with no Process -- the ride-hailing model has none -- has no
+    // entry server to be busy. Reading stationAt(0) there was out of bounds.
+    if (m_sim->model().stationCount() > 0) {
+        const Station& entry = m_sim->model().stationAt(0);
+        res.utilisation = entry.stats().utilisation(measured, entry.resource().capacity());
+    }
+    std::vector<NamedStatistic> named = m_sim->namedStatistics();
     res.measuredTime        = measured;
     if (m_setup.observeInterval > 0.0) m_series.push_back(m_sim->observations());
     // HERE, while the system is still alive: report() is a view of a
@@ -150,6 +155,7 @@ void RunController::finishRun() {
     if (m_setup.antithetic && !m_mirrorHalf) {
         // The first half of a pair. Hold it and run the mirror.
         m_firstHalf  = res;
+        m_firstNamed = std::move(named);
         m_mirrorHalf = true;
         return;
     }
@@ -165,9 +171,12 @@ void RunController::finishRun() {
         res.utilisation         = 0.5 * (m_firstHalf.utilisation + res.utilisation);
         res.served              = (m_firstHalf.served + res.served) / 2;
         res.seed                = m_firstHalf.seed;
+        for (std::size_t i = 0; i < named.size() && i < m_firstNamed.size(); ++i)
+            named[i].value = 0.5 * (m_firstNamed[i].value + named[i].value);
         m_mirrorHalf = false;
     }
     m_results.push_back(res);
+    m_named.push_back(std::move(named));
     ++m_replication;
 }
 
@@ -291,6 +300,7 @@ void RunController::report(std::ostream& os) const {
        << m_results.front().seed << ".." << m_results.back().seed << " ===\n";
     reportReplicationTable(os, m_results);
     reportReplicationSummary(os, m_results);
+    reportNamedStatistics(os, m_named);
     os << "=====================================================================\n";
 }
 

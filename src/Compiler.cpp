@@ -108,6 +108,170 @@ void checkSchema(const ModelDocument& doc, std::vector<Diagnostic>& out) {
     }
 }
 
+// v16: "4, 14, 22" -> {4, 14, 22}. False when any item is not a number.
+bool numberList(const std::string& text, std::vector<double>& out) {
+    out.clear();
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const std::size_t comma = text.find(',', start);
+        std::string item = text.substr(start, comma == std::string::npos ? std::string::npos
+                                                                         : comma - start);
+        const std::size_t b = item.find_first_not_of(" 	");
+        const std::size_t e = item.find_last_not_of(" 	");
+        item = b == std::string::npos ? std::string() : item.substr(b, e - b + 1);
+        if (!looksLikeReal(item)) return false;
+        out.push_back(std::strtod(item.c_str(), nullptr));
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    return !out.empty();
+}
+
+// v16: a Variable is one number or, with Rows, a table. Checked here because
+// the Initial Value column is text now -- a list, for an array.
+void checkVariables(const ModelDocument& doc, std::vector<Diagnostic>& out) {
+    for (std::size_t r = 0; r < doc.rowCount("Variable"); ++r) {
+        const std::string init = doc.cell("Variable", r, "Initial Value");
+        const std::string rows = doc.cell("Variable", r, "Rows");
+        const std::string cols = doc.cell("Variable", r, "Columns");
+        if (rows.empty() && !cols.empty())
+            report(out, Severity::Error, "Variable", r, "Columns",
+                   "Columns needs Rows too -- a one-row table is Rows = 1");
+        std::vector<double> values;
+        if (init.empty()) continue;
+        if (!numberList(init, values)) {
+            report(out, Severity::Error, "Variable", r, "Initial Value",
+                   rows.empty() ? "Initial Value must be a number, not '" + init + "'"
+                                : "Initial Value must be numbers separated by commas");
+            continue;
+        }
+        if (rows.empty()) {
+            if (values.size() != 1)
+                report(out, Severity::Error, "Variable", r, "Initial Value",
+                       "several values need Rows (and Columns) to say the table's shape");
+            continue;
+        }
+        if (!looksLikeInteger(rows) || (!cols.empty() && !looksLikeInteger(cols))) continue;
+        const long long cells = std::strtoll(rows.c_str(), nullptr, 10) *
+                                (cols.empty() ? 1 : std::strtoll(cols.c_str(), nullptr, 10));
+        if (cells < 1)
+            report(out, Severity::Error, "Variable", r, "Rows", "an array needs at least one cell");
+        else if (values.size() != 1 && static_cast<long long>(values.size()) != cells)
+            report(out, Severity::Error, "Variable", r, "Initial Value",
+                   "the table has " + std::to_string(cells) + " cells but " +
+                   std::to_string(values.size()) + " values were given -- give one "
+                   "per cell, row by row, or one for all");
+    }
+}
+
+std::vector<std::string> arrayNamesOf(const ModelDocument& doc) {
+    std::vector<std::string> names;
+    for (std::size_t r = 0; r < doc.rowCount("Variable"); ++r)
+        if (!doc.cell("Variable", r, "Rows").empty())
+            names.push_back(doc.cell("Variable", r, "Name"));
+    return names;
+}
+
+// v16: a Station nothing names is a landing pad no Route flies to. Legal --
+// it may be half-built -- and worth a word, because a misspelt Destination on
+// the Route is the usual reason and that one IS reported as an error there.
+void checkStations(const ModelDocument& doc, std::vector<Diagnostic>& out) {
+    const ModuleRegistry& reg = ModuleRegistry::instance();
+    std::vector<std::string> named;
+    for (const std::string& type : doc.types()) {
+        const ModuleSchema* schema = reg.find(type);
+        if (schema == nullptr) continue;
+        for (std::size_t r = 0; r < doc.rowCount(type); ++r)
+            for (const Column& c : schema->columns)
+                if (c.type == ColumnType::Reference) named.push_back(doc.cell(type, r, c.id));
+    }
+    for (std::size_t r = 0; r < doc.rowCount("Station"); ++r) {
+        const std::string name = doc.cell("Station", r, "Name");
+        if (!name.empty() && std::find(named.begin(), named.end(), name) == named.end())
+            report(out, Severity::Warning, "Station", r, "Name",
+                   "nothing arrives at station '" + name + "' -- no Route's Destination "
+                   "or block's Next names it");
+    }
+}
+
+void checkMatches(const ModelDocument& doc, std::vector<Diagnostic>& out) {
+    for (std::size_t r = 0; r < doc.rowCount("Match"); ++r) {
+        const std::string name = doc.cell("Match", r, "Name");
+        if (doc.cellOrDefault("Match", r, "Type") == "Attribute" &&
+            doc.cell("Match", r, "Attribute").empty())
+            report(out, Severity::Error, "Match", r, "Attribute",
+                   "Type = Attribute needs the Attribute to match on");
+        std::size_t lanes = 0;
+        for (std::size_t l = 0; l < doc.rowCount("MatchLane"); ++l)
+            if (doc.cell("MatchLane", l, "Match") == name) ++lanes;
+        if (lanes < 2 || lanes > 5)
+            report(out, Severity::Error, "Match", r, "Name",
+                   "match '" + name + "' has " + std::to_string(lanes) +
+                   " lane(s); it needs 2 to 5 [MatchLane] rows naming it");
+    }
+}
+
+void checkSchedules(const ModelDocument& doc, std::vector<Diagnostic>& out) {
+    for (std::size_t r = 0; r < doc.rowCount("Create"); ++r) {
+        const bool gap = !doc.cell("Create", r, "Interarrival").empty();
+        const bool sched = !doc.cell("Create", r, "Schedule").empty();
+        if (gap && sched)
+            report(out, Severity::Error, "Create", r, "Schedule",
+                   "a Create arrives by an Interarrival OR a Schedule -- clear one of them");
+        else if (!gap && !sched)
+            report(out, Severity::Error, "Create", r, "Interarrival",
+                   "Create needs an Interarrival, or a Schedule to follow");
+    }
+    for (std::size_t r = 1; r < doc.rowCount("Run"); ++r)
+        if (doc.cellOrDefault("Run", r, "Time Units") != doc.cellOrDefault("Run", 0, "Time Units"))
+            report(out, Severity::Error, "Run", r, "Time Units",
+                   "every [Run] must use the same Time Units -- the model has one clock");
+
+    for (std::size_t s = 0; s < doc.rowCount("Schedule"); ++s) {
+        const std::string name = doc.cell("Schedule", s, "Name");
+        const std::string type = doc.cellOrDefault("Schedule", s, "Type");
+        if (type != "Arrival")
+            report(out, Severity::Error, "Schedule", s, "Type",
+                   type == "Capacity"
+                       ? "Capacity schedules are not supported yet -- only Arrival"
+                       : "'" + type + "' is not a schedule type; this version has Arrival");
+        double total = 0.0, peak = 0.0;
+        std::size_t rows = 0;
+        for (std::size_t r = 0; r < doc.rowCount("ScheduleRow"); ++r) {
+            if (doc.cell("ScheduleRow", r, "Schedule") != name) continue;
+            ++rows;
+            const std::string v = doc.cell("ScheduleRow", r, "Value");
+            const std::string d = doc.cell("ScheduleRow", r, "Duration");
+            if (looksLikeReal(v) && std::strtod(v.c_str(), nullptr) < 0.0)
+                report(out, Severity::Error, "ScheduleRow", r, "Value", "a rate cannot be negative");
+            if (looksLikeReal(d) && std::strtod(d.c_str(), nullptr) < 0.0)
+                report(out, Severity::Error, "ScheduleRow", r, "Duration",
+                       "a duration cannot be negative");
+            if (looksLikeReal(d) && looksLikeReal(v)) {
+                const double dv = std::strtod(d.c_str(), nullptr);
+                total += dv;
+                if (dv > 0.0) peak = std::max(peak, std::strtod(v.c_str(), nullptr));
+            }
+        }
+        if (rows == 0)
+            report(out, Severity::Error, "Schedule", s, "Name",
+                   "schedule '" + name + "' has no ScheduleRow rows");
+        else if (total <= 0.0)
+            report(out, Severity::Error, "Schedule", s, "Name",
+                   "schedule '" + name + "': the durations add up to zero");
+        else if (peak <= 0.0)
+            report(out, Severity::Error, "Schedule", s, "Name",
+                   "schedule '" + name + "': every rate is zero, so nothing would arrive");
+
+        bool used = false;
+        for (std::size_t c = 0; c < doc.rowCount("Create"); ++c)
+            used |= doc.cell("Create", c, "Schedule") == name;
+        if (!used)
+            report(out, Severity::Warning, "Schedule", s, "Name",
+                   "no Create follows schedule '" + name + "'");
+    }
+}
+
 // --- pass 2: references ----------------------------------------------------
 // "Block" is the pseudo-type meaning "any flowchart block", which is what an
 // exit column points at. Everything else names one real module type.
@@ -135,6 +299,17 @@ void checkReferences(const ModelDocument& doc, std::vector<Diagnostic>& out) {
                 // already spells "leaves the system" as a null next.
                 if (value.empty()) continue;
 
+                if (c.referencedType == "Block" && !isDeclared(doc, "Block", value) &&
+                    isDeclared(doc, "Match", value)) {
+                    std::string lanes;
+                    for (std::size_t l = 0; l < doc.rowCount("MatchLane"); ++l)
+                        if (doc.cell("MatchLane", l, "Match") == value)
+                            lanes += (lanes.empty() ? "" : ", ") + doc.cell("MatchLane", l, "Name");
+                    report(out, Severity::Error, type, r, c.id,
+                           "'" + value + "' is a Match -- route to one of its lanes" +
+                           (lanes.empty() ? std::string() : ": " + lanes));
+                    continue;
+                }
                 if (!isDeclared(doc, c.referencedType, value))
                     out.push_back(Diagnostic{
                         Severity::Error, SourceSpan{},
@@ -151,6 +326,7 @@ void checkReferences(const ModelDocument& doc, std::vector<Diagnostic>& out) {
 // --- pass 3: expressions ---------------------------------------------------
 void checkExpressionCells(const ModelDocument& doc, std::vector<Diagnostic>& out) {
     const ModuleRegistry& reg = ModuleRegistry::instance();
+    const std::vector<std::string> arrays = arrayNamesOf(doc);
 
     for (const std::string& type : doc.types()) {
         const ModuleSchema* schema = reg.find(type);
@@ -163,7 +339,7 @@ void checkExpressionCells(const ModelDocument& doc, std::vector<Diagnostic>& out
                 const std::string text = doc.cell(type, r, c.id);
                 if (text.empty()) continue;    // required-and-empty is pass 1's
 
-                ParseResult parsed = parseExpression(text);
+                ParseResult parsed = parseExpression(text, arrays);
                 for (Diagnostic& d : parsed.diagnostics) {
                     // The span is left exactly as v10 measured it -- an offset
                     // WITHIN the cell -- and the cell is wrapped around it. Both
@@ -201,13 +377,46 @@ double asReal(const std::string& s, double fallback) {
     return std::strtod(s.c_str(), nullptr);
 }
 
+// v16: the base unit, from the [Run] rows. checkSchedules has already made
+// sure they agree, so the first one says it.
+TimeUnit baseUnitOf(const ModelDocument& doc) {
+    TimeUnit u = TimeUnit::Minutes;
+    if (doc.rowCount("Run") > 0) timeUnitFrom(doc.cellOrDefault("Run", 0, "Time Units"), u);
+    return u;
+}
+
+ArrivalSchedule scheduleOf(const ModelDocument& doc, const std::string& name) {
+    TimeUnit unit = TimeUnit::Hours;
+    for (std::size_t r = 0; r < doc.rowCount("Schedule"); ++r)
+        if (doc.cell("Schedule", r, "Name") == name)
+            timeUnitFrom(doc.cellOrDefault("Schedule", r, "Time Units"), unit);
+    const double toBase = unitsPer(unit, baseUnitOf(doc));   // one schedule unit, in base units
+    std::vector<ScheduleSlot> slots;
+    for (std::size_t r = 0; r < doc.rowCount("ScheduleRow"); ++r) {
+        if (doc.cell("ScheduleRow", r, "Schedule") != name) continue;
+        slots.push_back(ScheduleSlot{asReal(doc.cell("ScheduleRow", r, "Value"), 0.0) / toBase,
+                                     asReal(doc.cell("ScheduleRow", r, "Duration"), 0.0) * toBase});
+    }
+    return ArrivalSchedule(std::move(slots));
+}
+
 void buildBlocks(const ModelDocument& doc, Model& model) {
     const ModuleRegistry& reg = ModuleRegistry::instance();
 
     // 1. Variables, before anything can reference them.
     for (std::size_t r = 0; r < doc.rowCount("Variable"); ++r) {
-        model.variable(doc.cell("Variable", r, "Name"),
-                       asReal(doc.cellOrDefault("Variable", r, "Initial Value"), 0.0));
+        const std::string name = doc.cell("Variable", r, "Name");
+        const std::string rows = doc.cell("Variable", r, "Rows");
+        if (rows.empty()) {
+            model.variable(name, asReal(doc.cellOrDefault("Variable", r, "Initial Value"), 0.0));
+            continue;
+        }
+        std::vector<double> values;
+        if (!numberList(doc.cellOrDefault("Variable", r, "Initial Value"), values))
+            values = {0.0};
+        model.variableArray(name, static_cast<int>(asInteger(rows, 1)),
+                            static_cast<int>(asInteger(doc.cell("Variable", r, "Columns"), 1)),
+                            values);
     }
 
     // 2. Entity rows are declarative: a type name is carried by a Create, and
@@ -230,13 +439,28 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
                 return doc.cellOrDefault(type, r, c);
             };
 
-            if (type == "Create") {
+            if (type == "Create" && !cell("Schedule").empty()) {
+                const std::string perArrival = cell("Per Arrival");
+                const bool fixed = perArrival.empty() || looksLikeInteger(perArrival);
                 const std::string entityType = cell("Entity Type");
+                model.scheduledSource(name, entityType.empty() ? "Entity" : entityType,
+                                      cell("Schedule"), scheduleOf(doc, cell("Schedule")),
+                                      asInteger(cell("Max Arrivals"), -1),
+                                      asReal(cell("First At"), 0.0),
+                                      fixed ? static_cast<int>(asInteger(perArrival, 1)) : 1);
+                if (!fixed) model.perArrival(name, perArrival);
+            } else if (type == "Create") {
+                const std::string entityType = cell("Entity Type");
+                // A whole number keeps the fixed path, so a model that says
+                // Per Arrival = 3 describes and checks exactly as before.
+                const std::string perArrival = cell("Per Arrival");
+                const bool fixed = perArrival.empty() || looksLikeInteger(perArrival);
                 model.source(name, entityType.empty() ? "Entity" : entityType,
                              cell("Interarrival"),
                              asInteger(cell("Max Arrivals"), -1),
                              asReal(cell("First At"), 0.0),
-                             static_cast<int>(asInteger(cell("Per Arrival"), 1)));
+                             fixed ? static_cast<int>(asInteger(perArrival, 1)) : 1);
+                if (!fixed) model.perArrival(name, perArrival);
             } else if (type == "Process") {
                 const std::string resourceName = cell("Resource");
                 const QueueDiscipline rule = disciplineFrom(cell("Discipline"));
@@ -272,9 +496,19 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
                     model.separate(name);
             } else if (type == "Record") {
                 const std::string what = cell("What");
-                if (what == "Attribute")           model.recordAttribute(name, cell("Attribute"));
-                else if (what == "TimeInSystem")   model.recordTimeInSystem(name);
-                else                               model.record(name);
+                RecordNode::What kind = RecordNode::What::Count;
+                if (what == "Attribute")         kind = RecordNode::What::Attribute;
+                else if (what == "TimeInSystem") kind = RecordNode::What::TimeInSystem;
+                else if (what == "TimeInterval") kind = RecordNode::What::TimeInterval;
+                else if (what == "Expression")   kind = RecordNode::What::Expression;
+                model.recordNamed(name, kind, cell("Attribute"), cell("Value"),
+                                  cell("Statistic"));
+            } else if (type == "Match") {
+                model.match(name, cell("Type") == "Attribute" ? cell("Attribute") : std::string());
+            } else if (type == "Station") {
+                model.stationBlock(name);
+            } else if (type == "Route") {
+                model.routeBlock(name, cell("Route Time"));
             } else if (type == "Dispose") {
                 model.dispose(name);
             }
@@ -292,6 +526,9 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
         else if (target == "EntityType") model.assignEntityType(block, value);
         else                             model.assignTo(block, field, value);
     }
+
+    for (std::size_t r = 0; r < doc.rowCount("MatchLane"); ++r)
+        model.matchLane(doc.cell("MatchLane", r, "Match"), doc.cell("MatchLane", r, "Name"));
 
     for (std::size_t r = 0; r < doc.rowCount("DecideBranch"); ++r) {
         const std::string decide    = doc.cell("DecideBranch", r, "Decide");
@@ -312,6 +549,10 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
             const std::string next = doc.cell(type, r, "Next");
             if (!next.empty()) model.route(name, next);
 
+            if (type == "Route") {
+                const std::string to = doc.cell(type, r, "Destination");
+                if (!to.empty()) model.routeTo(name, to);
+            }
             if (type == "Separate") {
                 const std::string dup = doc.cell(type, r, "Duplicate");
                 if (!dup.empty()) model.routeDuplicate(name, dup);
@@ -326,6 +567,11 @@ void buildBlocks(const ModelDocument& doc, Model& model) {
                     model.renegeAfter(name, patience, doc.cell(type, r, "Renege To"));
             }
         }
+    }
+
+    for (std::size_t r = 0; r < doc.rowCount("MatchLane"); ++r) {
+        const std::string next = doc.cell("MatchLane", r, "Next");
+        if (!next.empty()) model.route(doc.cell("MatchLane", r, "Name"), next);
     }
 
     // 7. Entry: where the first source feeds, or the first flowchart block.
@@ -365,8 +611,11 @@ std::vector<std::string> referenceCandidates(const ModelDocument& doc,
     };
 
     if (targetType == "Block") {
+        // v16: a Match is entered through its lanes, which are the blocks
+        // other blocks name; the Match itself is not somewhere to go.
         for (const ModuleSchema& s : reg.all())
-            if (s.kind == ModuleKind::Flowchart) rowNames(s.typeName);
+            if (s.kind == ModuleKind::Flowchart && s.typeName != "Match") rowNames(s.typeName);
+        rowNames("MatchLane");
     } else {
         rowNames(targetType);
     }
@@ -398,6 +647,10 @@ bool compileInto(const ModelDocument& doc, Model& model,
     checkSchema(doc, diagnostics);
     checkReferences(doc, diagnostics);
     checkExpressionCells(doc, diagnostics);
+    checkVariables(doc, diagnostics);
+    checkStations(doc, diagnostics);
+    checkMatches(doc, diagnostics);
+    checkSchedules(doc, diagnostics);
     // The build cannot run with broken references or unparseable expressions,
     // so it is skipped and structureChecked stays false. Reporting a model as
     // checked when it was not is the failure this project keeps refusing.
@@ -413,6 +666,17 @@ bool compileInto(const ModelDocument& doc, Model& model,
     }
 
     for (const Diagnostic& d : model.checkStructure()) diagnostics.push_back(d);
+    // v16.1: names inside expressions -- a Variable, an array, an attribute --
+    // were checked only when a run started. With tables on their own tab,
+    // deleting one that a Create still reads must say so where it is edited,
+    // not at ^R.
+    // Their span is an offset WITHIN an expression, and with no cell lineOf()
+    // would read that as a file line, so it is dropped: "cannot say where"
+    // rather than a marker on the wrong line.
+    for (Diagnostic d : model.checkExpressions()) {
+        d.span = SourceSpan{};
+        diagnostics.push_back(std::move(d));
+    }
     if (structureChecked != nullptr) *structureChecked = true;
     return !hasErrors(diagnostics);
 }

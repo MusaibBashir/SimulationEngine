@@ -530,6 +530,15 @@ RecordNode::RecordNode(std::string name)
 RecordNode::RecordNode(std::string name, std::string attribute)
     : INode(std::move(name)), m_what(What::Attribute), m_attribute(std::move(attribute)) {}
 
+RecordNode::RecordNode(std::string name, What what, std::string attribute, ExpressionPtr value)
+    : INode(std::move(name)), m_what(what), m_attribute(std::move(attribute)),
+      m_value(std::move(value)) {
+    if (m_what == What::Expression && !m_value)
+        throw ModelError("record '" + m_name + "': What = Expression needs a Value");
+    if ((m_what == What::TimeInterval || m_what == What::Attribute) && m_attribute.empty())
+        throw ModelError("record '" + m_name + "': this kind of Record needs an Attribute");
+}
+
 std::unique_ptr<RecordNode> RecordNode::timeInSystem(std::string name) {
     auto r = std::make_unique<RecordNode>(std::move(name));
     r->m_what = What::TimeInSystem;
@@ -538,10 +547,16 @@ std::unique_ptr<RecordNode> RecordNode::timeInSystem(std::string name) {
 
 void RecordNode::enter(NodeContext& ctx, Entity* e) {
     double value = 0.0;
+    const auto valueOf = [&]() {
+        EvalContext ectx = ctx.evaluationContext(e);
+        return asNumber(m_value->evaluate(ectx));
+    };
     switch (m_what) {
-        case What::Count:        value = 1.0; break;
+        case What::Count:        value = m_value ? valueOf() : 1.0; break;
         case What::Attribute:    value = e->attribute(m_attribute); break;
         case What::TimeInSystem: value = ctx.now() - e->creationTime(); break;
+        case What::TimeInterval: value = ctx.now() - e->attribute(m_attribute); break;
+        case What::Expression:   value = valueOf(); break;
     }
     if (m_count == 0) { m_min = value; m_max = value; }
     else { m_min = std::min(m_min, value); m_max = std::max(m_max, value); }
@@ -560,12 +575,21 @@ void RecordNode::resetStatistics(SimTime now) {
     (void)now; m_count = 0; m_total = 0.0; m_min = 0.0; m_max = 0.0;
 }
 
-void RecordNode::reset() { m_count = 0; m_total = 0.0; m_min = 0.0; m_max = 0.0; }
+void RecordNode::reset() {
+    m_count = 0; m_total = 0.0; m_min = 0.0; m_max = 0.0;
+    if (m_value) m_value->reset();
+}
 
 std::string RecordNode::describe() const {
-    std::string what = m_what == What::Count ? "count"
-                     : m_what == What::Attribute ? ("attribute:" + m_attribute)
-                     : "time in system";
+    std::string what;
+    switch (m_what) {
+        case What::Count:        what = m_value ? "count +" + m_value->describe() : "count"; break;
+        case What::Attribute:    what = "attribute:" + m_attribute; break;
+        case What::TimeInSystem: what = "time in system"; break;
+        case What::TimeInterval: what = "time since " + m_attribute; break;
+        case What::Expression:   what = "value " + m_value->describe(); break;
+    }
+    if (!m_statistic.empty() && m_statistic != m_name) what += " into " + m_statistic;
     return "Record " + m_name + " [" + what + ", next=" +
            (m_next ? m_next->name() : std::string("exit")) + "]";
 }

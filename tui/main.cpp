@@ -7,6 +7,7 @@
 // behaviour of being double-clicked by somebody who has never seen it.
 
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -51,13 +52,23 @@ int main(int argc, char** argv) {
     // model they were building is where they left it when they come back.
     const bool chosen = (argc == 2);
     const std::string path = chosen ? argv[1] : defaultModelPath();
+    std::error_code ignored;
+    const bool existed = std::filesystem::exists(path, ignored);
     TuiState state = TuiState::open(path);
+    const std::string folder = std::filesystem::path(defaultModelPath()).parent_path().string();
+    state.setDefaultDirectory(folder.empty() ? std::string(".") : folder);
+    state.setOpener([](const std::string& file) { return openWithDefaultApp(file); });
     if (!chosen) {
-        const bool empty = state.buffer().lineCount() == 1 && state.buffer().lineAt(0).empty();
-        state.setStatus(empty ? "a new model -- ^S saves it to " + path +
-                                    "   ^T writes a working one"
-                              : "reopened " + path);
+        // A scratch model that was never saved has no name yet. Its first ^S
+        // asks for one, rather than every new model becoming untitled.des.
+        state.setUnnamed(!existed);
+        state.setStatus(!existed ? "a new model -- ^S asks for its name   ^T writes a working one"
+                                 : "reopened " + path);
     }
+
+    // A window of its own opens maximized: a flowchart wants the room, and
+    // a double-clicked model should not open in a postage stamp.
+    if (launchedOnOwnConsole()) maximizeOwnWindow();
 
     std::string whyNot;
     std::unique_ptr<ITerminal> terminal = openTerminal(whyNot);
@@ -66,7 +77,8 @@ int main(int argc, char** argv) {
         holdWindowOpen();
         return 1;
     }
-    terminal->setTitle("DES Simulator - " + fileNameOf(path));
+    std::string titled = state.path();
+    terminal->setTitle("DES Simulator - " + fileNameOf(titled));
 
     // Saves the text somewhere it will not be overwritten, then says where.
     // Shared by both catch clauses below so they cannot disagree.
@@ -114,6 +126,11 @@ int main(int argc, char** argv) {
             // layout depends on how big the window is right now.
             if (!handleKey(state, terminal->nextKey(), size.width, size.height)) break;
             if (state.wantsQuit()) break;
+            // ^N and a first save both change which file this is.
+            if (state.path() != titled) {
+                titled = state.path();
+                terminal->setTitle("DES Simulator - " + fileNameOf(titled));
+            }
         }
     } catch (const std::exception& e) {
         // A BACKSTOP, not the plan. A model that fails part way through a run

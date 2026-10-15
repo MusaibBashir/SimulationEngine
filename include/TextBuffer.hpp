@@ -78,6 +78,12 @@ public:
     // value -- the field a person fills in first.
     void insertLines(const std::vector<std::string>& block);
 
+    // v16: lines [first, first + count) become `with`, as ONE undo step. The
+    // Runs tab edits a field and deletes a run through this, so ^Z takes back
+    // what the person did rather than half of it.
+    void replaceLines(std::size_t first, std::size_t count,
+                      const std::vector<std::string>& with);
+
     bool canUndo() const { return !m_undo.empty(); }
     bool canRedo() const { return !m_redo.empty(); }
     void undo();
