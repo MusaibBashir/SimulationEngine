@@ -21,6 +21,7 @@
 #include "Diagnostic.hpp"
 #include "FlowGraph.hpp"
 #include "ModelDocument.hpp"
+#include "ModelGenerator.hpp"
 #include "ModuleSchema.hpp"
 #include "RunController.hpp"
 #include "TableStore.hpp"
@@ -39,7 +40,7 @@ enum class Pane { Palette, Editor };
 // Something drawn OVER the view, which takes every key until it closes. Modal
 // on purpose: a list of choices that let you edit underneath it would be
 // answering a question about text that had moved.
-enum class Overlay { None, Help, Picker, Confirm, Running, Prompt };
+enum class Overlay { None, Help, Picker, Confirm, Running, Prompt, Ask };
 
 // One Confirm overlay asks several questions; this says which, so a 'd' that
 // means "discard and quit" can never be read as "discard and open a new file".
@@ -48,6 +49,25 @@ enum class ConfirmFor { Quit, NewFile, DeleteRun, OpenExisting,
 
 // What the one-line Prompt is asking for.
 enum class PromptFor { None, NewFile, SaveAs };
+
+// v17: one line of the Ask panel's conversation.
+struct AskLine {
+    enum class Kind { You, Understood, Assumed, Question, Error, Info } kind{Kind::Info};
+    std::string text;
+};
+
+// v17: how F2 reaches the outside world. Installed by tui/main.cpp; a test
+// installs fakes, so the panel is driven with no network and no thread.
+struct AskHooks {
+    // One description (or answer) -> a result. Called OFF the UI thread.
+    std::function<GenerateResult(const std::string&, const JsonValue&, const LlmConfig&)> generate;
+    // Persist a key typed into the panel. Empty: the key lasts this session.
+    std::function<bool(const std::string&, std::string&)> saveKey;
+    // Run some work in the background. Empty: a detached std::thread.
+    std::function<void(std::function<void()>)> launch;
+};
+
+struct AskJob;   // a request in flight; TuiState.cpp
 
 // Which half of the Runs tab has the keyboard.
 enum class RunsFocus { List, Form };
@@ -328,6 +348,35 @@ public:
     void showTableHelp();
     std::vector<std::string> tableUsers() const;     // of the current table
 
+    // --- describe a model (v17, F2) -------------------------------------------
+    // Somebody says or types what happens; a small language model fills in a
+    // Scenario and our own code builds the model, which replaces the text as
+    // ONE edit -- ^Z takes it back. Missing facts come back as questions, and
+    // the answer goes in the same box. The request runs off the UI thread, so
+    // the screen keeps drawing and Esc stops waiting.
+    void setAskHooks(AskHooks hooks) { m_askHooks = std::move(hooks); }
+    void setLlmConfig(LlmConfig c) { m_llm = std::move(c); }
+    const LlmConfig& llmConfig() const { return m_llm; }
+
+    void openAsk();
+    void closeAsk();
+    const std::string& askDraft() const { return m_askDraft; }
+    void typeAsk(char c);
+    void backspaceAsk();
+    void pasteIntoAsk(const std::string& text);
+    void clearAsk() { m_askDraft.clear(); }
+    void commitAsk();               // Enter: send, or save the key being typed
+    void escapeAsk();               // stop waiting, leave key entry, or close
+    void beginKeyEntry();           // ^K in the panel
+    bool enteringKey() const { return m_askKeyEntry; }
+    bool askBusy() const { return m_askJob != nullptr; }
+    // Called by the main loop while askBusy(): applies a finished answer.
+    void pollAsk();
+    const std::vector<AskLine>& askLog() const { return m_askLog; }
+    // The filled-in form behind the model, so a later "add a second teller"
+    // changes it rather than starting again.
+    const JsonValue& askScenario() const { return m_askScenario; }
+
     // --- quitting ------------------------------------------------------------
     bool wantsQuit() const { return m_quit; }
     void requestQuit();
@@ -414,6 +463,17 @@ private:
     // What a Confirm about a table is waiting to do.
     std::size_t m_pendingRows{0}, m_pendingColumns{0};
     std::string m_pendingName;
+
+    AskHooks                 m_askHooks;
+    LlmConfig                m_llm;
+    std::string              m_askDraft;
+    bool                     m_askKeyEntry{false};
+    std::string              m_askPending;     // a description waiting on a key
+    std::vector<AskLine>     m_askLog;
+    JsonValue                m_askScenario;
+    std::string              m_askBuiltText;   // the text the last answer wrote
+    std::shared_ptr<AskJob>  m_askJob;
+    void startAsk(const std::string& text);
 
     void tablesChanging();            // snapshot for ^Z, before a change
     void tablesChanged();             // dirty, and re-read the joined model

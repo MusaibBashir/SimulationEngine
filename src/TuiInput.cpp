@@ -93,6 +93,33 @@ bool handlePrompt(TuiState& state, Key key) {
     return true;
 }
 
+// v17: the Ask panel. Ordinary typing goes into the box -- including what the
+// operating system's dictation types, which arrives as keys like any other.
+bool handleAsk(TuiState& state, Key key) {
+    switch (key.kind) {
+        case KeyKind::Char:      state.typeAsk(key.ch); break;
+        case KeyKind::Tab:       state.typeAsk(' '); break;
+        case KeyKind::Backspace: state.backspaceAsk(); break;
+        case KeyKind::Enter:     state.commitAsk(); break;
+        case KeyKind::Escape:    state.escapeAsk(); break;
+        case KeyKind::Function:
+            if (key.ch == 2) state.escapeAsk();      // F2 again closes it
+            break;
+        case KeyKind::Ctrl:
+            switch (key.ch) {
+                case 'K': state.beginKeyEntry(); break;
+                case 'V': state.pasteIntoAsk(state.clipboard()); break;
+                case 'U': state.clearAsk(); break;
+                // Quitting from inside the panel still asks about unsaved work.
+                case 'Q': state.closeAsk(); state.requestQuit(); return !state.wantsQuit();
+                default: break;
+            }
+            break;
+        default: break;
+    }
+    return true;
+}
+
 bool handleRunning(TuiState& state, Key key) {
     if (key.kind == KeyKind::Escape) state.stopRun();
     return true;
@@ -373,6 +400,8 @@ bool handleMouse(TuiState& state, Key key, int width, int height) {
                 state.setView(tabView(i));
                 return true;
             }
+        if (key.button == MouseButton::Left && key.x >= L.askStart && key.x < L.askEnd)
+            state.openAsk();
         return true;
     }
 
@@ -548,8 +577,10 @@ bool handleKey(TuiState& state, Key key, int width, int height) {
     if (state.overlay() == Overlay::Picker)  return handlePicker(state, key);
     if (state.overlay() == Overlay::Running) return handleRunning(state, key);
     if (state.overlay() == Overlay::Prompt)  return handlePrompt(state, key);
+    if (state.overlay() == Overlay::Ask)     return handleAsk(state, key);
 
     if (key.kind == KeyKind::Function && key.ch == 1) { openKeyMap(state); return true; }
+    if (key.kind == KeyKind::Function && key.ch == 2) { state.openAsk(); return true; }
 
     if (key.kind == KeyKind::Ctrl) {
         switch (key.ch) {

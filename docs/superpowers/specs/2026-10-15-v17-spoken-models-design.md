@@ -2,7 +2,9 @@
 
 **Status:** approved 2026-10-15 — scope: arrivals, processing steps, delays,
 branches, shared resources, run setup; Groq's 70B Llama; voice through the
-OS's own speech typing. Steps 1–4 built on `voice-agent`; step 5 (TUI) next.
+OS's own speech typing. Steps 1–5 built on `voice-agent`. In the TUI the panel is `F2`, not `^A`:
+`^A` was already select-all and `^K` the key map, so `^K` changes the key
+only inside the panel.
 **Date:** 2026-10-15
 
 ---

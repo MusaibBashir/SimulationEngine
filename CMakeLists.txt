@@ -80,6 +80,24 @@ endif()
 target_compile_options(des_engine PRIVATE ${DES_WARNINGS})
 
 # ----------------------------------------------------------------------------
+# v17: models from a description, through a small language model. A THIRD
+# library, linking des_engine and never the reverse, so the engine stays
+# offline and network-free for everybody who never sets a key. Portable code
+# in src/ for the same reason des_ui's is: verify.sh then runs it through
+# every compiler and sanitiser with no change to any gate.
+# ----------------------------------------------------------------------------
+add_library(des_ai STATIC
+    src/Json.cpp
+    src/Scenario.cpp
+    src/ScenarioBuilder.cpp
+    src/PreParse.cpp
+    src/ModelGenerator.cpp
+    src/CurlTransport.cpp
+)
+target_link_libraries(des_ai PUBLIC des_engine)
+target_compile_options(des_ai PRIVATE ${DES_WARNINGS})
+
+# ----------------------------------------------------------------------------
 # The user interface, as a SECOND library. des_ui links des_engine and never
 # the reverse -- that is the whole of the layering, and it is what a repository
 # boundary would otherwise have been protecting.
@@ -100,26 +118,10 @@ add_library(des_ui STATIC
     src/TuiTables.cpp
     src/FlowGraph.cpp
 )
-target_link_libraries(des_ui PUBLIC des_engine)
+# v17: des_ui links des_ai for F2, describe-a-model. Still one direction:
+# nothing in des_ai or des_engine knows a screen exists.
+target_link_libraries(des_ui PUBLIC des_engine des_ai)
 target_compile_options(des_ui PRIVATE ${DES_WARNINGS})
-
-# ----------------------------------------------------------------------------
-# v17: models from a description, through a small language model. A THIRD
-# library, linking des_engine and never the reverse, so the engine stays
-# offline and network-free for everybody who never sets a key. Portable code
-# in src/ for the same reason des_ui's is: verify.sh then runs it through
-# every compiler and sanitiser with no change to any gate.
-# ----------------------------------------------------------------------------
-add_library(des_ai STATIC
-    src/Json.cpp
-    src/Scenario.cpp
-    src/ScenarioBuilder.cpp
-    src/PreParse.cpp
-    src/ModelGenerator.cpp
-    src/CurlTransport.cpp
-)
-target_link_libraries(des_ai PUBLIC des_engine)
-target_compile_options(des_ai PRIVATE ${DES_WARNINGS})
 
 # ----------------------------------------------------------------------------
 # Programs
@@ -153,8 +155,8 @@ if(WIN32)
     target_link_libraries(des_tui PRIVATE shell32 ole32 uuid)
 endif()
 
-add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp tests/v16_tests.cpp tests/tables_tests.cpp tests/flowgraph_tests.cpp tests/scenario_tests.cpp)
-target_link_libraries(des_tests PRIVATE des_ui des_ai)
+add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp tests/v16_tests.cpp tests/tables_tests.cpp tests/flowgraph_tests.cpp tests/scenario_tests.cpp tests/ask_tests.cpp)
+target_link_libraries(des_tests PRIVATE des_ui)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
 
 # The decisive v11 test reads the shipped .des files. The suite is not always

@@ -49,7 +49,33 @@ struct LlmConfig {
 
     // DES_LLM_BASE_URL, DES_LLM_MODEL, and DES_LLM_API_KEY or GROQ_API_KEY.
     static LlmConfig fromEnvironment();
+
+    // The settings file first, then the environment over it: a variable set
+    // for one session is a deliberate override of what was saved.
+    static LlmConfig load();
+
+    // "api.groq.com", for telling a person where their words are going.
+    std::string host() const;
+    // Groq (or any hosted provider) without a key is a request bound to fail;
+    // a local server needs none.
+    bool needsKey() const;
 };
+
+// Where the settings live -- per user, never beside the model, so a key cannot
+// be emailed along with a .des file:
+//   Windows  %APPDATA%\DES Simulator\llm.conf
+//   macOS    ~/Library/Application Support/DES Simulator/llm.conf
+//   other    $XDG_CONFIG_HOME/des-simulator/llm.conf, or ~/.config/...
+std::string llmConfigPath();
+
+// `key = value` lines: api_key, base_url, model. Unknown keys and # comments
+// are ignored, so a newer version's file does not break an older program.
+LlmConfig   parseLlmConfig(const std::string& text, LlmConfig base = LlmConfig{});
+std::string llmConfigText(const LlmConfig& config);
+
+// Writes the key into the settings file, keeping whatever else is there.
+// Created readable by this user alone. False, with the reason, on failure.
+bool saveApiKey(const std::string& key, std::string& error);
 
 // "gsk_…a1b2": enough to tell two keys apart, never enough to use one.
 std::string maskKey(const std::string& key);

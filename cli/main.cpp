@@ -190,9 +190,10 @@ int generate(int argc, char** argv) {
                   ? from.substr(0, from.size() - 14) + ".des" : out;
     }
 
-    const LlmConfig config = LlmConfig::fromEnvironment();
-    if (config.apiKey.empty() && config.baseUrl.find("api.groq.com") != std::string::npos) {
+    const LlmConfig config = LlmConfig::load();
+    if (config.needsKey()) {
         std::cout << "des: no API key. Set DES_LLM_API_KEY to a Groq key (console.groq.com/keys),\n"
+                     "     or save one from des_tui (F2, then ^K),\n"
                      "     or point DES_LLM_BASE_URL at a local server such as\n"
                      "     http://localhost:11434/v1 (Ollama), which needs none.\n";
         return 1;

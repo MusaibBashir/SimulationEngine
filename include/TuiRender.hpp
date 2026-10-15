@@ -35,6 +35,10 @@ struct Layout {
     // The bar across the top: one entry per View, in order.
     std::vector<int> tabStart;
     std::vector<int> tabEnd;      // one past the last column
+    // v17: the Ask button after the tabs -- F2 for a mouse, and for a Mac
+    // keyboard where F2 needs Fn as well.
+    int askStart{0};
+    int askEnd{0};
 
     // Model view.
     int paletteX{0};       // first column of a palette label
@@ -70,6 +74,7 @@ Layout layoutFor(const TuiState& state, int width, int height);
 constexpr int TAB_COUNT = 5;
 View        tabView(int i);
 std::string tabLabel(const TuiState& state, int i);
+constexpr const char* ASK_LABEL = "Ask F2";
 
 // Where the current table's grid is on screen, worked out once so a click is
 // turned back into a cell by the arithmetic that drew it.

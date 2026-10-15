@@ -342,6 +342,7 @@ spacing and ordering survive because nothing rewrites them.
 | `^J` | jump to the first error |
 | `^T` | write a working model into an empty file |
 | `^R` | run it; on the Runs tab `A` adds a `[Run]` and `Del` deletes one |
+| `F2` | describe a model in words, or speak it — see **Describing a model** below |
 | `^N` | a new model — it asks for the name |
 | `^D` | the Tables tab: variables, arrays, matrices and schedules |
 | `^W` | save the results |
@@ -645,30 +646,44 @@ small language model fills in a short form; this project's own code turns the
 form into the `.des` file. The language model never writes the model itself,
 so whatever it produces compiles.
 
+**In the editor, press `F2`** (or click **Ask F2** on the top bar). Type, or
+speak with the operating system's own speech typing — `Win+H` on Windows 10
+and 11, the Dictation key (or `Fn` twice) on macOS — then press Enter:
+
+> customers come thirty an hour, two tellers, about 3 minutes each
+
+The panel shows what it worked out ("30 an hour = one every 2 minutes") and
+every default it had to choose ("Teller: 'about 3' taken as between 2.25 and
+3.75 minutes"), and the model replaces the text as **one edit**: `^Z` takes it
+back, `^R` runs it. Type a change ("add a third teller") to revise it, or
+press Enter on an empty line to close. When a fact is missing, or the numbers
+describe a queue that would grow for ever, it asks instead of guessing:
+
+> ? Teller would be busy 150% of the time with 1 server ... How many servers does Teller have?
+
+and the answer goes in the same box. The request runs in the background, so
+the screen keeps drawing; `Esc` stops waiting. Check spoken numbers before
+pressing Enter — "fifteen" and "fifty" sound alike.
+
+**The key.** The first time, it asks for an API key (free from
+[console.groq.com/keys](https://console.groq.com/keys)); `^K` in the panel
+changes it. It is saved for you alone — `%APPDATA%\DES Simulator\llm.conf` on
+Windows, `~/Library/Application Support/DES Simulator/llm.conf` on a Mac —
+never in a model file, and shown only as `gsk_…wxyz`. The panel's title always
+says where your words are sent.
+
+**From the command line**, the same thing:
+
 ```
-export DES_LLM_API_KEY=gsk_...        # a Groq key: console.groq.com/keys
+export DES_LLM_API_KEY=gsk_...        # or use the key saved from the editor
 des generate "customers arrive thirty an hour, two tellers take about 3 minutes each, run an 8 hour day"
+des generate --from model.scenario.json "there are two tellers"     # answering a question
 ```
 
-It prints what it worked out ("30 an hour = one every 2 minutes"), every default
-it had to choose ("no server count was given for X-ray, so it has 1"), and
-writes `model.des` plus `model.scenario.json`, the filled-in form. When a fact
-is missing, or the numbers describe a queue that would grow forever, it asks
-instead of guessing:
-
-```
-? Teller would be busy 150% of the time with 1 server ... How many servers does Teller have?
-des generate --from model.scenario.json "there are two tellers"
-```
-
-**Voice:** use the speech typing built into the operating system. Press
-`Win+H` on Windows 11, or the Dictation key (or `Fn` twice) on macOS, and speak
-into the terminal; check the numbers before pressing Enter, because "fifteen"
-and "fifty" sound alike.
-
-**Other providers:** `DES_LLM_BASE_URL` and `DES_LLM_MODEL` point it at any
-OpenAI-compatible server, for example `http://localhost:11434/v1` and
-`llama3.1` for Ollama on your own machine, which needs no key and no internet.
+**Other providers:** `base_url` and `model` in `llm.conf`, or `DES_LLM_BASE_URL`
+and `DES_LLM_MODEL`, point it at any OpenAI-compatible server — for example
+`http://localhost:11434/v1` and `llama3.1` for Ollama on your own machine,
+which needs no key and no internet.
 
 `des new scenario.json` builds a model from a form written by hand, with no
 language model at all. What it can build: arrival streams, processing steps

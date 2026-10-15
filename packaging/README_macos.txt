@@ -3,7 +3,8 @@ DES Simulator  @VERSION@
 
 A discrete-event simulation tool in the spirit of Arena's Basic Process
 template. You write a model as text, run it, and read the results. It needs
-nothing else installed: no compiler, no libraries, no internet connection.
+nothing else installed: no compiler, no libraries, and -- apart from F2 --
+no internet connection.
 
 Requires macOS 11 (Big Sur) or later, on either an Apple Silicon or an Intel
 Mac.
@@ -73,6 +74,7 @@ The keys are Control, not Command.
   Ctrl+L        list the values a field allows (Arena's drop-down)
   Ctrl+J        jump to the first error; errors are marked E beside the line
   Ctrl+T        write a working model into an empty file
+  F2            describe a model in words, or speak it (see below)
   Ctrl+R        run the model
   Ctrl+W        save the results to a file beside the model
   Ctrl+S        save the model
@@ -86,6 +88,25 @@ Terminal > Settings > Profiles > Keyboard.
 
 The tabs along the top -- Model, Flow, Runs, Results -- can be clicked, or
 reached with Ctrl+B, Ctrl+F, Ctrl+U and Ctrl+E.
+
+
+DESCRIBING A MODEL INSTEAD OF WRITING IT
+----------------------------------------
+
+Press F2 (fn+F2 on most Mac keyboards), or click "Ask F2" at the top. Say
+what happens -- press the Dictation key, or Fn twice, to speak instead of
+typing -- for example:
+
+    customers come thirty an hour, two tellers, about 3 minutes each
+
+and press Enter. A language model fills in what you said, and the program
+writes the model for you. It lists every number it had to assume, asks when
+something is missing, and Ctrl+Z takes the whole model back.
+
+This one feature uses the internet: your words are sent to Groq, and the
+first time it asks for a free API key from console.groq.com/keys (Ctrl+K in
+the panel changes it). The key is saved for you alone, never in a model.
+Everything else works with no connection at all.
 
 
 IF SOMETHING GOES WRONG

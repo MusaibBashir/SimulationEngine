@@ -1,9 +1,19 @@
 #include "ModelGenerator.hpp"
 
+#include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include "Compiler.hpp"
 #include "PreParse.hpp"
 #include "ScenarioBuilder.hpp"
+
+#ifndef _WIN32
+  #include <fcntl.h>
+  #include <sys/stat.h>
+  #include <unistd.h>
+#endif
 
 namespace des {
 
@@ -66,6 +76,122 @@ LlmConfig LlmConfig::fromEnvironment() {
     if (c.apiKey.empty()) c.apiKey = env("GROQ_API_KEY");
     while (!c.baseUrl.empty() && c.baseUrl.back() == '/') c.baseUrl.pop_back();
     return c;
+}
+
+LlmConfig LlmConfig::load() {
+    LlmConfig c;
+    std::ifstream in(llmConfigPath(), std::ios::binary);
+    if (in.is_open())
+        c = parseLlmConfig(std::string((std::istreambuf_iterator<char>(in)),
+                                       std::istreambuf_iterator<char>()));
+    const LlmConfig e = fromEnvironment();
+    if (!env("DES_LLM_BASE_URL").empty()) c.baseUrl = e.baseUrl;
+    if (!env("DES_LLM_MODEL").empty())    c.model   = e.model;
+    if (!e.apiKey.empty())                c.apiKey  = e.apiKey;
+    return c;
+}
+
+std::string LlmConfig::host() const {
+    std::string h = baseUrl;
+    const std::size_t scheme = h.find("://");
+    if (scheme != std::string::npos) h = h.substr(scheme + 3);
+    const std::size_t slash = h.find('/');
+    return slash == std::string::npos ? h : h.substr(0, slash);
+}
+
+bool LlmConfig::needsKey() const {
+    if (!apiKey.empty()) return false;
+    const std::string h = host();
+    return h.find("localhost") == std::string::npos && h.find("127.0.0.1") == std::string::npos &&
+           h.find("[::1]") == std::string::npos;
+}
+
+std::string llmConfigPath() {
+    namespace fs = std::filesystem;
+    fs::path dir;
+#ifdef _WIN32
+    const std::string appdata = env("APPDATA");
+    dir = appdata.empty() ? fs::path(".") : fs::path(appdata) / "DES Simulator";
+#elif defined(__APPLE__)
+    const std::string home = env("HOME");
+    dir = fs::path(home.empty() ? "." : home) / "Library" / "Application Support" / "DES Simulator";
+#else
+    const std::string xdg = env("XDG_CONFIG_HOME");
+    const std::string home = env("HOME");
+    dir = !xdg.empty() ? fs::path(xdg) / "des-simulator"
+                       : fs::path(home.empty() ? "." : home) / ".config" / "des-simulator";
+#endif
+    return (dir / "llm.conf").string();
+}
+
+LlmConfig parseLlmConfig(const std::string& text, LlmConfig c) {
+    std::size_t start = 0;
+    while (start < text.size()) {
+        std::size_t end = text.find('\n', start);
+        if (end == std::string::npos) end = text.size();
+        std::string line = text.substr(start, end - start);
+        start = end + 1;
+        const std::size_t eq = line.find('=');
+        if (line.empty() || line[0] == '#' || eq == std::string::npos) continue;
+        auto trim = [](std::string v) {
+            const std::size_t b = v.find_first_not_of(" \t\r");
+            if (b == std::string::npos) return std::string();
+            return v.substr(b, v.find_last_not_of(" \t\r") - b + 1);
+        };
+        const std::string key = trim(line.substr(0, eq));
+        const std::string value = trim(line.substr(eq + 1));
+        if (key == "api_key")                         c.apiKey = value;
+        else if (key == "base_url" && !value.empty()) c.baseUrl = value;
+        else if (key == "model" && !value.empty())    c.model = value;
+    }
+    while (!c.baseUrl.empty() && c.baseUrl.back() == '/') c.baseUrl.pop_back();
+    return c;
+}
+
+std::string llmConfigText(const LlmConfig& c) {
+    return "# DES Simulator: the language model behind F2 (describe a model).\n"
+           "# Any OpenAI-compatible server works; for Ollama on this machine use\n"
+           "#   base_url = http://localhost:11434/v1   and no api_key.\n"
+           "base_url = " + c.baseUrl + "\n"
+           "model = " + c.model + "\n"
+           "api_key = " + c.apiKey + "\n";
+}
+
+bool saveApiKey(const std::string& key, std::string& error) {
+    namespace fs = std::filesystem;
+    const fs::path path = llmConfigPath();
+    LlmConfig c;
+    {
+        std::ifstream in(path, std::ios::binary);
+        if (in.is_open())
+            c = parseLlmConfig(std::string((std::istreambuf_iterator<char>(in)),
+                                           std::istreambuf_iterator<char>()));
+    }
+    c.apiKey = key;
+    std::error_code ec;
+    fs::create_directories(path.parent_path(), ec);
+    const std::string text = llmConfigText(c);
+#ifdef _WIN32
+    // %APPDATA% is inside the user's own profile, which other accounts cannot
+    // read; that is the protection on Windows.
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << text;
+    if (!out) { error = "could not write " + path.string(); return false; }
+#else
+    // Write a fresh 0600 file and move it into place, so the key is never in a
+    // file anybody else could read, not even for a moment.
+    const std::string tmp = path.string() + ".tmp";
+    ::unlink(tmp.c_str());
+    const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+    if (fd < 0) { error = "could not write " + tmp; return false; }
+    const bool wrote = ::write(fd, text.data(), text.size()) == static_cast<ssize_t>(text.size());
+    if (::close(fd) != 0 || !wrote || std::rename(tmp.c_str(), path.c_str()) != 0) {
+        ::unlink(tmp.c_str());
+        error = "could not write " + path.string();
+        return false;
+    }
+#endif
+    return true;
 }
 
 std::string maskKey(const std::string& key) {
