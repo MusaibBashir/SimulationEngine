@@ -21,6 +21,13 @@ std::string lowerUnit(TimeUnit u) {
     return s;
 }
 
+// "1 minute", "2 minutes" -- the number and its unit, as a person says them.
+std::string amount(double v, TimeUnit u) {
+    std::string unit = lowerUnit(u);
+    if (v == 1.0) unit.pop_back();
+    return num(v) + " " + unit;
+}
+
 class Builder {
 public:
     explicit Builder(const Scenario& s) : m_s(s) {}
@@ -205,13 +212,13 @@ std::string expressionFor(const TimeSpec& t, TimeUnit unit, std::vector<std::str
             // queueing -- and a small model reaches for it whenever a sentence
             // gives one number. So it is said out loud like any other choice.
             if (assumptions != nullptr && !what.empty())
-                assumptions->push_back(what + ": exactly " + num(*t.mean) + " " + lowerUnit(t.unit) +
+                assumptions->push_back(what + ": exactly " + amount(*t.mean, t.unit) +
                                        " every time, with no variation. Say \"on average\" if it varies.");
             return "CONS(" + in(*t.mean) + ")";
         case Pattern::Random:
             if (assumptions != nullptr && !what.empty())
-                assumptions->push_back(what + ": random, averaging " + num(*t.mean) + " " +
-                                       lowerUnit(t.unit) + " (exponential).");
+                assumptions->push_back(what + ": random, averaging " + amount(*t.mean, t.unit) +
+                                       " (exponential).");
             return "EXPO(" + in(*t.mean) + ")";
         case Pattern::Between:
             return "UNIF(" + in(*t.min) + ", " + in(*t.max) + ")";

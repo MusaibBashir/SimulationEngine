@@ -145,6 +145,16 @@ void testPreParse() {
     check(preParse("takes 5 minutes per customer").notes.empty(),
           "'5 minutes per customer' is a time, not a rate");
     check(preParse("2 tellers each serving").notes.empty(), "'each' with no unit after it is not a rate");
+
+    const PreParsed about = preParse("a doctor for about 15 minutes, arriving thirty an hour");
+    check(contains(about.text, "about 15 minutes (pattern \"around\", mean 15)"),
+          "'about 15 minutes' carries the pattern it means, beside the words");
+    check(contains(about.text, "(on average one every 2 minutes)") && about.notes.size() == 2,
+          "...alongside a rate hint in the same sentence");
+    check(contains(preParse("walk, roughly one minute").text, "(pattern \"around\", mean 1)"),
+          "'roughly one minute': number words first, then the hint");
+    check(preParse("about every 6 minutes").notes.empty(),
+          "'about every 6 minutes' is a rough arrival rate, not a duration, and gets no hint");
 }
 
 void testScenarioReader() {

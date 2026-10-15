@@ -1,5 +1,6 @@
 #include "PreParse.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -214,10 +215,32 @@ PreParsed preParse(const std::string& description) {
         }
     }
 
+    // "about 15 minutes": Qwen 3.8 27B, told that "about" means the pattern
+    // "around", still wrote "random" -- exponential, the most variable choice
+    // there is, so an "about 15 minute" visit often took 2 or 45. The hint
+    // goes beside the words, where the rate hint already worked.
+    for (std::size_t i = 0; i < t.size(); ++i) {
+        const std::string w = t[i].lower();
+        if (w != "about" && w != "around" && w != "roughly" && w != "approximately" &&
+            w != "approx" && w != "usually" && w != "typically")
+            continue;
+        const std::size_t n = nextWord(t, i + 1);
+        if (n >= t.size() || t[n].kind != Token::Kind::Number) continue;
+        const std::size_t u = nextWord(t, n + 1);
+        if (u >= t.size() || unitSeconds(t[u].lower()) <= 0.0) continue;
+        out.notes.push_back(t[i].text + " " + t[n].text + " " + t[u].text + " = around " + t[n].text +
+                            ", varying a little either side");
+        inserts.emplace_back(u, " (pattern \"around\", mean " + t[n].text + ")");
+    }
+    std::sort(inserts.begin(), inserts.end(),
+              [](const std::pair<std::size_t, std::string>& a, const std::pair<std::size_t, std::string>& b) {
+                  return a.first < b.first;
+              });
+
     std::size_t next = 0;
     for (std::size_t i = 0; i < t.size(); ++i) {
         out.text += t[i].text;
-        if (next < inserts.size() && inserts[next].first == i) out.text += inserts[next++].second;
+        while (next < inserts.size() && inserts[next].first == i) out.text += inserts[next++].second;
     }
     return out;
 }
