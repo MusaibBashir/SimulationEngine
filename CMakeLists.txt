@@ -93,6 +93,7 @@ add_library(des_ai STATIC
     src/PreParse.cpp
     src/ModelGenerator.cpp
     src/CurlTransport.cpp
+    src/Speech.cpp
 )
 target_link_libraries(des_ai PUBLIC des_engine)
 target_compile_options(des_ai PRIVATE ${DES_WARNINGS})
@@ -140,12 +141,27 @@ target_compile_options(des PRIVATE ${DES_WARNINGS})
 # includes headers the other platform does not have. Terminal.hpp is not in
 # des_ui.hpp -- it is the platform boundary, and only tui/ includes it.
 if(WIN32)
-    add_executable(des_tui tui/main.cpp tui/Terminal_win32.cpp)
+    add_executable(des_tui tui/main.cpp tui/Terminal_win32.cpp tui/Microphone.cpp)
 else()
-    add_executable(des_tui tui/main.cpp tui/Terminal_posix.cpp)
+    add_executable(des_tui tui/main.cpp tui/Terminal_posix.cpp tui/Microphone.cpp)
 endif()
 target_link_libraries(des_tui PRIVATE des_ui)
 target_compile_options(des_tui PRIVATE ${DES_WARNINGS})
+
+# v17: the microphone. miniaudio is one vendored header, included as a SYSTEM
+# directory so its own warnings do not count against this project's -- the
+# gate is about code written here. What it needs from the platform:
+#   Windows  nothing at link time (WASAPI is loaded when recording starts)
+#   macOS    Core Audio, linked rather than loaded (MA_NO_RUNTIME_LINKING)
+#   Linux    dlopen and threads, for whichever sound server is there
+target_include_directories(des_tui SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio)
+if(APPLE)
+    target_link_libraries(des_tui PRIVATE "-framework CoreFoundation" "-framework CoreAudio"
+                                          "-framework AudioToolbox")
+elseif(UNIX)
+    find_package(Threads REQUIRED)
+    target_link_libraries(des_tui PRIVATE ${CMAKE_DL_LIBS} Threads::Threads m)
+endif()
 if(WIN32)
     # shell32 and ole32 for SHGetKnownFolderPath and CoTaskMemFree, which find
     # the user's REAL Documents folder -- redirected into OneDrive on a great

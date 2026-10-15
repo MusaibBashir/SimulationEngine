@@ -19,14 +19,27 @@ public:
     explicit CurlTransport(int timeoutSeconds = 60) : m_timeout(timeoutSeconds) {}
     HttpResponse post(const std::string& url, const std::vector<std::string>& headers,
                       const std::string& body) override;
+    HttpResponse postForm(const std::string& url, const std::vector<std::string>& headers,
+                          const std::vector<std::pair<std::string, std::string>>& fields,
+                          const std::string& fileField, const std::string& fileName,
+                          const std::string& fileBytes) override;
 
 private:
     int m_timeout;
+    // Writes `config` to a private temp file, runs curl on it, and reads the
+    // status off the end of the output. Shared by both kinds of request.
+    HttpResponse run(const std::string& url, const std::string& config, const std::string& cfgPath);
 };
 
 // The curl config text for one request -- separate so a test can check the
 // quoting without running curl. `bodyPath` is the file holding the body.
 std::string curlConfig(const std::string& url, const std::vector<std::string>& headers,
                        const std::string& bodyPath, int timeoutSeconds);
+// The same for a multipart form: `form-string` for each field, so a value is
+// never read as "@file"; `form` for the one file.
+std::string curlFormConfig(const std::string& url, const std::vector<std::string>& headers,
+                           const std::vector<std::pair<std::string, std::string>>& fields,
+                           const std::string& fileField, const std::string& filePath,
+                           const std::string& mimeType, int timeoutSeconds);
 
 }  // namespace des

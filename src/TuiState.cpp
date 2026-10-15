@@ -1178,13 +1178,75 @@ struct AskJob {
     GenerateResult    result;
 };
 
+struct SttJob {
+    std::atomic<bool> done{false};
+    TranscriptResult  result;
+};
+
+void TuiState::startTalking() {
+    if (askBusy()) return;
+    m_overlay = Overlay::Ask;
+    if (m_askKeyEntry) return;
+    if (!m_askHooks.openMicrophone || !m_askHooks.transcribe) {
+        m_askLog.push_back({AskLine::Kind::Error, "Speaking into it is not available in this build -- "
+                                                  "use Win+H (Windows) or Dictation (Mac) instead."});
+        return;
+    }
+    // Transcription goes to the same server with the same key, so a missing
+    // key is asked for first, and the recording starts once it is in.
+    if (m_llm.needsKey()) {
+        m_talkAfterKey = true;
+        m_askKeyEntry = true;
+        m_askDraft.clear();
+        m_askLog.push_back({AskLine::Kind::Info,
+                            "Speech goes to " + m_llm.host() + " with your API key. Paste it below and "
+                            "press Enter; recording starts after. A free one is at console.groq.com/keys."});
+        setStatus("paste the API key and press Enter");
+        return;
+    }
+    std::string why;
+    std::unique_ptr<IRecorder> mic = m_askHooks.openMicrophone(why);
+    if (mic == nullptr || !mic->start(why)) {
+        m_askLog.push_back({AskLine::Kind::Error, why.empty() ? "No microphone could be opened." : why});
+        setStatus("no microphone");
+        return;
+    }
+    m_recorder = std::move(mic);
+    setStatus("recording -- speak, then ^T or Enter to stop; Esc throws it away");
+}
+
+void TuiState::stopTalking() {
+    if (!m_recorder) return;
+    const std::vector<std::int16_t> samples = m_recorder->stop();
+    m_recorder.reset();
+    // Under half a second is a key pressed twice, not something said; sending
+    // it would be billed as ten seconds and come back empty.
+    if (samples.size() < static_cast<std::size_t>(kSpeechSampleRate / 2)) {
+        m_askLog.push_back({AskLine::Kind::Info, "That recording was too short to send."});
+        setStatus("too short -- ^T to try again");
+        return;
+    }
+    auto job = std::make_shared<SttJob>();
+    m_sttJob = job;
+    auto transcribeFn = m_askHooks.transcribe;
+    const LlmConfig config = m_llm;
+    const std::string wav = wavFromPcm16(samples, kSpeechSampleRate);
+    std::function<void()> work = [job, transcribeFn, wav, config] {
+        job->result = transcribeFn(wav, config);
+        job->done.store(true, std::memory_order_release);
+    };
+    setStatus("turning speech into text with " + m_llm.sttModel + " ... Esc stops waiting");
+    if (m_askHooks.launch) m_askHooks.launch(std::move(work));
+    else                   std::thread(std::move(work)).detach();
+}
+
 void TuiState::openAsk() {
     m_overlay = Overlay::Ask;
     if (m_askLog.empty())
         m_askLog.push_back({AskLine::Kind::Info,
                             "Say or type what happens -- what arrives and how often, what is done to "
-                            "it and how long that takes, how many servers. Windows: Win+H to speak. "
-                            "Mac: press the Dictation key, or Fn twice."});
+                            "it and how long that takes, how many servers. ^T to speak it instead: "
+                            "press, talk, press again."});
     setStatus(m_llm.needsKey() ? "no API key yet -- ^K to enter one (console.groq.com/keys)"
                                : "your words go to " + m_llm.host() + " (" + m_llm.model + ")");
 }
@@ -1221,6 +1283,19 @@ void TuiState::beginKeyEntry() {
 }
 
 void TuiState::escapeAsk() {
+    if (m_recorder) {
+        m_recorder->stop();
+        m_recorder.reset();
+        m_askLog.push_back({AskLine::Kind::Info, "Recording thrown away. Nothing was sent."});
+        setStatus("recording thrown away");
+        return;
+    }
+    if (m_sttJob) {
+        m_sttJob.reset();
+        m_askLog.push_back({AskLine::Kind::Info, "Stopped waiting for the transcript."});
+        setStatus("stopped waiting");
+        return;
+    }
     if (askBusy()) {
         m_askJob.reset();
         m_askLog.push_back({AskLine::Kind::Info, "Stopped waiting. Nothing was changed."});
@@ -1231,6 +1306,7 @@ void TuiState::escapeAsk() {
         m_askKeyEntry = false;
         m_askDraft.clear();
         m_askPending.clear();
+        m_talkAfterKey = false;
         setStatus("key left as it was");
         return;
     }
@@ -1252,7 +1328,10 @@ void TuiState::commitAsk() {
                             saved ? "Key " + maskKey(text) + " saved."
                                   : "Key " + maskKey(text) + " will be used until you quit" +
                                         (error.empty() ? std::string(".") : ", but not saved: " + error)});
-        if (!m_askPending.empty()) {
+        if (m_talkAfterKey) {
+            m_talkAfterKey = false;
+            startTalking();
+        } else if (!m_askPending.empty()) {
             const std::string pending = m_askPending;
             m_askPending.clear();
             startAsk(pending);
@@ -1314,6 +1393,28 @@ void TuiState::startAsk(const std::string& text) {
 }
 
 void TuiState::pollAsk() {
+    if (m_recorder && m_recorder->seconds() >= MAX_TALK_SECONDS) {
+        m_askLog.push_back({AskLine::Kind::Info, "Stopped recording at two minutes."});
+        stopTalking();
+    }
+    if (m_sttJob && m_sttJob->done.load(std::memory_order_acquire)) {
+        const std::shared_ptr<SttJob> job = std::move(m_sttJob);
+        m_sttJob.reset();
+        const TranscriptResult& t = job->result;
+        if (!t.ok) {
+            m_askLog.push_back({AskLine::Kind::Error, t.error});
+            setStatus("speech-to-text did not work -- see the box");
+        } else if (t.text.empty()) {
+            m_askLog.push_back({AskLine::Kind::Info, "Nothing was heard. ^T to try again."});
+            setStatus("nothing heard");
+        } else {
+            // Into the box, after anything already typed -- never sent. What
+            // was heard is read first, and corrected if "fifty" was "fifteen".
+            if (!m_askDraft.empty() && m_askDraft.back() != ' ') m_askDraft += ' ';
+            m_askDraft += t.text;
+            setStatus("check what was heard, fix any numbers, then Enter -- ^T adds more");
+        }
+    }
     if (!m_askJob || !m_askJob->done.load(std::memory_order_acquire)) return;
     const std::shared_ptr<AskJob> job = std::move(m_askJob);
     m_askJob.reset();

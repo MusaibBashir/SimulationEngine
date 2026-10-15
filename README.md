@@ -661,9 +661,9 @@ replications). Assign, Batch, Separate, Record and the rest stay in the editor.
 ### In the editor: `F2`
 
 Press **`F2`** (or click **Ask F2** on the top bar; on a Mac keyboard F2 may
-need `fn`). Type, or speak with the operating system's own speech typing —
-`Win+H` on Windows 10 and 11, the Dictation key (or `Fn` twice) on macOS — then
-press Enter:
+need `fn`) and type — or **speak**: `^T` in the panel starts recording, `^T` or
+Enter stops it, and what you said appears in the box (`F3` from anywhere opens
+the panel already recording). Then press Enter:
 
 > customers come thirty an hour, two tellers, about 3 minutes each
 
@@ -683,10 +683,28 @@ spoken numbers before pressing Enter: "fifteen" and "fifty" sound alike.
 
 | In the panel | |
 |---|---|
-| `Enter` | send; on an empty line after a finished model, close |
-| `Esc` / `F2` | stop waiting, or close |
+| `Enter` | send; while recording, stop; on an empty line after a finished model, close |
+| `^T` | start recording; again to stop and turn it into text |
+| `Esc` / `F2` | throw a recording away, stop waiting, or close |
 | `^K` | enter or change the API key |
 | `^V` `^U` | paste, clear the line |
+
+### Speaking
+
+`^T` records from the default microphone (16 kHz mono, up to two minutes),
+with a clock and a level meter — a flat meter means the wrong or a muted
+microphone. On stop, the recording goes to Whisper (`whisper-large-v3-turbo`)
+on the same Groq account with the same key, and the transcript lands **in the
+box, not sent**: read it, fix any misheard number ("fifteen" and "fifty" sound
+alike), and press Enter. Several recordings add up in the box. Recording uses
+[miniaudio](https://miniaud.io) (public domain, in `third_party/`) — WASAPI on
+Windows, Core Audio on a Mac — so nothing needs installing.
+
+The first time, the operating system may ask for microphone access: on
+Windows, *Settings → Privacy & security → Microphone* must let desktop apps
+use it; on a Mac, allow **Terminal** in *System Settings → Privacy & Security →
+Microphone*. The operating system's own speech typing (`Win+H`, Dictation)
+still works in the box too, with no key at all.
 
 A description that exercises everything it can build, and builds with no
 questions:
@@ -731,6 +749,9 @@ Every line but `api_key` may be left out or blank, and the defaults apply.
 - **`reasoning_effort`** — blank sends nothing (Groq's default). `none` turns
   Qwen's thinking off: faster and cheaper, possibly less careful. `low`,
   `medium`, `high` think more.
+- **`stt_model`, `stt_language`** — speech-to-text: `whisper-large-v3-turbo` by
+  default (`whisper-large-v3` is the slower, more accurate one). Set
+  `stt_language = en` (or `hi`, …) if Whisper guesses the language wrong.
 - **Other providers** — `base_url` and `model` point it at any
   OpenAI-compatible server, for example `http://localhost:11434/v1` and
   `llama3.1` for Ollama on your own machine, which needs no key and no
@@ -788,6 +809,10 @@ The error appears in red in the panel.
 - **HTTP 429** — rate limited: wait a moment and send again.
 - **"no response from …"** — no connection, or a firewall blocking
   `api.groq.com`.
+- **"could not open the microphone"** — no microphone, or the operating system
+  has not allowed it (see **Speaking**). `Win+H` / Dictation still work.
+- **"no speech-to-text at …"** — the server in `base_url` has no Whisper (a local
+  Ollama, say): speak with `Win+H` / Dictation instead.
 
 ## Documents
 

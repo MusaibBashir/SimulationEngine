@@ -100,13 +100,23 @@ bool handleAsk(TuiState& state, Key key) {
         case KeyKind::Char:      state.typeAsk(key.ch); break;
         case KeyKind::Tab:       state.typeAsk(' '); break;
         case KeyKind::Backspace: state.backspaceAsk(); break;
-        case KeyKind::Enter:     state.commitAsk(); break;
+        // Enter while recording stops it, so a person who just talked does
+        // not have to remember which key started it.
+        case KeyKind::Enter:
+            if (state.recording()) state.stopTalking();
+            else                   state.commitAsk();
+            break;
         case KeyKind::Escape:    state.escapeAsk(); break;
         case KeyKind::Function:
             if (key.ch == 2) state.escapeAsk();      // F2 again closes it
+            if (key.ch == 3) { if (state.recording()) state.stopTalking(); else state.startTalking(); }
             break;
         case KeyKind::Ctrl:
             switch (key.ch) {
+                case 'T':
+                    if (state.recording()) state.stopTalking();
+                    else                   state.startTalking();
+                    break;
                 case 'K': state.beginKeyEntry(); break;
                 case 'V': state.pasteIntoAsk(state.clipboard()); break;
                 case 'U': state.clearAsk(); break;
@@ -581,6 +591,7 @@ bool handleKey(TuiState& state, Key key, int width, int height) {
 
     if (key.kind == KeyKind::Function && key.ch == 1) { openKeyMap(state); return true; }
     if (key.kind == KeyKind::Function && key.ch == 2) { state.openAsk(); return true; }
+    if (key.kind == KeyKind::Function && key.ch == 3) { state.openAsk(); state.startTalking(); return true; }
 
     if (key.kind == KeyKind::Ctrl) {
         switch (key.ch) {

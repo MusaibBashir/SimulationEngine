@@ -22,6 +22,8 @@
 #include "FlowGraph.hpp"
 #include "ModelDocument.hpp"
 #include "ModelGenerator.hpp"
+#include "Recorder.hpp"
+#include "Speech.hpp"
 #include "ModuleSchema.hpp"
 #include "RunController.hpp"
 #include "TableStore.hpp"
@@ -65,9 +67,18 @@ struct AskHooks {
     std::function<bool(const std::string&, std::string&)> saveKey;
     // Run some work in the background. Empty: a detached std::thread.
     std::function<void(std::function<void()>)> launch;
+    // v17: speaking into it. The microphone, and the speech-to-text call --
+    // the latter also run through `launch`, off the UI thread.
+    std::function<std::unique_ptr<IRecorder>(std::string&)> openMicrophone;
+    std::function<TranscriptResult(const std::string& wav, const LlmConfig&)> transcribe;
 };
 
 struct AskJob;   // a request in flight; TuiState.cpp
+struct SttJob;   // a recording being transcribed; TuiState.cpp
+
+// The longest recording, in seconds. A description is a few sentences; this
+// is room for that and a pause to think, and it bounds what an upload costs.
+constexpr double MAX_TALK_SECONDS = 120.0;
 
 // Which half of the Runs tab has the keyboard.
 enum class RunsFocus { List, Form };
@@ -369,7 +380,18 @@ public:
     void escapeAsk();               // stop waiting, leave key entry, or close
     void beginKeyEntry();           // ^K in the panel
     bool enteringKey() const { return m_askKeyEntry; }
-    bool askBusy() const { return m_askJob != nullptr; }
+    // Anything under way -- a request out, a recording, a transcription. The
+    // main loop keeps redrawing while this is true; typing is ignored.
+    bool askBusy() const { return m_askJob != nullptr || m_recorder != nullptr || m_sttJob != nullptr; }
+
+    // v17: ^T in the panel, or F3 anywhere. Press to start, press (or Enter)
+    // to stop; the transcript goes into the box, to be read before sending.
+    void startTalking();
+    void stopTalking();
+    bool   recording() const { return m_recorder != nullptr; }
+    bool   transcribing() const { return m_sttJob != nullptr; }
+    double recordingSeconds() const { return m_recorder ? m_recorder->seconds() : 0.0; }
+    float  recordingLevel() const { return m_recorder ? m_recorder->level() : 0.0f; }
     // Called by the main loop while askBusy(): applies a finished answer.
     void pollAsk();
     const std::vector<AskLine>& askLog() const { return m_askLog; }
@@ -473,6 +495,9 @@ private:
     JsonValue                m_askScenario;
     std::string              m_askBuiltText;   // the text the last answer wrote
     std::shared_ptr<AskJob>  m_askJob;
+    std::unique_ptr<IRecorder> m_recorder;
+    std::shared_ptr<SttJob>  m_sttJob;
+    bool                     m_talkAfterKey{false};
     void startAsk(const std::string& text);
     void replaceWith(TuiState next);    // keeps the session's settings
 

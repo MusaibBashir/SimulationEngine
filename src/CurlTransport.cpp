@@ -84,16 +84,57 @@ std::string curlConfig(const std::string& url, const std::vector<std::string>& h
 
 HttpResponse CurlTransport::post(const std::string& url, const std::vector<std::string>& headers,
                                  const std::string& body) {
-    HttpResponse r;
     const std::string bodyPath = tempName(".json");
-    const std::string cfgPath  = tempName(".cfg");
-    struct Cleanup {
-        std::string a, b;
-        ~Cleanup() { std::remove(a.c_str()); std::remove(b.c_str()); }
-    } cleanup{bodyPath, cfgPath};
+    struct Cleanup { std::string a; ~Cleanup() { std::remove(a.c_str()); } } cleanup{bodyPath};
+    if (!writePrivate(bodyPath, body)) {
+        HttpResponse r;
+        r.error = "could not write a temporary file for the request";
+        return r;
+    }
+    return run(url, curlConfig(url, headers, bodyPath, m_timeout), tempName(".cfg"));
+}
 
-    if (!writePrivate(bodyPath, body) ||
-        !writePrivate(cfgPath, curlConfig(url, headers, bodyPath, m_timeout))) {
+HttpResponse CurlTransport::postForm(const std::string& url, const std::vector<std::string>& headers,
+                                     const std::vector<std::pair<std::string, std::string>>& fields,
+                                     const std::string& fileField, const std::string& fileName,
+                                     const std::string& fileBytes) {
+    // The file keeps its extension -- Whisper reads the format from it -- and
+    // its path uses forward slashes, which curl's -F syntax takes on Windows
+    // without the backslash-escaping questions a "C:\\Users\\User A" path raises.
+    const std::size_t dot = fileName.rfind('.');
+    const std::string ext = dot == std::string::npos ? std::string(".bin") : fileName.substr(dot);
+    const std::string filePath = std::filesystem::path(tempName(ext.c_str())).generic_string();
+    struct Cleanup { std::string a; ~Cleanup() { std::remove(a.c_str()); } } cleanup{filePath};
+    if (!writePrivate(filePath, fileBytes)) {
+        HttpResponse r;
+        r.error = "could not write a temporary file for the recording";
+        return r;
+    }
+    const std::string mime = ext == ".wav" ? "audio/wav" : "application/octet-stream";
+    return run(url, curlFormConfig(url, headers, fields, fileField, filePath, mime, m_timeout),
+               tempName(".cfg"));
+}
+
+std::string curlFormConfig(const std::string& url, const std::vector<std::string>& headers,
+                           const std::vector<std::pair<std::string, std::string>>& fields,
+                           const std::string& fileField, const std::string& filePath,
+                           const std::string& mimeType, int timeoutSeconds) {
+    std::string c;
+    c += "url = " + quoted(url) + "\n";
+    for (const std::string& h : headers) c += "header = " + quoted(h) + "\n";
+    for (const auto& f : fields) c += "form-string = " + quoted(f.first + "=" + f.second) + "\n";
+    c += "form = " + quoted(fileField + "=@" + filePath + ";type=" + mimeType) + "\n";
+    c += "max-time = " + std::to_string(timeoutSeconds) + "\n";
+    c += "silent\nshow-error\n";
+    c += "write-out = \"\\n%{http_code}\"\n";
+    return c;
+}
+
+HttpResponse CurlTransport::run(const std::string& url, const std::string& config,
+                                const std::string& cfgPath) {
+    HttpResponse r;
+    struct Cleanup { std::string a; ~Cleanup() { std::remove(a.c_str()); } } cleanup{cfgPath};
+    if (!writePrivate(cfgPath, config)) {
         r.error = "could not write a temporary file for the request";
         return r;
     }

@@ -163,6 +163,18 @@ public:
         return ::select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &zero) > 0;
     }
 
+    // One more byte if it arrives within `ms`, without blocking past that.
+    static bool byteWithin(int ms, char& out) {
+        fd_set in;
+        FD_ZERO(&in);
+        FD_SET(STDIN_FILENO, &in);
+        timeval wait{};
+        wait.tv_sec = 0;
+        wait.tv_usec = ms * 1000;
+        if (::select(STDIN_FILENO + 1, &in, nullptr, nullptr, &wait) <= 0) return false;
+        return ::read(STDIN_FILENO, &out, 1) == 1;
+    }
+
     Key nextKey() override {
         char c = 0;
         if (::read(STDIN_FILENO, &c, 1) != 1) return Key::special(KeyKind::Unknown);
@@ -170,8 +182,13 @@ public:
         if (c == 127 || c == 8)     return Key::special(KeyKind::Backspace);
         if (c == '\t')              return Key::special(KeyKind::Tab);
         if (c == 27) {
+            // A LONE Escape has nothing after it, and a blocking read here
+            // waited for the next key -- so Esc did nothing until something
+            // else was pressed, and the screen stopped drawing meanwhile. v17
+            // found it: a recording's clock froze on Esc. A terminal sends the
+            // rest of an escape sequence at once, so 50 ms is plenty.
             char a = 0;
-            if (::read(STDIN_FILENO, &a, 1) != 1) return Key::special(KeyKind::Escape);
+            if (!byteWithin(50, a)) return Key::special(KeyKind::Escape);
             if (a == 'O') {
                 // SS3, which is how most terminals send F1..F4.
                 char f = 0;

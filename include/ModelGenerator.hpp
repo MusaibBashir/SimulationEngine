@@ -40,6 +40,21 @@ public:
     virtual HttpResponse post(const std::string& url,
                               const std::vector<std::string>& headers,
                               const std::string& body) = 0;
+
+    // v17: a multipart form with one file in it -- how audio goes to a
+    // speech-to-text endpoint. Not every transport needs it, so the default
+    // says so rather than every fake having to.
+    virtual HttpResponse postForm(const std::string& url,
+                                  const std::vector<std::string>& headers,
+                                  const std::vector<std::pair<std::string, std::string>>& fields,
+                                  const std::string& fileField,
+                                  const std::string& fileName,
+                                  const std::string& fileBytes) {
+        (void)url; (void)headers; (void)fields; (void)fileField; (void)fileName; (void)fileBytes;
+        HttpResponse r;
+        r.error = "this connection cannot send files";
+        return r;
+    }
 };
 
 struct LlmConfig {
@@ -58,6 +73,10 @@ struct LlmConfig {
     // worth trying once there is an eval set to say what it costs in quality.
     std::string reasoningFormat;    // "hidden" | "parsed" | empty: automatic
     std::string reasoningEffort;    // "none" | "low" | "medium" | "high" | empty: not sent
+
+    // Speech-to-text, at the same server with the same key: Whisper on Groq.
+    std::string sttModel{"whisper-large-v3-turbo"};
+    std::string sttLanguage;        // "en", "hi", ... empty: Whisper decides
 
     // DES_LLM_BASE_URL, DES_LLM_MODEL, and DES_LLM_API_KEY or GROQ_API_KEY.
     static LlmConfig fromEnvironment();
@@ -81,7 +100,7 @@ struct LlmConfig {
 std::string llmConfigPath();
 
 // `key = value` lines: api_key, base_url, model, reasoning_format,
-// reasoning_effort. Unknown keys and # comments
+// reasoning_effort, stt_model, stt_language. Unknown keys and # comments
 // are ignored, so a newer version's file does not break an older program.
 LlmConfig   parseLlmConfig(const std::string& text, LlmConfig base = LlmConfig{});
 std::string llmConfigText(const LlmConfig& config);

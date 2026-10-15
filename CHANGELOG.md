@@ -19,6 +19,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   answered in the same box. The request runs in the background and `Esc`
   stops waiting. Scope: arrival streams, processing steps with their own or
   shared servers, delays, chance branches, run setup.
+- **Speaking into it: `^T` in the panel, or `F3` from anywhere.** Press to
+  record from the default microphone, press again (or Enter) to stop; a clock
+  and a level meter show it is hearing something. The recording goes to Whisper
+  (`whisper-large-v3-turbo`) on the same Groq account with the same key, and
+  the transcript lands in the box to be read and corrected before Enter --
+  never sent unread. Up to two minutes; under half a second is not sent; `Esc`
+  throws a recording away. Capture is miniaudio (public domain, vendored in
+  `third_party/`): WASAPI on Windows, Core Audio on a Mac, nothing to install.
+  `stt_model` and `stt_language` in `llm.conf`.
 - **The language model never writes `.des` text.** It fills in a Scenario of
   about twenty fields (`include/Scenario.hpp`); the reader checks every field,
   sending a malformed one back to the model once by name and turning a missing
@@ -76,6 +85,10 @@ rather than by asking the model more firmly:
 
 ### Fixed
 
+- **A lone `Esc` on macOS and Linux did nothing until the next key**: the
+  terminal waited, blocking, for the rest of an escape sequence, and the screen
+  stopped drawing meanwhile. It now waits 50 ms. Found when a recording's clock
+  froze on Esc.
 - **A new or reopened model dropped what the program sets up at start-up.**
   After `^N` or opening a file, F2 said "not available in this build" and
   forgot the key, and `P` on the Flow tab could no longer open its picture (the

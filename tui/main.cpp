@@ -15,6 +15,8 @@
 #include <thread>
 #include "des_ui.hpp"
 #include "CurlTransport.hpp"
+#include "Recorder.hpp"
+#include "Speech.hpp"
 #include "Terminal.hpp"
 
 using namespace des;
@@ -71,6 +73,11 @@ int main(int argc, char** argv) {
         return generateModel(text, previous, config, transport);
     };
     hooks.saveKey = [](const std::string& key, std::string& error) { return saveApiKey(key, error); };
+    hooks.openMicrophone = [](std::string& why) { return openMicrophone(why); };
+    hooks.transcribe = [](const std::string& wav, const LlmConfig& config) {
+        CurlTransport transport(120);   // a minute of audio is ~2 MB to upload
+        return transcribe(wav, config, transport);
+    };
     state.setAskHooks(std::move(hooks));
     if (!chosen) {
         // A scratch model that was never saved has no name yet. Its first ^S

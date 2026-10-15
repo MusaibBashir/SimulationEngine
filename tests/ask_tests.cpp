@@ -121,8 +121,7 @@ void testOpening() {
     const std::string screen = screenText(s);
     check(contains(screen, "describe the model -- sent to api.groq.com, qwen/qwen3.8-27b"),
           "the panel says where the words go, and to which model");
-    check(contains(screen, "Win+H") && contains(screen, "Dictation"),
-          "...and how to speak instead of typing, on both systems");
+    check(contains(screen, "^T to speak it instead"), "...and how to speak instead of typing");
     check(contains(screen, "Enter sends") && contains(screen, "^K API key"), "the hint line has its keys");
     handleKey(s, Key::function(2));
     check(s.overlay() == Overlay::None, "F2 again closes it");
@@ -239,6 +238,145 @@ void testNewModelKeepsSettings() {
     t.setClipboard("kept");
     t.newBlankModel("third.des");
     check(t.clipboard() == "kept", "...and the clipboard, which belongs to the session too");
+}
+
+// A microphone that records what the test says it heard.
+class FakeMic : public IRecorder {
+public:
+    double secs{0.0};
+    std::size_t samples{16000};    // one second
+    bool fail{false};
+    bool* stopped{nullptr};
+    bool start(std::string& error) override {
+        if (fail) error = "could not open the microphone (no device)";
+        return !fail;
+    }
+    std::vector<std::int16_t> stop() override {
+        if (stopped) *stopped = true;
+        return std::vector<std::int16_t>(samples, 100);
+    }
+    double seconds() const override { return secs; }
+    float level() const override { return 0.5f; }
+};
+
+void testTalking() {
+    section("v17: speaking into it");
+    Fake fake;
+    std::vector<std::size_t> wavSizes;
+    FakeMic* mic = nullptr;
+    bool micFails = false;
+    std::size_t micSamples = 16000;
+    AskHooks h = fake.hooks();
+    h.openMicrophone = [&mic, &micFails, &micSamples](std::string&) {
+        auto m = std::unique_ptr<FakeMic>(new FakeMic());
+        m->fail = micFails;
+        m->samples = micSamples;
+        mic = m.get();
+        return std::unique_ptr<IRecorder>(std::move(m));
+    };
+    std::string heard = "patients arrive every 5 minutes";
+    h.transcribe = [&wavSizes, &heard](const std::string& wav, const LlmConfig&) {
+        wavSizes.push_back(wav.size());
+        TranscriptResult r;
+        r.ok = true;
+        r.text = heard;
+        return r;
+    };
+
+    TuiState s = TuiState::fromText("", "talk.des");
+    LlmConfig c;
+    c.apiKey = "gsk_alreadyhere0123456789";
+    s.setLlmConfig(c);
+    s.setAskHooks(h);
+
+    handleKey(s, Key::function(3));
+    check(s.overlay() == Overlay::Ask && s.recording(), "F3 opens the panel and starts recording");
+    mic->secs = 4.0;
+    std::string screen = screenText(s);
+    check(contains(screen, "* recording 0:04") && contains(screen, "[#"), "the panel shows the time and a level meter");
+    check(contains(screen, "^T or Enter  stop and transcribe"), "...and how to stop");
+    typeText(s, "x");
+    check(s.askDraft().empty(), "typing while recording does nothing");
+    handleKey(s, Key::control('t'));
+    check(!s.recording() && s.transcribing(), "^T stops it and sends it for transcription");
+    check(wavSizes.size() == 1 && wavSizes[0] == 44 + 32000, "one second at 16 kHz, as a WAV file");
+    check(contains(screenText(s), "turning speech into text with whisper-large-v3-turbo"), "the panel says so");
+    s.pollAsk();
+    check(!s.askBusy() && s.askDraft() == "patients arrive every 5 minutes",
+          "the transcript lands in the box -- not sent");
+    check(fake.texts.empty(), "nothing goes to the language model until Enter");
+
+    heard = "two tellers";
+    handleKey(s, Key::control('t'));
+    handleKey(s, Key::special(KeyKind::Enter));
+    check(!s.recording(), "Enter also stops a recording");
+    s.pollAsk();
+    check(s.askDraft() == "patients arrive every 5 minutes two tellers", "a second recording adds to the box");
+    handleKey(s, Key::special(KeyKind::Enter));
+    check(fake.texts.size() == 1 && fake.texts[0] == "patients arrive every 5 minutes two tellers",
+          "Enter then sends the words as checked");
+    s.pollAsk();
+
+    bool stopped = false;
+    handleKey(s, Key::control('t'));
+    mic->stopped = &stopped;
+    handleKey(s, Key::special(KeyKind::Escape));
+    check(!s.recording() && !s.transcribing() && stopped && wavSizes.size() == 2,
+          "Esc throws a recording away: the microphone stops and nothing is sent");
+
+    micSamples = 2000;
+    handleKey(s, Key::control('t'));
+    handleKey(s, Key::control('t'));
+    check(!s.transcribing() && wavSizes.size() == 2 && logHas(s, AskLine::Kind::Info, "too short"),
+          "a recording under half a second is not sent");
+    micSamples = 16000;
+
+    handleKey(s, Key::control('t'));
+    mic->secs = MAX_TALK_SECONDS + 1;
+    s.pollAsk();
+    check(!s.recording() && wavSizes.size() == 3 && logHas(s, AskLine::Kind::Info, "two minutes"),
+          "a recording stops itself at two minutes");
+    s.pollAsk();
+
+    micFails = true;
+    handleKey(s, Key::control('t'));
+    check(!s.recording() && logHas(s, AskLine::Kind::Error, "could not open the microphone"),
+          "no microphone is an error in the panel, not a crash");
+    micFails = false;
+
+    fake.hold = true;
+    handleKey(s, Key::control('t'));
+    h.transcribe = nullptr;
+    handleKey(s, Key::control('t'));
+    check(s.transcribing() && fake.held.size() == 1, "transcription waits in the background");
+    handleKey(s, Key::special(KeyKind::Escape));
+    check(!s.transcribing(), "Esc stops waiting for it");
+    fake.held[0]();
+    const std::string before = s.askDraft();
+    s.pollAsk();
+    check(s.askDraft() == before, "a transcript nobody is waiting for changes nothing");
+
+    // With no key, the key comes first and the recording starts once it is in.
+    Fake fresh;
+    TuiState k = TuiState::fromText("", "talk2.des");
+    AskHooks kh = fresh.hooks();
+    kh.openMicrophone = h.openMicrophone;
+    kh.transcribe = [](const std::string&, const LlmConfig&) { TranscriptResult r; r.ok = true; return r; };
+    k.setAskHooks(kh);
+    handleKey(k, Key::function(3));
+    check(k.enteringKey() && !k.recording(), "talking with no key asks for the key first");
+    typeText(k, "gsk_typed0123456789wxyz");
+    handleKey(k, Key::special(KeyKind::Enter));
+    check(k.recording(), "...and records once it is entered");
+    handleKey(k, Key::control('t'));
+    k.pollAsk();
+    check(logHas(k, AskLine::Kind::Info, "Nothing was heard"), "an empty transcript says nothing was heard");
+
+    TuiState none = withKey(fake);
+    AskHooks nh = Fake().hooks();
+    none.setAskHooks(nh);
+    handleKey(none, Key::function(3));
+    check(logHas(none, AskLine::Kind::Error, "Win+H"), "a build with no microphone says what to use instead");
 }
 
 void testWaiting() {
@@ -367,6 +505,7 @@ void runAskTests() {
     testDescribe();
     testQuestions();
     testNewModelKeepsSettings();
+    testTalking();
     testWaiting();
     testKey();
 }

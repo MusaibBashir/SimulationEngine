@@ -236,6 +236,8 @@ LlmConfig parseLlmConfig(const std::string& text, LlmConfig c) {
         else if (key == "model" && !value.empty() && value != kRetiredDefaultModel) c.model = value;
         else if (key == "reasoning_format")           c.reasoningFormat = value;
         else if (key == "reasoning_effort")           c.reasoningEffort = value;
+        else if (key == "stt_model" && !value.empty()) c.sttModel = value;
+        else if (key == "stt_language")               c.sttLanguage = value;
     }
     while (!c.baseUrl.empty() && c.baseUrl.back() == '/') c.baseUrl.pop_back();
     return c;
@@ -250,7 +252,9 @@ std::string llmConfigText(const LlmConfig& c) {
            "api_key = " + c.apiKey + "\n"
            "# For a reasoning model: reasoning_effort = none turns thinking off.\n"
            "reasoning_format = " + c.reasoningFormat + "\n"
-           "reasoning_effort = " + c.reasoningEffort + "\n";
+           "reasoning_effort = " + c.reasoningEffort + "\n"
+           "stt_model = " + c.sttModel + "\n"
+           "stt_language = " + c.sttLanguage + "\n";
 }
 
 std::string withApiKey(const std::string& existing, const std::string& key) {

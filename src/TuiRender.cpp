@@ -1,6 +1,7 @@
 #include "TuiRender.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <string>
 #include <vector>
 #include "ModuleSchema.hpp"
@@ -744,6 +745,28 @@ void renderAsk(const TuiState& state, Screen& screen, const Layout& L) {
 
     for (int c = x + 1; c < x + w - 1; ++c) screen.text(c, inputTop - 1, "-", Attr::Dim);
 
+    if (state.recording()) {
+        // A meter, so a silent microphone -- muted, or the wrong one -- shows
+        // as a flat bar before anything is sent.
+        const int secs = static_cast<int>(state.recordingSeconds());
+        char clock[16];
+        std::snprintf(clock, sizeof clock, "%d:%02d", secs / 60, secs % 60);
+        const int bars = 20;
+        const int lit = std::min(bars, static_cast<int>(state.recordingLevel() * bars * 1.5f + 0.5f));
+        const std::string meter = "[" + std::string(static_cast<std::size_t>(lit), '#') +
+                                  std::string(static_cast<std::size_t>(bars - lit), ' ') + "]";
+        screen.text(x + 2, inputTop, fit(std::string("* recording ") + clock + "  " + meter, inner), Attr::Error);
+        screen.text(x + 2, inputTop + 1, fit("speak now -- ^T or Enter stops and turns it into text, "
+                                             "Esc throws it away", inner), Attr::Dim);
+        if (!state.askDraft().empty())
+            screen.text(x + 2, inputTop + 2, fit("> " + state.askDraft(), inner), Attr::Dim);
+        return;
+    }
+    if (state.transcribing()) {
+        screen.text(x + 2, inputTop, fit("turning speech into text with " + llm.sttModel +
+                                         " ...   Esc stops waiting", inner), Attr::Bold);
+        return;
+    }
     if (state.askBusy()) {
         screen.text(x + 2, inputTop, fit("asking " + llm.model + " ...   Esc stops waiting", inner),
                     Attr::Bold);
@@ -900,7 +923,7 @@ void renderKeyMap(Screen& screen, const Layout& L) {
         {"^J",           "jump to the first error"},
         {"^T",           "write a working model into an empty file"},
         {"^R",           "run; on the Runs tab A adds a run, Del deletes one"},
-        {"F2",           "describe a model in words, or speak it"},
+        {"F2  F3",       "describe a model in words; F3 starts by talking"},
         {"^N",           "a new model, asking for its name"},
         {"^W",           "save the results to a file"},
         {"^S",           "save the model"},
@@ -943,9 +966,10 @@ const char* hintFor(const TuiState& state) {
             break;
         case Overlay::Prompt:  return "Enter accepts   Esc cancels";
         case Overlay::Ask:
-            if (state.askBusy())    return "Esc  stop waiting";
+            if (state.recording())   return "^T or Enter  stop and transcribe   Esc  throw it away";
+            if (state.askBusy())     return "Esc  stop waiting";
             if (state.enteringKey()) return "Enter saves the key   Esc leaves it as it was   ^V paste";
-            return "Enter sends   Esc closes   ^K API key   ^V paste   ^U clear";
+            return "Enter sends   ^T talk   Esc closes   ^K API key   ^V paste   ^U clear";
         case Overlay::None:    break;
     }
     switch (state.view()) {

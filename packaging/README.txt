@@ -65,6 +65,7 @@ KEYS
   Ctrl+J        jump to the first error; errors are marked E beside the line
   Ctrl+T        write a working model into an empty file
   F2            describe a model in words, or speak it (see below)
+  F3            the same, starting by recording what you say
   Ctrl+R        run the model
   Ctrl+N        a new model (it asks for the name)
   Ctrl+D        the Tables tab: variables, arrays, matrices, schedules
@@ -109,7 +110,11 @@ speak instead of typing -- for example:
 
     customers come thirty an hour, two tellers, about 3 minutes each
 
-and press Enter. A language model fills in what you said, and the program
+Or press Ctrl+T in that box, speak, and press Ctrl+T again: what you said
+appears in the box to check before sending. (The first time, allow the
+program to use the microphone if asked.)
+
+Then press Enter. A language model fills in what you said, and the program
 writes the model for you. It lists every number it had to assume, asks when
 something is missing, and Ctrl+Z takes the whole model back.
 

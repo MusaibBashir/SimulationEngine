@@ -16,6 +16,7 @@
 #include "PreParse.hpp"
 #include "Scenario.hpp"
 #include "ScenarioBuilder.hpp"
+#include "Speech.hpp"
 
 using namespace des;
 using des_test::check;
@@ -65,6 +66,16 @@ public:
     std::vector<std::vector<std::string>> headers;
     std::vector<std::string>  urls;
 
+    std::vector<std::vector<std::pair<std::string, std::string>>> forms;
+    std::vector<std::string> files;
+    HttpResponse postForm(const std::string& url, const std::vector<std::string>& h,
+                          const std::vector<std::pair<std::string, std::string>>& fields,
+                          const std::string& fileField, const std::string& fileName,
+                          const std::string& bytes) override {
+        forms.push_back(fields);
+        files.push_back(fileField + ":" + fileName + ":" + std::to_string(bytes.size()));
+        return post(url, h, bytes);
+    }
     HttpResponse post(const std::string& url, const std::vector<std::string>& h,
                       const std::string& body) override {
         urls.push_back(url);
@@ -510,6 +521,68 @@ void testGenerator() {
           "curl's config quotes what it is given");
 }
 
+void testSpeech() {
+    section("v17: speech to text");
+    const std::string wav = wavFromPcm16({0, 1000, -1000, 32767, -32768}, 16000);
+    check(wav.size() == 44 + 10 && wav.compare(0, 4, "RIFF") == 0 && wav.compare(8, 4, "WAVE") == 0 &&
+              wav.compare(36, 4, "data") == 0,
+          "a WAV file: RIFF header, then 2 bytes per sample");
+    auto u32 = [&wav](std::size_t at) {
+        return static_cast<unsigned>(static_cast<unsigned char>(wav[at])) |
+               static_cast<unsigned>(static_cast<unsigned char>(wav[at + 1])) << 8 |
+               static_cast<unsigned>(static_cast<unsigned char>(wav[at + 2])) << 16 |
+               static_cast<unsigned>(static_cast<unsigned char>(wav[at + 3])) << 24;
+    };
+    check(u32(4) == 46 && u32(24) == 16000 && u32(28) == 32000 && u32(40) == 10,
+          "sizes and rates are little-endian and consistent");
+    check(static_cast<unsigned char>(wav[50]) == 0xFF && static_cast<unsigned char>(wav[51]) == 0x7F,
+          "32767 is stored low byte first");
+
+    LlmConfig c = testConfig();
+    RecordedTransport t;
+    t.add(200, R"({"text": "  patients arrive every five minutes  "})");
+    const TranscriptResult r = transcribe(wav, c, t);
+    check(r.ok && r.text == "patients arrive every five minutes", "the transcript comes back trimmed");
+    check(t.urls.size() == 1 && t.urls[0] == "https://api.groq.com/openai/v1/audio/transcriptions",
+          "it goes to Groq's transcription endpoint, same server as the model");
+    bool model = false, lang = false;
+    for (const auto& f : t.forms[0]) {
+        model = model || (f.first == "model" && f.second == "whisper-large-v3-turbo");
+        lang = lang || f.first == "language";
+    }
+    check(model && !lang, "with whisper-large-v3-turbo, and no language unless one is set");
+    check(t.files[0] == "file:speech.wav:" + std::to_string(wav.size()), "the recording is the file field, as .wav");
+    bool auth = false;
+    for (const std::string& h : t.headers[0]) auth = auth || h == "Authorization: Bearer gsk_testkey0123456789abcd";
+    check(auth, "with the same key");
+
+    c.sttLanguage = "en";
+    RecordedTransport t2;
+    t2.add(200, R"({"text": "hi"})");
+    transcribe(wav, c, t2);
+    bool en = false;
+    for (const auto& f : t2.forms[0]) en = en || (f.first == "language" && f.second == "en");
+    check(en, "stt_language is sent when set");
+
+    RecordedTransport t3;
+    t3.add(404, "{}");
+    check(contains(transcribe(wav, testConfig(), t3).error, "no speech-to-text"),
+          "a server without speech-to-text says so, and what to use instead");
+    RecordedTransport t4;
+    t4.add(401, "{}");
+    check(contains(transcribe(wav, testConfig(), t4).error, "refused the API key"), "a refused key says so");
+
+    const std::string form = curlFormConfig("https://x/audio", {"Authorization: Bearer k"},
+                                            {{"model", "@etc/passwd"}}, "file", "C:/Users/User A/t.wav",
+                                            "audio/wav", 120);
+    check(contains(form, "form-string = \"model=@etc/passwd\"") &&
+              contains(form, "form = \"file=@C:/Users/User A/t.wav;type=audio/wav\""),
+          "fields go as form-string (an @ is never read as a file); the path keeps its space");
+
+    const LlmConfig parsed = parseLlmConfig("stt_model = whisper-large-v3\nstt_language = hi\n");
+    check(parsed.sttModel == "whisper-large-v3" && parsed.sttLanguage == "hi", "stt settings are read from llm.conf");
+}
+
 }  // namespace
 
 void runScenarioTests() {
@@ -519,4 +592,5 @@ void runScenarioTests() {
     testLoad();
     testBuilder();
     testGenerator();
+    testSpeech();
 }
