@@ -427,7 +427,7 @@ void testGenerator() {
               "a reply that is all thinking says so");
     }
 
-    check(maskKey("gsk_abcdefghijklmnopwxyz") == "gsk_…wxyz", "a key is shown as its prefix and last four");
+    check(maskKey("gsk_abcdefghijklmnopwxyz") == "gsk_...wxyz", "a key is shown as its prefix and last four");
     check(systemPrompt() == systemPrompt(), "the system prompt is the same on every call, so it can be cached");
 
     // The worked example inside the prompt is itself a valid scenario. A prompt

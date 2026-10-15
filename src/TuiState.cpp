@@ -468,9 +468,7 @@ void TuiState::answerConfirm(char c) {
     if (m_confirmFor == ConfirmFor::OpenExisting) {
         if (c == 'y') {
             const std::string path = m_pendingPath;
-            const std::string dir = m_defaultDir;
-            *this = open(path);
-            m_defaultDir = dir;
+            replaceWith(open(path));
             return;
         }
         if (c == 'n') {
@@ -482,10 +480,22 @@ void TuiState::answerConfirm(char c) {
     }
 }
 
+// A new or reopened model replaces the whole state -- but not what belongs to
+// the SESSION. The first version kept only the models folder, so after ^N the
+// picture opener (v16.2) was gone and F2 answered "not available in this
+// build" with the saved key forgotten: everything tui/main.cpp installs at
+// start-up was dropped with the old model. Anything installed there goes here.
+void TuiState::replaceWith(TuiState next) {
+    next.m_defaultDir = std::move(m_defaultDir);
+    next.m_opener     = std::move(m_opener);
+    next.m_askHooks   = std::move(m_askHooks);
+    next.m_llm        = std::move(m_llm);
+    next.m_clip       = std::move(m_clip);
+    *this = std::move(next);
+}
+
 void TuiState::newBlankModel(const std::string& path) {
-    const std::string dir = m_defaultDir;
-    *this = fromText(std::string(), path);
-    m_defaultDir = dir;
+    replaceWith(fromText(std::string(), path));
     setStatus(path + ": a new model -- pick a module on the left, or ^T for a working one");
 }
 

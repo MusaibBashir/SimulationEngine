@@ -474,6 +474,7 @@ private:
     std::string              m_askBuiltText;   // the text the last answer wrote
     std::shared_ptr<AskJob>  m_askJob;
     void startAsk(const std::string& text);
+    void replaceWith(TuiState next);    // keeps the session's settings
 
     void tablesChanging();            // snapshot for ^Z, before a change
     void tablesChanged();             // dirty, and re-read the joined model

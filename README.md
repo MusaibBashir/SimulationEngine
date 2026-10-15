@@ -669,7 +669,7 @@ pressing Enter — "fifteen" and "fifty" sound alike.
 [console.groq.com/keys](https://console.groq.com/keys)); `^K` in the panel
 changes it. It is saved for you alone — `%APPDATA%\DES Simulator\llm.conf` on
 Windows, `~/Library/Application Support/DES Simulator/llm.conf` on a Mac —
-never in a model file, and shown only as `gsk_…wxyz`. The panel's title always
+never in a model file, and shown only as `gsk_...wxyz`. The panel's title always
 says where your words are sent.
 
 **From the command line**, the same thing:

@@ -209,6 +209,38 @@ void testQuestions() {
     s.pollAsk();
 }
 
+void testNewModelKeepsSettings() {
+    section("v17: a new or reopened model keeps F2 working");
+    Fake fake;
+    TuiState s = withKey(fake, "old\n");
+    std::vector<std::string> opened;
+    s.setOpener([&opened](const std::string& f) { opened.push_back(f); return true; });
+
+    // ^N and a name: the whole state is rebuilt for the new model.
+    handleKey(s, Key::control('n'));
+    typeText(s, "fresh_model_for_ask_test");
+    handleKey(s, Key::special(KeyKind::Enter));
+    check(s.buffer().text().empty() && contains(s.path(), "fresh_model_for_ask_test"),
+          "^N made a new, empty model");
+    check(s.llmConfig().apiKey == "gsk_alreadyhere0123456789", "...and the key survived it");
+    handleKey(s, Key::function(2));
+    typeText(s, "two tellers");
+    handleKey(s, Key::special(KeyKind::Enter));
+    check(fake.texts.size() == 1 && fake.keys[0] == "gsk_alreadyhere0123456789",
+          "F2 still sends after ^N -- it once said \"not available in this build\"");
+    check(!logHas(s, AskLine::Kind::Error, "not available"), "...with no such error");
+    s.pollAsk();
+    check(contains(s.buffer().text(), "[Create]"), "and the model lands in the new file");
+
+    TuiState t = withKey(fake);
+    t.setOpener([&opened](const std::string& f) { opened.push_back(f); return true; });
+    t.newBlankModel("another.des");
+    check(t.llmConfig().apiKey == "gsk_alreadyhere0123456789", "newBlankModel keeps the key");
+    t.setClipboard("kept");
+    t.newBlankModel("third.des");
+    check(t.clipboard() == "kept", "...and the clipboard, which belongs to the session too");
+}
+
 void testWaiting() {
     section("v17: waiting, and stopping waiting");
     Fake fake;
@@ -257,7 +289,7 @@ void testKey() {
     check(fake.saved.size() == 1 && fake.saved[0] == "gsk_secret0123456789wxyz", "Enter saves it");
     check(fake.texts.size() == 1 && fake.texts[0] == "a teller" && fake.keys[0] == "gsk_secret0123456789wxyz",
           "...and the waiting description goes out with it");
-    check(logHas(s, AskLine::Kind::Info, "gsk_…wxyz saved"), "the log names the key only by its ends");
+    check(logHas(s, AskLine::Kind::Info, "gsk_...wxyz saved"), "the log names the key only by its ends");
     s.pollAsk();
     for (const AskLine& l : s.askLog())
         check(!contains(l.text, "secret"), "no line of the conversation holds the key");
@@ -334,6 +366,7 @@ void runAskTests() {
     testOpening();
     testDescribe();
     testQuestions();
+    testNewModelKeepsSettings();
     testWaiting();
     testKey();
 }

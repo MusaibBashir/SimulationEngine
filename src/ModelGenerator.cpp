@@ -277,10 +277,12 @@ bool saveApiKey(const std::string& key, std::string& error) {
 }
 
 std::string maskKey(const std::string& key) {
-    if (key.size() <= 8) return key.empty() ? "(none)" : "…";
+    // ASCII dots, not an ellipsis: a Windows console not set to UTF-8 drew
+    // "…" as "ÔÇª" in the middle of the key.
+    if (key.size() <= 8) return key.empty() ? "(none)" : "...";
     const std::size_t us = key.find('_');
     const std::string prefix = (us != std::string::npos && us < 6) ? key.substr(0, us + 1) : key.substr(0, 3);
-    return prefix + "…" + key.substr(key.size() - 4);
+    return prefix + "..." + key.substr(key.size() - 4);
 }
 
 const std::string& systemPrompt() {
