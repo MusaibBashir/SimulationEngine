@@ -75,6 +75,10 @@ jobs:
           $stage = "dist/DES-Simulator"
           Copy-Item "$env:QT_ROOT_DIR/plugins/platforms/qoffscreen.dll" "$stage/platforms/"
           $env:QT_QPA_PLATFORM = "offscreen"
+          # The offscreen platform keeps its own font list and finds none on
+          # Windows -- every letter came out as a box. The real app, on the
+          # windows platform, uses the system's fonts as normal.
+          $env:QT_QPA_FONTDIR = "$env:WINDIR\Fonts"
           & "$stage/DES-Simulator.exe" --screenshot flow.png --tab flow "$stage/examples/shared.des" | Out-Null
           & "$stage/DES-Simulator.exe" --screenshot results.png --tab results --run "$stage/examples/decide.des" | Out-Null
           Remove-Item "$stage/platforms/qoffscreen.dll"
