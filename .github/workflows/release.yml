@@ -1,0 +1,226 @@
+# ============================================================================
+# .github/workflows/release.yml  --  build the Windows and macOS packages
+# ============================================================================
+# Push a tag and the packages build, check themselves and publish:
+#
+#     git tag v15.3.0 && git push origin v15.3.0
+#
+# The version is the tag without its "v". It must have a "## [15.3.0]" section
+# in CHANGELOG.md, which becomes the release notes -- a release nobody wrote
+# notes for is refused, the way the package scripts refuse an untested build.
+#
+# Run it by hand from the Actions tab to build a version WITHOUT publishing it
+# (the packages are kept as workflow artifacts), or tick "publish" to create
+# the tag and the release from the chosen branch.
+#
+# Each platform builds through its own tools/package*.sh, the same script a
+# person runs locally, so CI and a laptop cannot disagree about what a package
+# is: the release build passes the whole suite, links against nothing the
+# other machine lacks, and starts with no compiler on PATH -- or nothing ships.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, e.g. 15.3.0 (no leading v)'
+        required: true
+      publish:
+        description: 'Create tag v<version> and publish a GitHub release'
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # --------------------------------------------------------------------------
+  # One place that decides the version, so the two builds cannot be stamped
+  # differently, and that pulls the release notes out of CHANGELOG.md.
+  # --------------------------------------------------------------------------
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: v
+        name: Resolve the version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            publish=true
+          else
+            version="${INPUT_VERSION#v}"
+            publish="$INPUT_PUBLISH"
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::'$version' is not a version like 15.3.0 or 15.3.0-rc.1"
+            exit 1
+          fi
+          case "$version" in *-*) prerelease=true ;; *) prerelease=false ;; esac
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building $version (publish: $publish, prerelease: $prerelease)"
+
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          PUBLISH: ${{ steps.v.outputs.publish }}
+        run: |
+          # Everything from "## [VERSION]" up to the next "## [" heading.
+          awk -v v="$VERSION" '
+            index($0, "## [" v "]") == 1 { found = 1; print; next }
+            found && /^## \[/            { exit }
+            found                        { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            if [ "$PUBLISH" = "true" ]; then
+              echo "::error::CHANGELOG.md has no '## [$VERSION]' section; write the notes before releasing"
+              exit 1
+            fi
+            echo "Unreleased build of $VERSION." > release-notes.md
+          fi
+          cat release-notes.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  # --------------------------------------------------------------------------
+  # Windows: MSYS2's UCRT64 GCC stands in for the WinLibs GCC package.sh was
+  # written against -- both are MinGW-w64 targeting the Universal C Runtime, so
+  # the DLL check in package.sh means the same thing on both.
+  # --------------------------------------------------------------------------
+  windows:
+    needs: version
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-make
+
+      - name: Install Inno Setup 6
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /? | Select-Object -First 1
+
+      - name: Package
+        env:
+          WINLIBS_BIN: /ucrt64/bin
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          bash tools/package.sh "$VERSION"
+          # package.sh treats the installer as optional for a laptop without
+          # Inno Setup. A release is not that laptop.
+          test -f "dist/DES-Simulator-$VERSION-setup.exe" || { echo "::error::no installer was built"; exit 1; }
+          test -f "dist/DES-Simulator-$VERSION-windows-x64.zip" || { echo "::error::no zip was built"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          path: |
+            dist/DES-Simulator-${{ needs.version.outputs.version }}-windows-x64.zip
+            dist/DES-Simulator-${{ needs.version.outputs.version }}-setup.exe
+
+  # --------------------------------------------------------------------------
+  # macOS: one universal binary, built on Apple Silicon. The suite runs on the
+  # arm64 slice here; package_macos.sh refuses a binary missing either slice.
+  # --------------------------------------------------------------------------
+  macos:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: bash tools/package_macos.sh "$VERSION"
+
+      - name: Run the suite on the Intel slice too
+        # Rosetta is present on GitHub's Apple Silicon runners. Where it is not,
+        # say so rather than pass silently.
+        run: |
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            status=0
+            out="$(arch -x86_64 build-release-macos/des_tests 2>&1)" || status=$?
+            printf '%s\n' "$out" | grep -E "FAIL|checks passed" || true
+            [ "$status" -eq 0 ] || { echo "::error::the suite failed on x86_64 (exit $status)"; exit 1; }
+            if printf '%s' "$out" | grep -q FAIL; then echo "::error::the suite reported failures on x86_64"; exit 1; fi
+          else
+            echo "::warning::Rosetta is not available; the x86_64 slice was built but not tested"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          if-no-files-found: error
+          path: |
+            dist/DES-Simulator-${{ needs.version.outputs.version }}-macos-universal.zip
+            dist/DES-Simulator-${{ needs.version.outputs.version }}-macos-universal.dmg
+
+  # --------------------------------------------------------------------------
+  # Publish only when BOTH platforms packaged cleanly: a release with half its
+  # downloads missing is worse than a release a few minutes late.
+  # --------------------------------------------------------------------------
+  release:
+    needs: [version, windows, macos]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Checksums
+        working-directory: artifacts
+        run: |
+          find windows macos -type f -exec mv {} . \;
+          sha256sum DES-Simulator-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: DES Simulator ${{ needs.version.outputs.version }}
+          body_path: artifacts/release-notes/release-notes.md
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/DES-Simulator-*
+            artifacts/SHA256SUMS.txt

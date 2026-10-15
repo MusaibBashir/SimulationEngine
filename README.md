@@ -546,7 +546,27 @@ exe to open it instead.
 exe is not code-signed. *More info → Run anyway*. Removing that needs a paid
 code-signing certificate.
 
-**Windows only, for now.** Nothing has been packaged for macOS or Linux.
+**On a Mac**, `bash tools/package_macos.sh 15.1.0` does the same job: one
+universal binary (Apple Silicon and Intel, macOS 11+), a `DES Simulator.command`
+to double-click that opens Terminal in `Documents/DES Models`, as a `.zip` and a
+`.dmg`. It refuses on the same grounds, plus a missing architecture slice. The
+binary is ad-hoc signed but not notarised, so Gatekeeper asks once —
+`packaging/README_macos.txt` says how to allow it.
+
+### Releases are built by CI
+
+`.github/workflows/release.yml` builds both platforms through these same two
+scripts. Write the `## [x.y.z]` section in `CHANGELOG.md`, then:
+
+```
+git tag v15.3.0 && git push origin v15.3.0
+```
+
+Windows (zip + installer) and macOS (zip + dmg) build, gate themselves, and
+publish as a GitHub release with the changelog section as its notes and a
+`SHA256SUMS.txt`. A tag with no changelog entry is refused, and nothing is
+published unless both platforms pass. Running the workflow by hand from the
+Actions tab builds a version without publishing it.
 
 ## Documents
 
