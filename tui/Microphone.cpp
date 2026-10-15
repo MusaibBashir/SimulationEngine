@@ -9,6 +9,12 @@
 // Platform code, like Terminal_*.cpp: nothing here can be tested without a
 // sound card, which is why the UI sees only IRecorder.
 
+// Before anything includes windows.h -- miniaudio does on Windows -- or its
+// min and max macros eat std::max below (MSVC: "illegal token on right side
+// of '::'"). MinGW happened not to define them; MSVC does.
+#ifndef NOMINMAX
+  #define NOMINMAX
+#endif
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_DECODING
 #define MA_NO_ENCODING

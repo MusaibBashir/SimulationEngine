@@ -153,26 +153,26 @@ void MainWindow::buildDocks() {
     m_modules->setHeaderHidden(true);
     m_modules->setIndentation(14);
     QTreeWidgetItem* flow = new QTreeWidgetItem(m_modules, {"Flowchart"});
-    QTreeWidgetItem* data = new QTreeWidgetItem(m_modules, {"Data"});
+    QTreeWidgetItem* dataGroup = new QTreeWidgetItem(m_modules, {"Data"});
     QTreeWidgetItem* child = new QTreeWidgetItem(m_modules, {"Rows of a module"});
     for (const des::ModuleSchema& s : des::ModuleRegistry::instance().all()) {
         if (s.readOnly) continue;
         QTreeWidgetItem* parent = s.kind == des::ModuleKind::Flowchart ? flow
-                                  : s.kind == des::ModuleKind::Data ? data : child;
+                                  : s.kind == des::ModuleKind::Data ? dataGroup : child;
         auto* item = new QTreeWidgetItem(parent, {QString::fromStdString(s.typeName)});
         item->setToolTip(0, QString::fromStdString(s.help));
         QPixmap swatch(10, 10);
         swatch.fill(theme::blockColor(QString::fromStdString(s.typeName)));
         item->setIcon(0, QIcon(swatch));
     }
-    for (QTreeWidgetItem* g : {flow, data, child}) {
+    for (QTreeWidgetItem* g : {flow, dataGroup, child}) {
         QFont f = g->font(0);
         f.setBold(true);
         g->setFont(0, f);
         g->setFlags(Qt::ItemIsEnabled);
     }
     flow->setExpanded(true);
-    data->setExpanded(true);
+    dataGroup->setExpanded(true);
     connect(m_modules, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* it) {
         if (it->parent() != nullptr) insertModule(it->text(0));
     });
