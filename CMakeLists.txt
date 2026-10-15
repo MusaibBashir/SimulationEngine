@@ -104,6 +104,24 @@ target_link_libraries(des_ui PUBLIC des_engine)
 target_compile_options(des_ui PRIVATE ${DES_WARNINGS})
 
 # ----------------------------------------------------------------------------
+# v17: models from a description, through a small language model. A THIRD
+# library, linking des_engine and never the reverse, so the engine stays
+# offline and network-free for everybody who never sets a key. Portable code
+# in src/ for the same reason des_ui's is: verify.sh then runs it through
+# every compiler and sanitiser with no change to any gate.
+# ----------------------------------------------------------------------------
+add_library(des_ai STATIC
+    src/Json.cpp
+    src/Scenario.cpp
+    src/ScenarioBuilder.cpp
+    src/PreParse.cpp
+    src/ModelGenerator.cpp
+    src/CurlTransport.cpp
+)
+target_link_libraries(des_ai PUBLIC des_engine)
+target_compile_options(des_ai PRIVATE ${DES_WARNINGS})
+
+# ----------------------------------------------------------------------------
 # Programs
 # ----------------------------------------------------------------------------
 add_executable(des_demo main.cpp)
@@ -113,7 +131,7 @@ target_compile_options(des_demo PRIVATE ${DES_WARNINGS})
 # The CLI takes the name `des`: `des check model.des` is the product and the
 # five-scenario program above is a demo.
 add_executable(des cli/main.cpp)
-target_link_libraries(des PRIVATE des_engine)
+target_link_libraries(des PRIVATE des_ai)
 target_compile_options(des PRIVATE ${DES_WARNINGS})
 
 # The platform half. WIN32 and non-WIN32 sources are mutually exclusive: each
@@ -135,8 +153,8 @@ if(WIN32)
     target_link_libraries(des_tui PRIVATE shell32 ole32 uuid)
 endif()
 
-add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp tests/v16_tests.cpp tests/tables_tests.cpp tests/flowgraph_tests.cpp)
-target_link_libraries(des_tests PRIVATE des_ui)
+add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp tests/v16_tests.cpp tests/tables_tests.cpp tests/flowgraph_tests.cpp tests/scenario_tests.cpp)
+target_link_libraries(des_tests PRIVATE des_ui des_ai)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
 
 # The decisive v11 test reads the shipped .des files. The suite is not always

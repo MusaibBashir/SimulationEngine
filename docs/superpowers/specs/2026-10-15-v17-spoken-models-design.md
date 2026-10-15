@@ -1,7 +1,8 @@
-# v16 — a model you can describe out loud
+# v17 — a model you can describe out loud
 
-**Status:** proposal, not yet approved. Revised 2026-10-15: designed for a
-small, cheap model (Llama on Groq) rather than a frontier one.
+**Status:** approved 2026-10-15 — scope: arrivals, processing steps, delays,
+branches, shared resources, run setup; Groq's 70B Llama; voice through the
+OS's own speech typing. Steps 1–4 built on `voice-agent`; step 5 (TUI) next.
 **Date:** 2026-10-15
 
 ---

@@ -638,6 +638,42 @@ publish as a GitHub release with the changelog section as its notes and a
 published unless both platforms pass. Running the workflow by hand from the
 Actions tab builds a version without publishing it.
 
+## Describing a model instead of writing it
+
+*v17, in progress on the `voice-agent` branch.* Say or type what happens and a
+small language model fills in a short form; this project's own code turns the
+form into the `.des` file. The language model never writes the model itself,
+so whatever it produces compiles.
+
+```
+export DES_LLM_API_KEY=gsk_...        # a Groq key: console.groq.com/keys
+des generate "customers arrive thirty an hour, two tellers take about 3 minutes each, run an 8 hour day"
+```
+
+It prints what it worked out ("30 an hour = one every 2 minutes"), every default
+it had to choose ("no server count was given for X-ray, so it has 1"), and
+writes `model.des` plus `model.scenario.json`, the filled-in form. When a fact
+is missing, or the numbers describe a queue that would grow forever, it asks
+instead of guessing:
+
+```
+? Teller would be busy 150% of the time with 1 server ... How many servers does Teller have?
+des generate --from model.scenario.json "there are two tellers"
+```
+
+**Voice:** use the speech typing built into the operating system. Press
+`Win+H` on Windows 11, or the Dictation key (or `Fn` twice) on macOS, and speak
+into the terminal; check the numbers before pressing Enter, because "fifteen"
+and "fifty" sound alike.
+
+**Other providers:** `DES_LLM_BASE_URL` and `DES_LLM_MODEL` point it at any
+OpenAI-compatible server, for example `http://localhost:11434/v1` and
+`llama3.1` for Ollama on your own machine, which needs no key and no internet.
+
+`des new scenario.json` builds a model from a form written by hand, with no
+language model at all. What it can build: arrival streams, processing steps
+with their own or shared servers, delays, chance branches, and run setup.
+
 ## Documents
 
 | File | What it is |

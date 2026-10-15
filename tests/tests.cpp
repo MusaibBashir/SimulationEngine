@@ -31,6 +31,7 @@ void runTuiTests();          // tests/tui_tests.cpp
 void runV16Tests();          // tests/v16_tests.cpp
 void runTablesTests();       // tests/tables_tests.cpp
 void runFlowGraphTests();    // tests/flowgraph_tests.cpp
+void runScenarioTests();     // tests/scenario_tests.cpp
 
 namespace {
 
@@ -1716,6 +1717,7 @@ int main() {
     runV16Tests();
     runTablesTests();
     runFlowGraphTests();
+    runScenarioTests();
 
     std::cout << "\n" << (des_test::g_checks - des_test::g_failures)
               << " / " << des_test::g_checks << " checks passed\n";
