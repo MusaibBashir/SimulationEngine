@@ -106,6 +106,9 @@ struct ScenarioRead {
     Scenario                   scenario;
     std::vector<ScenarioIssue> invalid;     // malformed: ask the model again
     std::vector<Question>      questions;   // missing: ask the person
+    // What the reader changed because the form, read literally, could not be
+    // what was meant -- each said out loud with the other assumptions.
+    std::vector<std::string>   adjustments;
 };
 
 // Never throws. Reads what it can and lists the rest. Run length and warm-up
@@ -122,6 +125,13 @@ struct StepLoad {
     double      utilisation{0.0};
 };
 std::vector<StepLoad> offeredLoads(const Scenario& s);
+
+// `update` laid over `previous`: what the model sent wins, what it left out or
+// sent as null keeps its earlier value. Steps, arrivals and resources match by
+// name and branches by from/to, so an answer that sends back only the step it
+// changed -- which a small model does, however it is told -- adds to the form
+// rather than replacing it. (The cost: removing a step needs the editor.)
+JsonValue mergeScenarioJson(const JsonValue& previous, const JsonValue& update);
 std::vector<Question> loadQuestions(const Scenario& s);
 
 // The JSON shape the language model is asked for, in its own words: the one

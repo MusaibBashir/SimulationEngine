@@ -80,6 +80,68 @@ bool replyText(const HttpResponse& r, std::string& text, std::string& error) {
     return true;
 }
 
+// A short answer to "how many servers does X have?" -- "3", "take 4 servers",
+// "there are 2 machines" -- is filled in by code. A language model given "3"
+// and a form once sent back a form with no arrivals and no steps; arithmetic
+// on one field cannot go wrong that way, and costs nothing.
+bool fillServersDirectly(JsonValue& form, const Question& q, const std::string& answer) {
+    const std::string tail = ".servers";
+    if (q.path.size() <= tail.size() || q.path.compare(q.path.size() - tail.size(), tail.size(), tail) != 0)
+        return false;
+    const std::size_t open = q.path.find('['), close = q.path.find(']');
+    if (open == std::string::npos || close == std::string::npos || close < open) return false;
+    const std::string list = q.path.substr(0, open);
+    const std::size_t index = static_cast<std::size_t>(std::atoi(q.path.substr(open + 1, close - open - 1).c_str()));
+
+    // Exactly one whole number, a short reply, and no time unit: "3 minutes"
+    // is a change to a time, not a count, and goes to the model.
+    const std::string text = preParse(answer).text;
+    int numbers = 0, words = 0, value = 0;
+    bool fraction = false;
+    std::string word;
+    auto endWord = [&] {
+        if (word.empty()) return;
+        ++words;
+        std::string w = word;
+        for (char& c : w) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        TimeUnit unused{};
+        if (parseTimeUnit(w, unused)) numbers = 99;
+        word.clear();
+    };
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        if (std::isdigit(c)) {
+            endWord();
+            std::size_t j = i;
+            while (j < text.size() && (std::isdigit(static_cast<unsigned char>(text[j])) || text[j] == '.')) ++j;
+            const std::string n = text.substr(i, j - i);
+            fraction = fraction || n.find('.') != std::string::npos;
+            value = std::atoi(n.c_str());
+            ++numbers;
+            ++words;
+            i = j - 1;
+        } else if (std::isalpha(c)) {
+            word += static_cast<char>(c);
+        } else {
+            if (c == '%') numbers = 99;
+            endWord();
+        }
+    }
+    endWord();
+    if (numbers != 1 || fraction || value < 1 || words > 6) return false;
+
+    const JsonValue& items = form[list];
+    if (!items.isArray() || index >= items.items().size() || !items.items()[index].isObject()) return false;
+    JsonValue rebuilt = JsonValue::array();
+    for (std::size_t i = 0; i < items.items().size(); ++i) {
+        JsonValue item = items.items()[i];
+        if (i == index) item.set("servers", JsonValue::number(value));
+        rebuilt.push(item);
+    }
+    form.set(list, rebuilt);
+    return true;
+}
+
 std::string issueList(const std::vector<ScenarioIssue>& issues) {
     std::string s;
     for (const ScenarioIssue& i : issues)
@@ -300,6 +362,9 @@ const std::string& systemPrompt() {
         "always, or on the dot. A single number with no such word -- \"every 2 "
         "minutes\", \"takes 3 minutes\", \"30 an hour\" -- is \"random\" with that "
         "mean, because real arrivals and services vary.\n"
+        "- After a step with branches, set that step's \"next\" to where the REST "
+        "go. \"20% need an X-ray, then everyone goes to discharge\": the branch goes "
+        "to X-ray, the step's next is Discharge, and X-ray's next is Discharge.\n"
         "- A step is something each arrival goes through: being served (process) or "
         "just spending time (delay). Name steps with the person's own short words.\n"
         "- Use \"resources\" only when the description says several steps share the "
@@ -365,19 +430,52 @@ std::string chatRequestBody(const LlmConfig& config, const Messages& messages) {
     return writeJson(body);
 }
 
+// Questions, assumptions, build and compile: the same whichever way the form
+// was filled in.
+GenerateResult& finish(GenerateResult& out, const ScenarioRead& read);
+
 GenerateResult generateModel(const std::string& description, const JsonValue& previous,
                              const LlmConfig& config, ITransport& transport) {
     GenerateResult out;
     const PreParsed pre = preParse(description);
     out.notes = pre.notes;
 
+    // What the person was last asked, worked out from the form itself, so the
+    // CLI's --from and the editor agree without passing questions around.
+    std::vector<Question> pending;
+    if (previous.isObject()) {
+        const ScenarioRead before = readScenario(previous);
+        pending = before.questions;
+        if (pending.empty() && before.invalid.empty()) pending = loadQuestions(before.scenario);
+    }
+
+    ScenarioRead read;
+    if (!pending.empty()) {
+        JsonValue filled = previous;
+        if (fillServersDirectly(filled, pending.front(), description)) {
+            read = readScenario(filled);
+            out.scenarioJson = filled;
+            out.notes.push_back("Took that as the answer to: " + pending.front().text.substr(
+                                    0, pending.front().text.find('.') + 1));
+            return finish(out, read);
+        }
+    }
+
     Messages messages;
     messages.emplace_back("system", systemPrompt());
     std::string user;
-    if (previous.isObject())
-        user += "Current form:\n" + writeJson(previous) + "\n\nNew information or change:\n";
-    else
+    if (previous.isObject()) {
+        user += "Current form:\n" + writeJson(previous) + "\n\n";
+        if (!pending.empty()) {
+            user += "The person was asked:\n";
+            for (const Question& q : pending) user += "- " + q.text + "  (fills " + q.path + ")\n";
+            user += "\nTheir answer, or a change:\n";
+        } else {
+            user += "New information or change:\n";
+        }
+    } else {
         user += "Description:\n";
+    }
     user += pre.text;
     messages.emplace_back("user", user);
 
@@ -386,7 +484,6 @@ GenerateResult generateModel(const std::string& description, const JsonValue& pr
     const std::string url = config.baseUrl + "/chat/completions";
 
     // Two attempts: the answer, and one correction naming the bad fields.
-    ScenarioRead read;
     for (int attempt = 0; attempt < 2; ++attempt) {
         ++out.calls;
         std::string text;
@@ -397,8 +494,11 @@ GenerateResult generateModel(const std::string& description, const JsonValue& pr
             read = ScenarioRead{};
             read.invalid.push_back({"", "not a JSON object: " + parsed.error});
         } else {
-            read = readScenario(parsed.value);
-            out.scenarioJson = parsed.value;
+            // Laid over the earlier form, so a reply holding only what changed
+            // -- which this model sends however it is told -- loses nothing.
+            const JsonValue form = mergeScenarioJson(previous, parsed.value);
+            read = readScenario(form);
+            out.scenarioJson = form;
         }
         if (read.invalid.empty()) break;
         messages.emplace_back("assistant", text);
@@ -411,6 +511,10 @@ GenerateResult generateModel(const std::string& description, const JsonValue& pr
         return out;
     }
 
+    return finish(out, read);
+}
+
+GenerateResult& finish(GenerateResult& out, const ScenarioRead& read) {
     out.scenario  = read.scenario;
     out.questions = read.questions;
     if (out.questions.empty()) {
@@ -419,7 +523,8 @@ GenerateResult generateModel(const std::string& description, const JsonValue& pr
     }
 
     BuiltScenario built = buildScenario(read.scenario);
-    out.assumptions = built.assumptions;
+    out.assumptions = read.adjustments;
+    out.assumptions.insert(out.assumptions.end(), built.assumptions.begin(), built.assumptions.end());
     out.document    = std::move(built.document);
     if (!out.questions.empty()) return out;
 

@@ -76,6 +76,7 @@ public:
 
         resolveNames();
         checkProbabilities();
+        if (out.invalid.empty()) unshadowBranches();
     }
 
 private:
@@ -291,6 +292,42 @@ private:
                             "two steps are called '" + s.steps[k].name + "'");
     }
 
+    // "After the doctor, 20% need an X-ray" with X-ray listed right after
+    // Doctor and no `next` on Doctor: read literally, the other 80% fall
+    // through to X-ray as well and everybody gets one. A branch to the very
+    // place the rest go is never meant, so the rest go past it -- to where the
+    // branch target itself goes next -- and the reader says so.
+    std::string afterStep(std::size_t i) const {
+        const Scenario& s = out.scenario;
+        if (!s.steps[i].next.empty()) return s.steps[i].next;
+        return i + 1 < s.steps.size() ? s.steps[i + 1].name : std::string("exit");
+    }
+    void unshadowBranches() {
+        Scenario& s = out.scenario;
+        for (std::size_t i = 0; i < s.steps.size(); ++i) {
+            const std::string fall = afterStep(i);
+            if (fall == "exit") continue;
+            double branched = 0.0;
+            bool shadowed = false;
+            for (const Branch& b : s.branches) {
+                if (b.from != s.steps[i].name) continue;
+                branched += b.probability;
+                shadowed = shadowed || b.to == fall;
+            }
+            if (!shadowed || branched >= 1.0 - 1e-9) continue;
+            std::size_t t = 0;
+            while (t < s.steps.size() && s.steps[t].name != fall) ++t;
+            if (t == s.steps.size()) continue;
+            const std::string beyond = afterStep(t);
+            if (beyond == fall || beyond == s.steps[i].name) continue;
+            s.steps[i].next = beyond;
+            out.adjustments.push_back(
+                "After " + s.steps[i].name + ", the other " + percent(1.0 - branched) + " go to " +
+                (beyond == "exit" ? std::string("the exit") : beyond) + ", not through " + fall +
+                " -- otherwise everyone would go to " + fall + ".");
+        }
+    }
+
     void checkProbabilities() {
         for (const Step& st : out.scenario.steps) {
             double total = 0.0;
@@ -363,6 +400,65 @@ ScenarioRead readScenario(const JsonValue& json) {
     Reader r;
     r.read(json);
     return r.out;
+}
+
+namespace {
+
+JsonValue mergeObject(const JsonValue& previous, const JsonValue& update) {
+    if (!previous.isObject() || !update.isObject()) return update.isNull() ? previous : update;
+    JsonValue out = previous;
+    for (const auto& m : update.members()) {
+        if (m.second.isNull()) continue;
+        const JsonValue& before = previous[m.first];
+        out.set(m.first, before.isObject() && m.second.isObject() ? mergeObject(before, m.second)
+                                                                   : m.second);
+    }
+    return out;
+}
+
+std::string itemKey(const JsonValue& item, bool branch) {
+    if (!item.isObject()) return "";
+    if (branch) return lower(trim(item["from"].asString())) + "\x1f" + lower(trim(item["to"].asString()));
+    return lower(trim(item["name"].asString()));
+}
+
+JsonValue mergeList(const JsonValue& previous, const JsonValue& update, bool branch) {
+    if (!previous.isArray()) return update;
+    std::vector<JsonValue> items = previous.items();
+    for (const JsonValue& u : update.items()) {
+        const std::string key = itemKey(u, branch);
+        // An unnamed item in a list of exactly one is that one -- by position,
+        // since an unnamed stream has no name to match with.
+        if (key.empty() && !branch && items.size() == 1) {
+            items[0] = mergeObject(items[0], u);
+            continue;
+        }
+        bool merged = false;
+        for (JsonValue& p : items)
+            if (!key.empty() && itemKey(p, branch) == key) { p = mergeObject(p, u); merged = true; break; }
+        if (!merged) items.push_back(u);
+    }
+    JsonValue out = JsonValue::array();
+    for (JsonValue& i : items) out.push(std::move(i));
+    return out;
+}
+
+}  // namespace
+
+JsonValue mergeScenarioJson(const JsonValue& previous, const JsonValue& update) {
+    if (!previous.isObject()) return update;
+    if (!update.isObject()) return previous;
+    JsonValue out = previous;
+    for (const auto& m : update.members()) {
+        if (m.second.isNull()) continue;
+        const bool list = m.first == "arrivals" || m.first == "steps" || m.first == "resources" ||
+                          m.first == "branches";
+        if (list && m.second.isArray())
+            out.set(m.first, mergeList(previous[m.first], m.second, m.first == "branches"));
+        else
+            out.set(m.first, mergeObject(previous[m.first], m.second));
+    }
+    return out;
 }
 
 std::vector<StepLoad> offeredLoads(const Scenario& s) {

@@ -5,6 +5,7 @@
 // never called; what it might answer is written down here instead.
 // ============================================================================
 
+#include <cmath>
 #include <string>
 #include <vector>
 #include "harness.hpp"
@@ -197,6 +198,44 @@ void testScenarioReader() {
     check(!overBranched.invalid.empty(), "branches adding up to more than 1 are refused");
 
     check(!readScenario(json("[1, 2]")).invalid.empty(), "an answer that is not an object is refused");
+
+    // The clinic, as Qwen 3.8 27B first sent it: X-ray listed right after
+    // Doctor, a 20% branch to it, and no `next` on Doctor -- so read literally
+    // everybody went to X-ray (140% busy).
+    const ScenarioRead clinic = readScenario(json(R"({
+        "arrivals": [{"every": {"pattern": "random", "mean": 5}}],
+        "steps": [{"name": "Doctor", "servers": 3, "time": {"pattern": "random", "mean": 15}},
+                  {"name": "X-ray", "time": {"pattern": "fixed", "mean": 10}},
+                  {"name": "Discharge", "time": {"pattern": "fixed", "mean": 2}}],
+        "branches": [{"from": "Doctor", "to": "X-ray", "probability": 0.2}]})"));
+    check(clinic.invalid.empty() && clinic.scenario.steps[0].next == "Discharge",
+          "a branch to the step the rest fall through to sends the rest past it");
+    check(clinic.adjustments.size() == 1 && contains(clinic.adjustments[0], "other 80% go to Discharge"),
+          "...and says so");
+    std::vector<StepLoad> cl = offeredLoads(clinic.scenario);
+    check(cl.size() == 3 && std::abs(cl[1].utilisation - 0.4) < 1e-9,
+          "so X-ray gets 20% of the traffic: 0.2 x 0.2/min x 10 = 40%, not 200%");
+    const ScenarioRead meant = readScenario(json(R"({
+        "arrivals": [{"every": {"pattern": "random", "mean": 5}}],
+        "steps": [{"name": "Inspect", "time": {"pattern": "fixed", "mean": 1}, "next": "Ship"},
+                  {"name": "Rework", "time": {"pattern": "fixed", "mean": 2}, "next": "Inspect"},
+                  {"name": "Ship", "time": {"pattern": "fixed", "mean": 1}}],
+        "branches": [{"from": "Inspect", "to": "Rework", "probability": 0.1}]})"));
+    check(meant.adjustments.empty() && meant.scenario.steps[0].next == "Ship",
+          "a form that already says where the rest go is left alone");
+
+    // Merging a partial answer onto the form.
+    const JsonValue merged = mergeScenarioJson(
+        json(R"({"run_length": {"value": 8, "unit": "hours"}, "steps": [{"name": "Teller", "servers": 1,
+                 "time": {"pattern": "random", "mean": 3}}], "branches": [{"from": "A", "to": "B", "probability": 0.1}]})"),
+        json(R"({"run_length": null, "steps": [{"name": "teller", "servers": 4}, {"name": "Exit desk", "servers": 1}],
+                 "branches": [{"from": "a", "to": "b", "probability": 0.2}]})"));
+    check(merged["run_length"]["value"].asNumber() == 8, "null in the answer keeps the earlier value");
+    check(merged["steps"].items().size() == 2 && merged["steps"].items()[0]["servers"].asNumber() == 4 &&
+              merged["steps"].items()[0]["time"]["mean"].asNumber() == 3,
+          "a step matched by name is updated field by field; a new one is added");
+    check(merged["branches"].items().size() == 1 && merged["branches"].items()[0]["probability"].asNumber() == 0.2,
+          "a branch matched by from/to is updated, not duplicated");
 }
 
 void testLoad() {
@@ -369,11 +408,25 @@ void testGenerator() {
         check(r.scenarioJson.isObject(), "...and the form is kept so the answer can be merged in");
 
         RecordedTransport t2;
-        t2.add(200, reply(kTeller));
         const GenerateResult r2 = generateModel("there are two tellers", r.scenarioJson, testConfig(), t2);
-        check(r2.ok, "the answer, merged by the model, finishes the job");
-        check(contains(json(t2.bodies[0])["messages"].items()[1]["content"].asString(), "Current form:"),
-              "...because the current form is sent with it");
+        check(r2.ok && r2.calls == 0 && t2.bodies.empty(),
+              "a short count answering a server question is filled in by code -- no call at all");
+        check(r2.document.cell("Process", 0, "Capacity") == "2", "...into the step that was asked about");
+        RecordedTransport t2b;
+        check(generateModel("take 4 serverse", r.scenarioJson, testConfig(), t2b).calls == 0,
+              "typos around the number do not matter");
+
+        // "every 3 minutes" names a time: that is a change, not a count, and
+        // goes to the model with the question it might be answering.
+        RecordedTransport t3;
+        t3.add(200, reply(R"({"arrivals": [{"every": {"pattern": "random", "mean": 6}}]})"));
+        const GenerateResult r3 = generateModel("make it every 6 minutes", r.scenarioJson, testConfig(), t3);
+        check(t3.bodies.size() == 1 &&
+                  contains(json(t3.bodies[0])["messages"].items()[1]["content"].asString(), "The person was asked"),
+              "a longer answer goes to the model with the question it answers");
+        check(r3.ok && r3.scenario.steps.size() == 1 && r3.scenario.arrivals.size() == 1 &&
+                  r3.scenario.arrivals[0].every && *r3.scenario.arrivals[0].every->mean == 6.0,
+              "a reply holding only the changed arrivals is merged -- the steps survive it");
     }
     {
         RecordedTransport t;
