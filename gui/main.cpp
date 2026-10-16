@@ -29,7 +29,9 @@ int main(int argc, char** argv) {
     QCommandLineOption tab("tab", "With --screenshot: model, flow or results.", "name", "model");
     QCommandLineOption run("run", "With --screenshot: run the model first.");
     QCommandLineOption describe("describe", "With --screenshot: describe a model, wait for it, then draw.", "words");
-    args.addOptions({shot, tab, run, describe});
+    QCommandLineOption set("set", "With --screenshot: change a Run setup field first, e.g. \"Replications=5\".",
+                           "field=value");
+    args.addOptions({shot, tab, run, describe, set});
     args.process(app);
 
     const QStringList files = args.positionalArguments();
@@ -41,6 +43,8 @@ int main(int argc, char** argv) {
         const auto snap = [&] {
             if (taken) return;   // the answer, the poll and the grace timer may all ask
             taken = true;
+            for (const QString& f : args.values(set))
+                w.setRunField(f.section('=', 0, 0).trimmed(), f.section('=', 1).trimmed());
             if (args.isSet(run)) w.runToEndForScreenshot();
             if (args.isSet(tab)) w.showTab(args.value(tab));
             QTimer::singleShot(300, &app, [&] {

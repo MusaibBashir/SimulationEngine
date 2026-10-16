@@ -35,11 +35,14 @@ protected:
     }
 };
 
+const char* const kTalkTip =
+    "Speak instead of typing (F3). Click again to stop; the words appear in the box to check.";
+
 }  // namespace
 
 AskPanel::AskPanel(QWidget* parent)
     : QWidget(parent), m_log(new QTextBrowser(this)), m_input(new InputBox(this)),
-      m_talk(new QPushButton("Talk", this)), m_send(new QPushButton("Send", this)),
+      m_talk(new QPushButton(this)), m_send(new QPushButton("Send", this)),
       m_state(new QLabel(this)), m_level(new QProgressBar(this)), m_tick(new QTimer(this)),
       m_generation(std::make_shared<int>(0)) {
     auto* layout = new QVBoxLayout(this);
@@ -63,7 +66,9 @@ AskPanel::AskPanel(QWidget* parent)
     auto* settings = new QPushButton("Settings", this);
     m_talk->setObjectName("record");
     m_talk->setCheckable(true);
-    m_talk->setToolTip("Record what you say (F3). Click again to stop; the words appear in the box to check.");
+    m_talk->setIcon(theme::micIcon());
+    m_talk->setIconSize(QSize(20, 20));
+    m_talk->setToolTip(kTalkTip);
     m_send->setObjectName("primary");
     m_send->setToolTip("Build the model from these words (Enter)");
     row->addWidget(settings);
@@ -80,13 +85,13 @@ AskPanel::AskPanel(QWidget* parent)
         if (!m_recorder) return;
         m_level->setValue(static_cast<int>(qMin(1.0f, m_recorder->level() * 1.5f) * 100));
         const int secs = static_cast<int>(m_recorder->seconds());
-        m_state->setText(QString("Recording %1:%2 -- speak, then click Talk again to stop.")
+        m_state->setText(QString("Recording %1:%2 -- speak, then click the microphone again to stop.")
                              .arg(secs / 60).arg(secs % 60, 2, 10, QChar('0')));
         if (m_recorder->seconds() >= 120.0) stopTalking();
     });
 
     append("info", "Describe what happens -- what arrives and how often, what is done to it and how long "
-                   "it takes, how many servers. Or click <b>Talk</b> and say it.");
+                   "it takes, how many servers. Or click the <b>microphone</b> and say it.");
 }
 
 void AskPanel::setConfig(const des::LlmConfig& c) {
@@ -198,10 +203,10 @@ void AskPanel::startTalking() {
     }
     m_recorder = std::move(mic);
     m_talk->setChecked(true);
-    m_talk->setText("Stop");
+    m_talk->setToolTip("Stop recording (F3)");
     m_level->show();
     m_tick->start(50);
-    setBusy(true, "Recording -- speak, then click Stop.");
+    setBusy(true, "Recording -- speak, then click the microphone to stop.");
 }
 
 void AskPanel::stopTalking() {
@@ -209,7 +214,7 @@ void AskPanel::stopTalking() {
     m_tick->stop();
     m_level->hide();
     m_talk->setChecked(false);
-    m_talk->setText("Talk");
+    m_talk->setToolTip(kTalkTip);
     const std::vector<std::int16_t> samples = m_recorder->stop();
     m_recorder.reset();
     if (samples.size() < static_cast<std::size_t>(des::kSpeechSampleRate / 2)) {
@@ -229,7 +234,7 @@ void AskPanel::stopTalking() {
             if (!self || *generation != ticket) return;
             self->setBusy(false, "Check what was heard, fix any numbers, then press Enter.");
             if (!t.ok) { self->append("error", QString::fromStdString(t.error)); return; }
-            if (t.text.empty()) { self->m_state->setText("Nothing was heard. Try Talk again."); return; }
+            if (t.text.empty()) { self->m_state->setText("Nothing was heard. Try the microphone again."); return; }
             QString now = self->m_input->toPlainText();
             if (!now.isEmpty() && !now.endsWith(' ')) now += ' ';
             self->m_input->setPlainText(now + QString::fromStdString(t.text));

@@ -98,7 +98,7 @@ private:
 #if defined(_WIN32)
         return "Check Settings > Privacy & security > Microphone, and that desktop apps may use it.";
 #elif defined(__APPLE__)
-        return "Check System Settings > Privacy & Security > Microphone, and allow Terminal.";
+        return "Check System Settings > Privacy & Security > Microphone, and allow DES Simulator (or Terminal, for the terminal version).";
 #else
         return "Check that a microphone is connected and not in use.";
 #endif

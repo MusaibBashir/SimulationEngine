@@ -184,6 +184,7 @@ endif()
 option(DES_BUILD_GUI "Build the Qt desktop app (DES-Simulator)" OFF)
 if(DES_BUILD_GUI)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets)
+    set(DES_GUI_VERSION "17.0.0" CACHE STRING "The version the Mac bundle reports")
     add_executable(des_gui
         gui/main.cpp
         gui/MainWindow.cpp
@@ -202,7 +203,11 @@ if(DES_BUILD_GUI)
         WIN32_EXECUTABLE ON          # a window, no console behind it
         MACOSX_BUNDLE ON
         MACOSX_BUNDLE_GUI_IDENTIFIER "org.dessimulator.app"
-        MACOSX_BUNDLE_BUNDLE_NAME "DES Simulator")
+        MACOSX_BUNDLE_BUNDLE_NAME "DES Simulator"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${DES_GUI_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${DES_GUI_VERSION}"
+        # CMake's template plus the microphone line macOS insists on.
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in")
     target_link_libraries(des_gui PRIVATE des_ui Qt6::Widgets)
     # The engine has a Schedule::slots(); Qt's `slots`, `signals` and `emit`
     # macros would rewrite it. The GUI spells them Q_SLOTS, Q_SIGNALS, Q_EMIT.

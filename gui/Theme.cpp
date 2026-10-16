@@ -1,6 +1,7 @@
 #include "Theme.hpp"
 
 #include <QApplication>
+#include <QPainter>
 #include <QPalette>
 #include <QStyleFactory>
 
@@ -16,6 +17,37 @@ QColor blockColor(const QString& type) {
     if (type == "Batch" || type == "Separate" || type == "Match") return QColor(0xDB, 0x27, 0x77);
     if (type == "Station" || type == "Route") return QColor(0x4D, 0x7C, 0x0F);
     return QColor(0x64, 0x74, 0x8B);
+}
+
+namespace {
+
+QPixmap micPixmap(const QColor& c) {
+    QPixmap pm(64, 64);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    p.drawRoundedRect(QRectF(22, 4, 20, 34), 10, 10);       // the capsule
+    QPen pen(c, 5, Qt::SolidLine, Qt::RoundCap);
+    p.setPen(pen);
+    p.setBrush(Qt::NoBrush);
+    p.drawArc(QRectF(13, 12, 38, 38), 180 * 16, 180 * 16);  // the cradle
+    p.drawLine(QPointF(32, 50), QPointF(32, 58));           // the stand
+    p.drawLine(QPointF(22, 59), QPointF(42, 59));
+    return pm;
+}
+
+}  // namespace
+
+QIcon micIcon() {
+    QIcon icon;
+    icon.addPixmap(micPixmap(text), QIcon::Normal, QIcon::Off);
+    icon.addPixmap(micPixmap(Qt::white), QIcon::Normal, QIcon::On);
+    icon.addPixmap(micPixmap(Qt::white), QIcon::Active, QIcon::On);
+    icon.addPixmap(micPixmap(border), QIcon::Disabled, QIcon::Off);
+    icon.addPixmap(micPixmap(Qt::white), QIcon::Disabled, QIcon::On);
+    return icon;
 }
 
 void apply(QApplication& app) {
@@ -54,7 +86,10 @@ void apply(QApplication& app) {
         QPushButton:hover { border-color: %4; }
         QPushButton#primary { background: %4; color: white; border-color: %4; font-weight: 600; }
         QPushButton#primary:disabled { background: %3; border-color: %3; }
+        QPushButton#record { padding: 6px 10px; }
         QPushButton#record:checked { background: %8; color: white; border-color: %8; }
+        QToolBar QLabel { color: %6; padding-left: 6px; }
+        QToolBar QLineEdit, QToolBar QComboBox { padding: 3px 6px; }
         QPlainTextEdit, QTextBrowser, QTreeWidget, QListWidget, QLineEdit, QComboBox {
             border: 1px solid %1; border-radius: 6px; background: %2; selection-background-color: %4; }
         QLineEdit, QComboBox { padding: 4px 6px; }

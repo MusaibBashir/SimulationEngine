@@ -647,11 +647,14 @@ publish as a GitHub release with the changelog section as its notes and a
 published unless both platforms pass. Running the workflow by hand from the
 Actions tab builds a version without publishing it.
 
-## The desktop app (in progress, `desktop-ui` branch)
+## The desktop app
 
 A windowed app beside the terminal one, in Qt 6 Widgets, with one design on
 Windows and macOS (Qt's Fusion style and one palette, `gui/Theme.cpp`):
 
+- **Run setup** in the toolbar: which `[Run]` to run, and its Length,
+  Warm-up, Replications and time units. Changing one rewrites that line of the
+  text (undoable); a model with no `[Run]` gets one.
 - **Modules** on the left, grouped as Arena groups them — double-click inserts
   one, hover explains it.
 - **Model**: the `.des` text with colour, line numbers, and every error as a red
@@ -662,7 +665,7 @@ Windows and macOS (Qt's Fusion style and one palette, `gui/Theme.cpp`):
 - **Results**: the engine's own report, under a bar per station showing how
   busy it was, averaged over every replication — shared resources summed.
 - **Describe** on the right: the same describe-a-model as F2 in the terminal,
-  with **Talk** for speaking it and Settings for the key.
+  with the **microphone** button for speaking it and Settings for the key.
 - **Problems** along the bottom; double-click one to go to it.
 
 `F5` runs, `Shift+F5` stops, `F2` describes, `F3` talks. The text is the
@@ -673,10 +676,22 @@ cmake -S . -B build-gui -DDES_BUILD_GUI=ON -DCMAKE_PREFIX_PATH=<Qt 6>/lib/cmake
 cmake --build build-gui --target des_gui
 ```
 
-`.github/workflows/desktop.yml` builds it on Windows with MSVC and Qt 6.8,
-packages it with `windeployqt` (Qt ships as DLLs beside the exe, as its LGPL
-licence expects) and takes screenshots on the runner. macOS comes next, from
-the same code.
+`.github/workflows/desktop.yml` builds it with Qt 6.8 on both platforms and
+takes screenshots on each runner:
+
+- **Windows**: MSVC, packaged with `windeployqt` (Qt ships as DLLs beside the
+  exe, as its LGPL licence expects) into
+  `DES-Simulator-<version>-windows-x64-desktop.zip`. Unzip, run
+  `DES-Simulator.exe`.
+- **macOS 12+**: one universal binary (Apple Silicon and Intel), bundled by
+  `macdeployqt` into `DES Simulator.app`, ad-hoc signed, on
+  `DES-Simulator-<version>-macos-universal-desktop.dmg`. Drag it to
+  Applications; the first time, *System Settings → Privacy & Security → Open
+  Anyway* (it is not notarised). The bundle asks for the microphone the first
+  time the microphone button is clicked.
+
+A `v*` tag builds both through the same workflow and attaches them to the
+release beside the terminal packages.
 
 ## Describing a model instead of writing it
 

@@ -10,15 +10,19 @@
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QSaveFile>
+#include <QSpinBox>
+#include <QTextBlock>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabWidget>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <sstream>
@@ -38,6 +42,8 @@ MainWindow::MainWindow(const QString& path, QWidget* parent)
     : QMainWindow(parent), m_editor(new ModelEditor(this)), m_flow(new FlowView(this)),
       m_results(new ResultsView(this)), m_tabs(new QTabWidget(this)), m_modules(new QTreeWidget(this)),
       m_problems(new QTreeWidget(this)), m_ask(new AskPanel(this)), m_runPicker(new QComboBox(this)),
+      m_length(new QLineEdit(this)), m_warmUp(new QLineEdit(this)), m_reps(new QSpinBox(this)),
+      m_units(new QComboBox(this)),
       m_compileState(new QLabel(this)), m_progress(new QProgressBar(this)), m_reparseTimer(new QTimer(this)),
       m_runTimer(new QTimer(this)), m_runAction(nullptr), m_stopAction(nullptr) {
     setWindowIcon(QApplication::style()->standardIcon(QStyle::SP_ComputerIcon));
@@ -124,7 +130,7 @@ void MainWindow::buildMenusAndToolbar() {
     auto* describe = model->addAction(st->standardIcon(QStyle::SP_MessageBoxQuestion), "&Describe a model",
                                       this, [this] { m_ask->focusInput(); });
     describe->setShortcut(Qt::Key_F2);
-    auto* talk = model->addAction("&Talk", this, [this] { m_ask->toggleTalk(); });
+    auto* talk = model->addAction(theme::micIcon(), "&Talk", this, [this] { m_ask->toggleTalk(); });
     talk->setShortcut(Qt::Key_F3);
     auto* settings = model->addAction(st->standardIcon(QStyle::SP_FileDialogDetailedView), "Se&ttings...",
                                       this, &MainWindow::openSettings);
@@ -133,18 +139,52 @@ void MainWindow::buildMenusAndToolbar() {
     tb->setMovable(false);
     tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     tb->setIconSize(QSize(18, 18));
-    tb->addAction(newAct);
-    tb->addAction(openAct);
-    tb->addAction(saveAct);
+    // The file buttons as icons alone: the room goes to the run setup.
+    for (QAction* a : {newAct, openAct, saveAct}) {
+        tb->addAction(a);
+        if (auto* b = qobject_cast<QToolButton*>(tb->widgetForAction(a))) b->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    }
     tb->addSeparator();
     tb->addAction(m_runAction);
     tb->addAction(m_stopAction);
-    m_runPicker->setToolTip("Which [Run] record to run");
-    m_runPicker->setMinimumWidth(120);
-    tb->addWidget(m_runPicker);
+    tb->addSeparator();
+
+    // Run setup -- Arena keeps it in a dialog; here it is always in view, and
+    // what it shows is the [Run] record chosen on the left of it.
+    auto label = [&](const QString& t, QWidget* buddy) {
+        auto* l = new QLabel(t, tb);
+        l->setBuddy(buddy);
+        tb->addWidget(l);
+        tb->addWidget(buddy);
+    };
+    m_runPicker->setToolTip("Which [Run] record to run, and to show here");
+    m_runPicker->setMinimumWidth(110);
+    label("Run", m_runPicker);
+    m_length->setPlaceholderText("no limit");
+    m_length->setFixedWidth(80);
+    m_length->setToolTip("Length: stop at this simulated time. Blank runs until the model runs out of events.");
+    label("Length", m_length);
+    m_warmUp->setPlaceholderText("0");
+    m_warmUp->setFixedWidth(64);
+    m_warmUp->setToolTip("Warm-up: statistics measured before this time are discarded.");
+    label("Warm-up", m_warmUp);
+    m_reps->setRange(1, 100000);
+    m_reps->setKeyboardTracking(false);   // one edit when the number is finished, not one per digit
+    m_reps->setFixedWidth(72);
+    m_reps->setToolTip("Replications: independent runs. More than one gives a confidence interval.");
+    label("Replications", m_reps);
+    m_units->addItems({"Seconds", "Minutes", "Hours", "Days"});
+    m_units->setToolTip("Time units: what one unit of time in this model is.");
+    label("Units", m_units);
     tb->addSeparator();
     tb->addAction(describe);
     tb->addAction(settings);
+
+    connect(m_runPicker, &QComboBox::currentIndexChanged, this, [this] { syncRunSetup(); });
+    connect(m_length, &QLineEdit::editingFinished, this, [this] { setRunValue("Length", m_length->text().trimmed()); });
+    connect(m_warmUp, &QLineEdit::editingFinished, this, [this] { setRunValue("Warm-up", m_warmUp->text().trimmed()); });
+    connect(m_reps, &QSpinBox::valueChanged, this, [this](int v) { setRunValue("Replications", QString::number(v)); });
+    connect(m_units, &QComboBox::currentTextChanged, this, [this](const QString& u) { setRunValue("Time Units", u); });
 }
 
 void MainWindow::buildDocks() {
@@ -239,12 +279,98 @@ void MainWindow::reparse() {
                                                              warnings ? QString(" (%1 warning%2)").arg(warnings).arg(warnings == 1 ? "" : "s") : ""));
     m_runAction->setEnabled(!empty && errors == 0 && !m_run);
 
+    const int pickedAt = m_runPicker->currentIndex();
     const QString picked = m_runPicker->currentText();
-    m_runPicker->clear();
-    for (const std::string& n : des::runNames(m_document)) m_runPicker->addItem(QString::fromStdString(n));
-    if (m_runPicker->count() == 0) m_runPicker->addItem("(default)");
-    const int keep = m_runPicker->findText(picked);
-    if (keep >= 0) m_runPicker->setCurrentIndex(keep);
+    {
+        const QSignalBlocker quiet(m_runPicker);
+        m_runPicker->clear();
+        for (const std::string& n : des::runNames(m_document)) m_runPicker->addItem(QString::fromStdString(n));
+        if (m_runPicker->count() == 0) m_runPicker->addItem("(default)");
+        // By name, so renaming another run does not move the choice; by
+        // position when the chosen one itself was renamed.
+        int keep = m_runPicker->findText(picked);
+        if (keep < 0 && pickedAt < m_runPicker->count()) keep = pickedAt;
+        if (keep >= 0) m_runPicker->setCurrentIndex(keep);
+    }
+    syncRunSetup();
+}
+
+// Shows the chosen [Run]'s fields, without echoing them back as edits, and
+// leaves alone a field that is being typed in.
+void MainWindow::syncRunSetup() {
+    const std::size_t r = static_cast<std::size_t>(qMax(0, m_runPicker->currentIndex()));
+    const bool has = r < m_document.rowCount("Run");
+    auto cell = [&](const char* col) {
+        return has ? QString::fromStdString(m_document.cell("Run", r, col)) : QString();
+    };
+    const QSignalBlocker b1(m_length), b2(m_warmUp), b3(m_reps), b4(m_units);
+    if (!m_length->hasFocus()) m_length->setText(cell("Length"));
+    if (!m_warmUp->hasFocus()) m_warmUp->setText(cell("Warm-up"));
+    if (!m_reps->hasFocus()) m_reps->setValue(qMax(1, cell("Replications").toInt()));
+    const QString units = has ? QString::fromStdString(m_document.cellOrDefault("Run", r, "Time Units")) : "Minutes";
+    const int u = m_units->findText(units, Qt::MatchFixedString);
+    if (u >= 0) m_units->setCurrentIndex(u);
+}
+
+// Writes one field of the chosen [Run] into the text, as one undoable edit:
+// the existing line rewritten with its key as it was typed, or a new line
+// after the record's last field. A model with no [Run] gets one at the top.
+void MainWindow::setRunValue(const QString& column, const QString& value) {
+    reparse();   // line numbers as the text is now, not as of the last pause in typing
+    const std::size_t r = static_cast<std::size_t>(qMax(0, m_runPicker->currentIndex()));
+    QTextDocument* doc = m_editor->document();
+    QTextCursor c(doc);
+    if (r >= m_document.rowCount("Run")) {
+        if (value.isEmpty()) return;
+        // After a leading "version = 1", if there is one.
+        QTextBlock first = doc->firstBlock();
+        QString head = "[Run]\nName = Setup\n" + column + " = " + value + "\n\n";
+        if (first.text().trimmed().startsWith("version")) {
+            c.setPosition(first.position() + first.length() - 1);
+            head = "\n\n" + head.chopped(2);
+        }
+        c.insertText(head);
+        reparse();
+        return;
+    }
+    const std::size_t header = m_document.rows("Run")[r].headerLine;   // 1-based
+    QTextBlock b = doc->findBlockByNumber(static_cast<int>(header));   // the line after it
+    QTextBlock found, last = doc->findBlockByNumber(static_cast<int>(header) - 1);
+    for (; b.isValid(); b = b.next()) {
+        const QString t = b.text().trimmed();
+        if (t.startsWith('[')) break;
+        if (t.isEmpty() || t.startsWith('#') || t.startsWith(';')) continue;
+        last = b;
+        const int eq = t.indexOf('=');
+        if (eq > 0 && t.left(eq).trimmed().compare(column, Qt::CaseInsensitive) == 0) found = b;
+    }
+    if (found.isValid()) {
+        const QString line = found.text();
+        const QString now = line.mid(line.indexOf('=') + 1).trimmed();
+        if (now == value) return;
+        c.setPosition(found.position());
+        if (value.isEmpty()) {
+            // The whole line, so an unset field is one the file does not mention.
+            if (found.next().isValid()) {
+                c.setPosition(found.next().position(), QTextCursor::KeepAnchor);
+            } else {   // the last line: take the newline before it instead
+                c.setPosition(found.position() - 1);
+                c.setPosition(found.position() + found.length() - 1, QTextCursor::KeepAnchor);
+            }
+            c.removeSelectedText();
+        } else {
+            c.setPosition(found.position() + line.indexOf('=') + 1);
+            c.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+            c.insertText(" " + value);
+        }
+    } else {
+        if (value.isEmpty() || !last.isValid()) return;
+        // Defaults go unwritten: Time Units already Minutes need no line.
+        if (value == QString::fromStdString(m_document.cellOrDefault("Run", r, column.toStdString()))) return;
+        c.setPosition(last.position() + last.length() - 1);
+        c.insertText("\n" + column + " = " + value);
+    }
+    reparse();
 }
 
 void MainWindow::updateTitle() {

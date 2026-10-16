@@ -67,8 +67,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **A desktop app** (`gui/`, `DES_BUILD_GUI=ON`, branch `desktop-ui`): Qt 6
   Widgets with one design on Windows and macOS -- Modules, the model text with
   errors marked, the flow drawn as a graph, results with a utilisation bar per
-  station, Describe with Talk, and Problems. Built and packaged on Windows by
-  `.github/workflows/desktop.yml`.
+  station, Describe with a microphone button, and Problems. The run setup
+  (which `[Run]`, Length, Warm-up, Replications, time units) sits in the
+  toolbar and edits the text. Built and packaged by
+  `.github/workflows/desktop.yml` for Windows (MSVC, zip) and macOS (universal
+  `.app` on a dmg, with the microphone permission in its `Info.plist`);
+  `release.yml` calls it, so a tag attaches both to the release.
 - `RunController::finalSnapshots()`: each run's stations as they stood when it
   ended, since `snapshot()` is empty once a run's system is gone.
 - On Windows, curl is started with `CreateProcess` and no window instead of

@@ -9,6 +9,7 @@
 
 #pragma once
 #include <QColor>
+#include <QIcon>
 #include <QString>
 
 class QApplication;
@@ -28,6 +29,11 @@ const QColor success(0x16, 0xA3, 0x4A);
 
 // The flowchart blocks, one colour per kind, used by the graph and the palette.
 QColor blockColor(const QString& type);
+
+// A microphone, drawn rather than loaded: no image files to ship, and it
+// takes the palette's colours. Dark when idle, white on the red "recording"
+// background when the button is checked, grey when disabled.
+QIcon micIcon();
 
 void apply(QApplication& app);
 

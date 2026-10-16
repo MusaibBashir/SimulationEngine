@@ -18,6 +18,8 @@ class ModelEditor;
 class QAction;
 class QComboBox;
 class QLabel;
+class QLineEdit;
+class QSpinBox;
 class QProgressBar;
 class QTabWidget;
 class QTimer;
@@ -38,6 +40,8 @@ public:
     // Close without asking about unsaved changes -- for --screenshot, where a
     // "Save first?" dialog would wait for ever for a click nobody can make.
     void discardChanges();
+    // What the toolbar's Run setup does when a field is edited.
+    void setRunField(const QString& column, const QString& value) { setRunValue(column, value); }
 
 protected:
     void closeEvent(QCloseEvent* e) override;
@@ -51,6 +55,12 @@ private:
     QTreeWidget* m_problems;
     AskPanel*    m_ask;
     QComboBox*   m_runPicker;
+    // Run setup, in the toolbar: the chosen [Run]'s fields. Editing one
+    // rewrites that line of the text, so the file stays the one source.
+    QLineEdit*   m_length;
+    QLineEdit*   m_warmUp;
+    QSpinBox*    m_reps;
+    QComboBox*   m_units;
     QLabel*      m_compileState;
     QProgressBar* m_progress;
     QTimer*      m_reparseTimer;
@@ -78,4 +88,6 @@ private:
     void stepRun();
     void finishRun();
     void openSettings();
+    void syncRunSetup();
+    void setRunValue(const QString& column, const QString& value);
 };
