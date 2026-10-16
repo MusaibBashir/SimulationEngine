@@ -185,6 +185,16 @@ option(DES_BUILD_GUI "Build the Qt desktop app (DES-Simulator)" OFF)
 if(DES_BUILD_GUI)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets)
     set(DES_GUI_VERSION "17.0.0" CACHE STRING "The version the Mac bundle reports")
+    # Qt 6.8's WrapOpenGL still links Apple's AGL framework, which newer
+    # Xcode SDKs no longer ship ("ld: framework 'AGL' not found"). Nothing
+    # here uses AGL -- it was deprecated in 10.9 -- so drop it from the link.
+    if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
+        get_target_property(_des_gl_libs WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
+        if(_des_gl_libs)
+            list(FILTER _des_gl_libs EXCLUDE REGEX "AGL")
+            set_target_properties(WrapOpenGL::WrapOpenGL PROPERTIES INTERFACE_LINK_LIBRARIES "${_des_gl_libs}")
+        endif()
+    endif()
     add_executable(des_gui
         gui/main.cpp
         gui/MainWindow.cpp
