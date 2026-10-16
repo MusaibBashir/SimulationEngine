@@ -1,0 +1,225 @@
+# ============================================================================
+# .github/workflows/desktop.yml  --  the Qt desktop app, built and packaged
+# ============================================================================
+# Windows first: MSVC + Qt 6, the suite run on the same compiler, then
+# windeployqt gathers the Qt libraries beside DES-Simulator.exe (LGPL: Qt is
+# shipped as separate DLLs, so it can be replaced) and the folder is zipped.
+# A screenshot is taken on the runner itself, so a layout change can be seen
+# as Windows draws it without anyone opening the zip.
+#
+# macOS: the same code and the same design, built universal (Apple Silicon
+# and Intel in one binary), gathered into DES Simulator.app by macdeployqt,
+# ad-hoc signed and put on a disk image with an Applications shortcut.
+#
+# Runs on a push that touches the app, from the Actions tab with a version,
+# and from release.yml, which attaches both packages to the release.
+
+name: desktop
+
+on:
+  push:
+    branches: [desktop-ui, main]
+    paths:
+      - 'gui/**'
+      - 'src/**'
+      - 'include/**'
+      - 'tui/Microphone.cpp'
+      - 'CMakeLists.txt'
+      - 'packaging/macos/**'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version for the package name, e.g. 17.0.0-desktop.1'
+        required: false
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ inputs.version || format('dev-{0}', github.sha) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDES_BUILD_GUI=ON -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --target des_gui des_tests
+
+      - name: The suite, on the same compiler as the app
+        shell: pwsh
+        run: |
+          .\build\des_tests.exe | Select-String -Pattern 'FAIL|checks passed|skipped'
+          if ($LASTEXITCODE -ne 0) { throw "the suite failed" }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $stage = "dist/DES-Simulator"
+          New-Item -ItemType Directory -Force -Path "$stage/examples" | Out-Null
+          Copy-Item build/DES-Simulator.exe $stage/
+          # --compiler-runtime: the MSVC runtime DLLs go in the folder too, so
+          # nothing has to be installed first.
+          windeployqt --release --compiler-runtime --no-translations --no-system-d3d-compiler --no-opengl-sw "$stage/DES-Simulator.exe"
+          Copy-Item examples/models/*.des "$stage/examples/"
+          Get-ChildItem -Recurse $stage | Measure-Object -Property Length -Sum | ForEach-Object { "{0:N1} MB in the folder" -f ($_.Sum / 1MB) }
+
+      - name: Starts, and draws itself
+        shell: pwsh
+        run: |
+          # The offscreen platform, borrowed from Qt for this one check and
+          # removed again: the shipped folder has only the real one.
+          $stage = "dist/DES-Simulator"
+          Copy-Item "$env:QT_ROOT_DIR/plugins/platforms/qoffscreen.dll" "$stage/platforms/"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          # The offscreen platform keeps its own font list and finds none on
+          # Windows -- every letter came out as a box. The real app, on the
+          # windows platform, uses the system's fonts as normal.
+          $env:QT_QPA_FONTDIR = "$env:WINDIR\Fonts"
+          & "$stage/DES-Simulator.exe" --screenshot flow.png --tab flow "$stage/examples/shared.des" | Out-Null
+          & "$stage/DES-Simulator.exe" --screenshot results.png --tab results --run "$stage/examples/decide.des" | Out-Null
+          Remove-Item "$stage/platforms/qoffscreen.dll"
+          if (!(Test-Path flow.png) -or !(Test-Path results.png)) { throw "the app did not draw itself" }
+
+      - name: Zip
+        shell: pwsh
+        # Windows' own bsdtar, not Compress-Archive: tools/package.sh records why
+        # (backslashes in entry names, which break the zip on a Mac or Linux).
+        run: |
+          Set-Location dist
+          C:\Windows\System32\tar.exe -a -c -f "DES-Simulator-$env:VERSION-windows-x64-desktop.zip" DES-Simulator
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          if-no-files-found: error
+          path: dist/DES-Simulator-*-windows-x64-desktop.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows-screenshots
+          path: |
+            flow.png
+            results.png
+
+  macos:
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ inputs.version || format('dev-{0}', github.sha) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          host: mac
+          target: desktop
+          arch: clang_64     # Qt's macOS libraries are universal already
+          cache: true
+
+      - name: Configure
+        # 12.0: the oldest macOS Qt 6.8 supports.
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DDES_BUILD_GUI=ON \
+                -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
+                -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+                -DDES_GUI_VERSION="$(printf '%s' "$VERSION" | grep -Eo '^[0-9]+\.[0-9]+\.[0-9]+' || echo 17.0.0)"
+
+      - name: Build
+        run: cmake --build build --target des_gui des_tests -j "$(sysctl -n hw.ncpu)"
+
+      - name: The suite, on the same compiler as the app
+        run: |
+          status=0
+          out="$(build/des_tests 2>&1)" || status=$?
+          printf '%s\n' "$out" | grep -E "FAIL|checks passed|skipped" || true
+          [ "$status" -eq 0 ] || { echo "::error::the suite failed (exit $status)"; exit 1; }
+
+      - name: Bundle
+        run: |
+          mkdir -p dist/stage
+          cp -R build/DES-Simulator.app "dist/stage/DES Simulator.app"
+          app="dist/stage/DES Simulator.app"
+          macdeployqt "$app" -always-overwrite
+          archs="$(lipo -archs "$app/Contents/MacOS/DES-Simulator")"
+          echo "architectures: $archs"
+          case " $archs " in *" arm64 "*) ;; *) echo "::error::no Apple Silicon slice"; exit 1 ;; esac
+          case " $archs " in *" x86_64 "*) ;; *) echo "::error::no Intel slice"; exit 1 ;; esac
+          /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$app/Contents/Info.plist"
+          # Nothing but the bundle and the system: Homebrew or the runner's Qt
+          # would be missing on the Mac it is opened on.
+          stray="$(otool -L "$app/Contents/MacOS/DES-Simulator" | grep -E '^[[:space:]]' | awk '{print $1}' \
+                   | grep -vE '^(/usr/lib/|/System/|@rpath/|@executable_path/)' || true)"
+          [ -z "$stray" ] || { echo "::error::links outside the bundle: $stray"; exit 1; }
+          du -sh "$app"
+
+      - name: Starts, and draws itself
+        run: |
+          # The offscreen platform, borrowed from Qt for this one check and
+          # removed again before signing: the shipped app has only Cocoa.
+          app="dist/stage/DES Simulator.app"
+          cp "$QT_ROOT_DIR/plugins/platforms/libqoffscreen.dylib" "$app/Contents/PlugIns/platforms/"
+          export QT_QPA_PLATFORM=offscreen
+          bin="$app/Contents/MacOS/DES-Simulator"
+          "$bin" --screenshot flow-macos.png --tab flow "$PWD/examples/models/shared.des"
+          "$bin" --screenshot results-macos.png --tab results --run "$PWD/examples/models/decide.des"
+          rm "$app/Contents/PlugIns/platforms/libqoffscreen.dylib"
+          test -f flow-macos.png && test -f results-macos.png || { echo "::error::the app did not draw itself"; exit 1; }
+
+      - name: Sign and make the disk image
+        run: |
+          app="dist/stage/DES Simulator.app"
+          # Ad hoc: Apple Silicon will not run unsigned code, and macdeployqt's
+          # edits invalidated the linker's signature. Not notarised -- the
+          # README in the image says how to open it the first time.
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict "$app"
+          mkdir -p dist/stage/examples
+          cp examples/models/*.des dist/stage/examples/
+          sed "s/@VERSION@/$VERSION/" packaging/macos/README_desktop.txt > dist/stage/README.txt
+          ln -s /Applications dist/stage/Applications
+          dmg="dist/DES-Simulator-$VERSION-macos-universal-desktop.dmg"
+          made=0
+          for attempt in 1 2 3; do
+            if hdiutil create -quiet -volname "DES Simulator" -srcfolder dist/stage -ov -format UDZO "$dmg"; then
+              made=1; break
+            fi
+            echo "hdiutil attempt $attempt failed, retrying"; sleep 5
+          done
+          [ $made -eq 1 ] || { echo "::error::could not create the disk image"; exit 1; }
+          ls -la "$dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos
+          if-no-files-found: error
+          path: dist/DES-Simulator-*-macos-universal-desktop.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos-screenshots
+          path: |
+            flow-macos.png
+            results-macos.png

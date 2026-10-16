@@ -136,6 +136,10 @@ public:
     const std::vector<ReplicationResult>&   results() const { return m_results; }
     const std::vector<std::vector<NamedStatistic>>& namedStatistics() const { return m_named; }
     const std::vector<std::vector<double>>& series()  const { return m_series; }
+    // v17: every run's stations and resources as they stood when it ended --
+    // one per run, so two per replication with antithetic pairing. snapshot()
+    // is empty once a run is over, because its system is gone.
+    const std::vector<RunSnapshot>& finalSnapshots() const { return m_finalSnapshots; }
 
     // Drives to the end. Loops on STATE rather than on advance()'s return
     // value: a replication that produced no events at all would return 0 and
@@ -161,6 +165,7 @@ private:
     std::vector<std::vector<NamedStatistic>> m_named;   // v16: per replication
     std::vector<NamedStatistic>       m_firstNamed;     // antithetic pairing
     std::vector<std::vector<double>>  m_series;
+    std::vector<RunSnapshot>          m_finalSnapshots;
     // Taken while the system is alive: report() is a VIEW of a
     // SimulationSystem, and the system does not survive its replication.
     std::ostringstream                m_lastReport;

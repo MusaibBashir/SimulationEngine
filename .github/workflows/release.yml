@@ -192,11 +192,21 @@ jobs:
             dist/DES-Simulator-${{ needs.version.outputs.version }}-macos-universal.dmg
 
   # --------------------------------------------------------------------------
+  # The Qt desktop app, both platforms -- desktop.yml, the same workflow every
+  # push to the app runs, so a release cannot build it differently.
+  # --------------------------------------------------------------------------
+  desktop:
+    needs: version
+    uses: ./.github/workflows/desktop.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  # --------------------------------------------------------------------------
   # Publish only when BOTH platforms packaged cleanly: a release with half its
   # downloads missing is worse than a release a few minutes late.
   # --------------------------------------------------------------------------
   release:
-    needs: [version, windows, macos]
+    needs: [version, windows, macos, desktop]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -209,7 +219,7 @@ jobs:
       - name: Checksums
         working-directory: artifacts
         run: |
-          find windows macos -type f -exec mv {} . \;
+          find windows macos desktop-windows desktop-macos -type f -exec mv {} . \;
           sha256sum DES-Simulator-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 

@@ -76,6 +76,7 @@ docs/*
 !tests/baseline/*.txt
 # The READMEs that go inside the packages are source, not output.
 !packaging/*.txt
+!packaging/**/*.txt
 # Test artefacts written by the suite into the working directory
 /trace_text.md
 /trace_code.md

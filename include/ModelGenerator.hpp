@@ -110,10 +110,14 @@ std::string llmConfigText(const LlmConfig& config);
 // comments, so later defaults still apply. Separate from the save so a test
 // can check it without touching the real file.
 std::string withApiKey(const std::string& existingText, const std::string& key);
+// The same for any one setting -- "model", "reasoning_effort", ...
+std::string withSetting(const std::string& existingText, const std::string& setting,
+                        const std::string& value);
 
 // Writes the key into the settings file, keeping whatever else is there.
 // Created readable by this user alone. False, with the reason, on failure.
 bool saveApiKey(const std::string& key, std::string& error);
+bool saveLlmSetting(const std::string& setting, const std::string& value, std::string& error);
 
 // "gsk_...a1b2": enough to tell two keys apart, never enough to use one.
 std::string maskKey(const std::string& key);

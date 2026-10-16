@@ -64,6 +64,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   with this file's section as the notes. A run from the Actions tab builds
   without publishing.
 
+- **A desktop app** (`gui/`, `DES_BUILD_GUI=ON`, branch `desktop-ui`): Qt 6
+  Widgets with one design on Windows and macOS -- Modules, the model text with
+  errors marked, the flow drawn as a graph, results with a utilisation bar per
+  station, Describe with a microphone button, and Problems. The run setup
+  (which `[Run]`, Length, Warm-up, Replications, time units) sits in the
+  toolbar and edits the text. Built and packaged by
+  `.github/workflows/desktop.yml` for Windows (MSVC, zip) and macOS (universal
+  `.app` on a dmg, with the microphone permission in its `Info.plist`);
+  `release.yml` calls it, so a tag attaches both to the release.
+- `RunController::finalSnapshots()`: each run's stations as they stood when it
+  ended, since `snapshot()` is empty once a run's system is gone.
+- On Windows, curl is started with `CreateProcess` and no window instead of
+  through `_popen`, which from a windowed program flashed a console up for
+  every request.
+
 ### Learned from testing on Qwen 3.8 27B
 
 Each of these was a wrong model on a real run, and each is now handled in code
