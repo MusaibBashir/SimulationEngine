@@ -1,6 +1,7 @@
 #include "TuiRender.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <string>
 #include <vector>
 #include "ModuleSchema.hpp"
@@ -176,6 +177,8 @@ Layout layoutFor(const TuiState& state, int width, int height) {
         L.tabEnd.push_back(x + w);
         x += w;
     }
+    L.askStart = x + 1;
+    L.askEnd   = L.askStart + static_cast<int>(std::string(ASK_LABEL).size()) + 2;
 
     // The palette is fixed at fourteen columns of label. Every module type
     // this project has fits, and a palette that resized with its longest entry
@@ -217,7 +220,8 @@ namespace {
 
 void renderBar(const TuiState& state, Screen& screen, const Layout& L) {
     const std::string name = state.path() + (state.dirty() ? "*" : "");
-    const int nameRoom = std::min(static_cast<int>(name.size()), L.width / 3);
+    const int nameRoom = std::max(0, std::min({static_cast<int>(name.size()), L.width / 3,
+                                               L.width - L.askEnd - 2}));
     screen.text(L.width - nameRoom - 1, L.barRow, fitTail(name, nameRoom), Attr::Bold);
 
     for (int i = 0; i < TAB_COUNT; ++i) {
@@ -232,6 +236,8 @@ void renderBar(const TuiState& state, Screen& screen, const Layout& L) {
                     here ? Attr::Reverse : broken ? Attr::Error
                          : (empty ? Attr::Dim : Attr::Normal));
     }
+    screen.text(L.askStart, L.barRow, std::string(" ") + ASK_LABEL + " ",
+                state.overlay() == Overlay::Ask ? Attr::Reverse : Attr::Bold);
 }
 
 void renderPalette(const TuiState& state, Screen& screen, const Layout& L) {
@@ -693,6 +699,93 @@ void renderPrompt(const TuiState& state, Screen& screen, const Layout& L) {
                 Attr::Dim);
 }
 
+// v17: the Ask panel. The conversation above, newest at the bottom; the box
+// for your words below. It says where the words go, every time it is open.
+void renderAsk(const TuiState& state, Screen& screen, const Layout& L) {
+    const int w = std::min(L.width - 6, 96);
+    const int h = L.height - 6;
+    const int x = (L.width - w) / 2;
+    const int y = 2;
+    clearFor(screen, x, y, w, h);
+    const LlmConfig& llm = state.llmConfig();
+    frame(screen, x, y, w, h, "describe the model -- sent to " + llm.host() + ", " + llm.model);
+
+    const int inner = w - 4;
+    const int inputRows = 3;
+    const int inputTop = y + h - 1 - inputRows;
+    const int logBottom = inputTop - 2;
+
+    // Every log line wrapped, then the last ones that fit.
+    struct Row { std::string text; Attr attr; };
+    std::vector<Row> rows;
+    for (const AskLine& line : state.askLog()) {
+        std::string prefix;
+        Attr attr = Attr::Normal;
+        switch (line.kind) {
+            case AskLine::Kind::You:        prefix = "you: ";        attr = Attr::Bold;  break;
+            case AskLine::Kind::Understood: prefix = "understood: "; attr = Attr::Dim;   break;
+            case AskLine::Kind::Assumed:    prefix = "assumed: ";    attr = Attr::Normal; break;
+            case AskLine::Kind::Question:   prefix = "? ";           attr = Attr::Bold;  break;
+            case AskLine::Kind::Error:      prefix = "! ";           attr = Attr::Error; break;
+            case AskLine::Kind::Info:       prefix = "";             attr = Attr::Dim;   break;
+        }
+        bool first = true;
+        for (const std::string& part : wrapText(prefix + line.text, inner - 2)) {
+            rows.push_back({(first ? "" : "  ") + part, attr});
+            first = false;
+        }
+    }
+    const int room = logBottom - (y + 1) + 1;
+    const std::size_t from = rows.size() > static_cast<std::size_t>(room)
+                                 ? rows.size() - static_cast<std::size_t>(room) : 0;
+    int row = y + 1;
+    if (from > 0) screen.text(x + w - 8, y, " more ^ ", Attr::Dim);
+    for (std::size_t i = from; i < rows.size(); ++i)
+        screen.text(x + 2, row++, fit(rows[i].text, inner), rows[i].attr);
+
+    for (int c = x + 1; c < x + w - 1; ++c) screen.text(c, inputTop - 1, "-", Attr::Dim);
+
+    if (state.recording()) {
+        // A meter, so a silent microphone -- muted, or the wrong one -- shows
+        // as a flat bar before anything is sent.
+        const int secs = static_cast<int>(state.recordingSeconds());
+        char clock[16];
+        std::snprintf(clock, sizeof clock, "%d:%02d", secs / 60, secs % 60);
+        const int bars = 20;
+        const int lit = std::min(bars, static_cast<int>(state.recordingLevel() * bars * 1.5f + 0.5f));
+        const std::string meter = "[" + std::string(static_cast<std::size_t>(lit), '#') +
+                                  std::string(static_cast<std::size_t>(bars - lit), ' ') + "]";
+        screen.text(x + 2, inputTop, fit(std::string("* recording ") + clock + "  " + meter, inner), Attr::Error);
+        screen.text(x + 2, inputTop + 1, fit("speak now -- ^T or Enter stops and turns it into text, "
+                                             "Esc throws it away", inner), Attr::Dim);
+        if (!state.askDraft().empty())
+            screen.text(x + 2, inputTop + 2, fit("> " + state.askDraft(), inner), Attr::Dim);
+        return;
+    }
+    if (state.transcribing()) {
+        screen.text(x + 2, inputTop, fit("turning speech into text with " + llm.sttModel +
+                                         " ...   Esc stops waiting", inner), Attr::Bold);
+        return;
+    }
+    if (state.askBusy()) {
+        screen.text(x + 2, inputTop, fit("asking " + llm.model + " ...   Esc stops waiting", inner),
+                    Attr::Bold);
+        return;
+    }
+    // A key is shown as stars with its last four, so it can be checked
+    // against the provider's page without being readable over a shoulder.
+    std::string shown = state.askDraft();
+    if (state.enteringKey() && shown.size() > 4)
+        shown = std::string(shown.size() - 4, '*') + shown.substr(shown.size() - 4);
+    const std::string label = state.enteringKey() ? "API key: " : "> ";
+    std::vector<std::string> lines = wrapText(label + shown + "_", inner);
+    if (lines.empty()) lines.push_back(label + "_");
+    const std::size_t first = lines.size() > static_cast<std::size_t>(inputRows)
+                                  ? lines.size() - static_cast<std::size_t>(inputRows) : 0;
+    for (std::size_t i = first; i < lines.size(); ++i)
+        screen.text(x + 2, inputTop + static_cast<int>(i - first), fit(lines[i], inner));
+}
+
 void renderResults(const TuiState& state, Screen& screen, const Layout& L) {
     frame(screen, 0, L.bodyTop, L.width, L.bodyBottom - L.bodyTop + 1,
           state.haveResults() ? "results: " + state.resultsOf() : "results");
@@ -830,6 +923,7 @@ void renderKeyMap(Screen& screen, const Layout& L) {
         {"^J",           "jump to the first error"},
         {"^T",           "write a working model into an empty file"},
         {"^R",           "run; on the Runs tab A adds a run, Del deletes one"},
+        {"F2  F3",       "describe a model in words; F3 starts by talking"},
         {"^N",           "a new model, asking for its name"},
         {"^W",           "save the results to a file"},
         {"^S",           "save the model"},
@@ -871,6 +965,11 @@ const char* hintFor(const TuiState& state) {
             }
             break;
         case Overlay::Prompt:  return "Enter accepts   Esc cancels";
+        case Overlay::Ask:
+            if (state.recording())   return "^T or Enter  stop and transcribe   Esc  throw it away";
+            if (state.askBusy())     return "Esc  stop waiting";
+            if (state.enteringKey()) return "Enter saves the key   Esc leaves it as it was   ^V paste";
+            return "Enter sends   ^T talk   Esc closes   ^K API key   ^V paste   ^U clear";
         case Overlay::None:    break;
     }
     switch (state.view()) {
@@ -932,6 +1031,7 @@ void render(const TuiState& state, Screen& screen) {
         case Overlay::Picker:  renderPicker(state, screen, L);  break;
         case Overlay::Running: renderRunning(state, screen, L); break;
         case Overlay::Prompt:  renderPrompt(state, screen, L);  break;
+        case Overlay::Ask:     renderAsk(state, screen, L);     break;
         case Overlay::Confirm: break;
         case Overlay::None:    break;
     }

@@ -63,6 +63,14 @@ Downtown riders none, 87% served within 5 minutes. Array Variables
 statistics table with half-widths came with it. The Runs tab is a form now,
 and new models ask for their name.
 
+**v17 (in progress, `voice-agent` branch): describe a model out loud.** Press
+`F2`, say what happens — *"patients arrive every 5 minutes, two nurses do
+triage in 3 to 6 minutes…"* — and a small language model (Qwen 3.8 27B on
+Groq) fills in a short form, from which this project's own code writes the
+model. The language model never writes `.des` text, so what it produces
+compiles; missing facts and overloaded servers come back as questions. See
+**Describing a model instead of writing it** below.
+
 ```cpp
 #include "des.hpp"
 using namespace des;
@@ -342,6 +350,7 @@ spacing and ordering survive because nothing rewrites them.
 | `^J` | jump to the first error |
 | `^T` | write a working model into an empty file |
 | `^R` | run it; on the Runs tab `A` adds a `[Run]` and `Del` deletes one |
+| `F2` | describe a model in words, or speak it — see **Describing a model** below |
 | `^N` | a new model — it asks for the name |
 | `^D` | the Tables tab: variables, arrays, matrices and schedules |
 | `^W` | save the results |
@@ -637,6 +646,173 @@ publish as a GitHub release with the changelog section as its notes and a
 `SHA256SUMS.txt`. A tag with no changelog entry is refused, and nothing is
 published unless both platforms pass. Running the workflow by hand from the
 Actions tab builds a version without publishing it.
+
+## Describing a model instead of writing it
+
+*v17, in progress on the `voice-agent` branch.* Say or type what happens and a
+small language model fills in a short form; this project's own code turns the
+form into the `.des` file. The language model never writes the model itself,
+so whatever it produces compiles.
+
+What it can build: arrival streams, processing steps with their own or shared
+servers, delays, chance branches, and run setup (length, warm-up,
+replications). Assign, Batch, Separate, Record and the rest stay in the editor.
+
+### In the editor: `F2`
+
+Press **`F2`** (or click **Ask F2** on the top bar; on a Mac keyboard F2 may
+need `fn`) and type — or **speak**: `^T` in the panel starts recording, `^T` or
+Enter stops it, and what you said appears in the box (`F3` from anywhere opens
+the panel already recording). Then press Enter:
+
+> customers come thirty an hour, two tellers, about 3 minutes each
+
+The panel shows what was understood ("30 an hour = on average one every 2
+minutes"), every number it had to choose ("No server count was given for
+X-ray, so it has 1", "Discharge: exactly 2 minutes every time, with no
+variation"), and the model replaces the text as **one edit**: `^Z` takes it
+back, `^R` runs it. Type a change ("add a second X-ray machine") to revise it,
+or press Enter on an empty line to close. When a fact is missing, or the
+numbers describe a queue that would grow for ever, it asks instead of guessing:
+
+> ? Teller would be busy 150% of the time with 1 server ... How many servers does Teller have?
+
+and the answer goes in the same box — a bare number is enough. The request runs
+in the background, so the screen keeps drawing; `Esc` stops waiting. Check
+spoken numbers before pressing Enter: "fifteen" and "fifty" sound alike.
+
+| In the panel | |
+|---|---|
+| `Enter` | send; while recording, stop; on an empty line after a finished model, close |
+| `^T` | start recording; again to stop and turn it into text |
+| `Esc` / `F2` | throw a recording away, stop waiting, or close |
+| `^K` | enter or change the API key |
+| `^V` `^U` | paste, clear the line |
+
+### Speaking
+
+`^T` records from the default microphone (16 kHz mono, up to two minutes),
+with a clock and a level meter — a flat meter means the wrong or a muted
+microphone. On stop, the recording goes to Whisper (`whisper-large-v3-turbo`)
+on the same Groq account with the same key, and the transcript lands **in the
+box, not sent**: read it, fix any misheard number ("fifteen" and "fifty" sound
+alike), and press Enter. Several recordings add up in the box. Recording uses
+[miniaudio](https://miniaud.io) (public domain, in `third_party/`) — WASAPI on
+Windows, Core Audio on a Mac — so nothing needs installing.
+
+The first time, the operating system may ask for microphone access: on
+Windows, *Settings → Privacy & security → Microphone* must let desktop apps
+use it; on a Mac, allow **Terminal** in *System Settings → Privacy & Security →
+Microphone*. The operating system's own speech typing (`Win+H`, Dictation)
+still works in the box too, with no key at all.
+
+A description that exercises everything it can build, and builds with no
+questions:
+
+> Patients arrive at a clinic on average every 5 minutes. Registration takes
+> between 2 and 4 minutes with one clerk. Then they walk to the waiting room,
+> which takes about 1 minute. Triage takes 3 to 6 minutes by a nurse. There are
+> 2 nurses, and the same nurses also do discharge, which takes exactly 2
+> minutes. After triage, 30% go straight to discharge and the rest see one of 3
+> doctors for about 15 minutes. After the doctor, 20% need an X-ray that takes
+> 10 minutes, and then everyone goes to discharge. Run a 12 hour day, 5 times.
+
+It should give a `[Resource] Nurses` used by both Triage and Discharge, two
+`[Decide]` blocks, the walk as a `[Delay]`, and X-ray's `Next` as Discharge.
+
+### The key and the settings
+
+The first time, the panel asks for an API key — free from
+[console.groq.com/keys](https://console.groq.com/keys). Paste it and press
+Enter; `^K` changes it later. It is saved for you alone, never in a model file,
+and shown only as `gsk_...wxyz`. The panel's title always says where your
+words are sent.
+
+The settings file is `%APPDATA%\DES Simulator\llm.conf` on Windows and
+`~/Library/Application Support/DES Simulator/llm.conf` on a Mac:
+
+```
+base_url = https://api.groq.com/openai/v1
+model = qwen/qwen3.8-27b
+api_key = gsk_...
+reasoning_format =
+reasoning_effort =
+```
+
+Every line but `api_key` may be left out or blank, and the defaults apply.
+
+- **`model`** — Qwen 3.8 27B on Groq by default. Groq lists it as a *preview*
+  model; if it is ever withdrawn, put any other Groq model's name here.
+- **`reasoning_format`** — leave blank. Groq refuses JSON mode with a
+  reasoning model unless this is `hidden` or `parsed`, so for a Qwen 3 model
+  `hidden` is sent automatically; other models get nothing.
+- **`reasoning_effort`** — blank sends nothing (Groq's default). `none` turns
+  Qwen's thinking off: faster and cheaper, possibly less careful. `low`,
+  `medium`, `high` think more.
+- **`stt_model`, `stt_language`** — speech-to-text: `whisper-large-v3-turbo` by
+  default (`whisper-large-v3` is the slower, more accurate one). Set
+  `stt_language = en` (or `hi`, …) if Whisper guesses the language wrong.
+- **Other providers** — `base_url` and `model` point it at any
+  OpenAI-compatible server, for example `http://localhost:11434/v1` and
+  `llama3.1` for Ollama on your own machine, which needs no key and no
+  internet.
+
+`DES_LLM_API_KEY` (or `GROQ_API_KEY`), `DES_LLM_BASE_URL` and `DES_LLM_MODEL`
+override the file for one session.
+
+### From the command line
+
+```
+export DES_LLM_API_KEY=gsk_...        # or use the key saved from the editor
+des generate "customers arrive thirty an hour, two tellers take about 3 minutes each, run an 8 hour day"
+des generate --from model.scenario.json "there are two tellers"     # answering a question
+des new scenario.json -o model.des    # a form written by hand: no language model at all
+```
+
+`generate` writes `model.des` and `model.scenario.json`, the filled-in form.
+It exits 3 while questions remain, printing how to answer them.
+
+### Why a small model is enough
+
+A small model is good at picking facts out of a sentence and bad at
+everything around that, so everything around it is code:
+
+- **Before the call**, a pre-parser turns number words into digits ("half an
+  hour" → 30 minutes), writes the time between arrivals beside every rate
+  ("30 an hour (on average one every 2 minutes)"), and marks "about 15
+  minutes" as the pattern it means. Each of these was a mistake the model
+  made until the hint was there.
+- **The model fills in a form** of about twenty fields, at temperature 0, in
+  JSON mode. Times are chosen from five words — fixed, random, between,
+  around, measured — never distribution syntax.
+- **After the call**, the reader checks every field. A malformed one goes back
+  to the model once, naming the field; a missing one becomes a question for
+  you. A branch whose target is also where everyone else would go ("20% need
+  an X-ray", with no word on the other 80%) sends the rest past it, and says
+  so.
+- **Answers** to a server-count question are filled in by code with no call at
+  all. Other answers go to the model with the question they answer, and its
+  reply is merged onto the form, so a partial reply cannot lose what was
+  already there.
+- **The builder** writes every block, `Next` field and default itself, listing
+  each default as an assumption, then compiles the result.
+
+### If something goes wrong
+
+The error appears in red in the panel.
+
+- **HTTP 401** — the key was refused: `^K` and paste it again.
+- **HTTP 404, "model … does not exist"** — the model name in `llm.conf` is
+  wrong or withdrawn. The first test build wrote
+  `model = llama-3.3-70b-versatile` into that file; later builds ignore that
+  line, or delete it yourself.
+- **HTTP 429** — rate limited: wait a moment and send again.
+- **"no response from …"** — no connection, or a firewall blocking
+  `api.groq.com`.
+- **"could not open the microphone"** — no microphone, or the operating system
+  has not allowed it (see **Speaking**). `Win+H` / Dictation still work.
+- **"no speech-to-text at …"** — the server in `base_url` has no Whisper (a local
+  Ollama, say): speak with `Win+H` / Dictation instead.
 
 ## Documents
 

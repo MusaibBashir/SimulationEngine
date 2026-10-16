@@ -63,7 +63,11 @@ case " $archs " in *" arm64 "*) ;; *) fail "no Apple Silicon slice in des_tui" ;
 case " $archs " in *" x86_64 "*) ;; *) fail "no Intel slice in des_tui" ;; esac
 
 printf '\n=== linked libraries ===\n'
-libs="$(otool -L "$BUILD/des_tui" | tail -n +2 | awk '{print $1}' | sort -u)"
+# Only the INDENTED lines are libraries. A universal binary prints a heading
+# per architecture -- "des_tui (architecture x86_64):" -- and the first version
+# of this skipped only the first heading, read the second as a library, and
+# refused a binary that was fine.
+libs="$(otool -L "$BUILD/des_tui" | grep -E '^[[:space:]]' | awk '{print $1}' | sort -u)"
 printf '%s\n' "$libs" | sed 's/^/  /'
 # libc++ and libSystem are part of macOS itself. Anything outside /usr/lib and
 # /System would have to be installed on the other Mac -- Homebrew's libc++ is the

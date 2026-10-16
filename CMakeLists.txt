@@ -80,6 +80,25 @@ endif()
 target_compile_options(des_engine PRIVATE ${DES_WARNINGS})
 
 # ----------------------------------------------------------------------------
+# v17: models from a description, through a small language model. A THIRD
+# library, linking des_engine and never the reverse, so the engine stays
+# offline and network-free for everybody who never sets a key. Portable code
+# in src/ for the same reason des_ui's is: verify.sh then runs it through
+# every compiler and sanitiser with no change to any gate.
+# ----------------------------------------------------------------------------
+add_library(des_ai STATIC
+    src/Json.cpp
+    src/Scenario.cpp
+    src/ScenarioBuilder.cpp
+    src/PreParse.cpp
+    src/ModelGenerator.cpp
+    src/CurlTransport.cpp
+    src/Speech.cpp
+)
+target_link_libraries(des_ai PUBLIC des_engine)
+target_compile_options(des_ai PRIVATE ${DES_WARNINGS})
+
+# ----------------------------------------------------------------------------
 # The user interface, as a SECOND library. des_ui links des_engine and never
 # the reverse -- that is the whole of the layering, and it is what a repository
 # boundary would otherwise have been protecting.
@@ -100,7 +119,9 @@ add_library(des_ui STATIC
     src/TuiTables.cpp
     src/FlowGraph.cpp
 )
-target_link_libraries(des_ui PUBLIC des_engine)
+# v17: des_ui links des_ai for F2, describe-a-model. Still one direction:
+# nothing in des_ai or des_engine knows a screen exists.
+target_link_libraries(des_ui PUBLIC des_engine des_ai)
 target_compile_options(des_ui PRIVATE ${DES_WARNINGS})
 
 # ----------------------------------------------------------------------------
@@ -113,19 +134,34 @@ target_compile_options(des_demo PRIVATE ${DES_WARNINGS})
 # The CLI takes the name `des`: `des check model.des` is the product and the
 # five-scenario program above is a demo.
 add_executable(des cli/main.cpp)
-target_link_libraries(des PRIVATE des_engine)
+target_link_libraries(des PRIVATE des_ai)
 target_compile_options(des PRIVATE ${DES_WARNINGS})
 
 # The platform half. WIN32 and non-WIN32 sources are mutually exclusive: each
 # includes headers the other platform does not have. Terminal.hpp is not in
 # des_ui.hpp -- it is the platform boundary, and only tui/ includes it.
 if(WIN32)
-    add_executable(des_tui tui/main.cpp tui/Terminal_win32.cpp)
+    add_executable(des_tui tui/main.cpp tui/Terminal_win32.cpp tui/Microphone.cpp)
 else()
-    add_executable(des_tui tui/main.cpp tui/Terminal_posix.cpp)
+    add_executable(des_tui tui/main.cpp tui/Terminal_posix.cpp tui/Microphone.cpp)
 endif()
 target_link_libraries(des_tui PRIVATE des_ui)
 target_compile_options(des_tui PRIVATE ${DES_WARNINGS})
+
+# v17: the microphone. miniaudio is one vendored header, included as a SYSTEM
+# directory so its own warnings do not count against this project's -- the
+# gate is about code written here. What it needs from the platform:
+#   Windows  nothing at link time (WASAPI is loaded when recording starts)
+#   macOS    Core Audio, linked rather than loaded (MA_NO_RUNTIME_LINKING)
+#   Linux    dlopen and threads, for whichever sound server is there
+target_include_directories(des_tui SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio)
+if(APPLE)
+    target_link_libraries(des_tui PRIVATE "-framework CoreFoundation" "-framework CoreAudio"
+                                          "-framework AudioToolbox")
+elseif(UNIX)
+    find_package(Threads REQUIRED)
+    target_link_libraries(des_tui PRIVATE ${CMAKE_DL_LIBS} Threads::Threads m)
+endif()
 if(WIN32)
     # shell32 and ole32 for SHGetKnownFolderPath and CoTaskMemFree, which find
     # the user's REAL Documents folder -- redirected into OneDrive on a great
@@ -135,7 +171,7 @@ if(WIN32)
     target_link_libraries(des_tui PRIVATE shell32 ole32 uuid)
 endif()
 
-add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp tests/v16_tests.cpp tests/tables_tests.cpp tests/flowgraph_tests.cpp)
+add_executable(des_tests tests/tests.cpp tests/harness.cpp tests/expression_tests.cpp tests/document_tests.cpp tests/runtime_tests.cpp tests/tui_tests.cpp tests/v16_tests.cpp tests/tables_tests.cpp tests/flowgraph_tests.cpp tests/scenario_tests.cpp tests/ask_tests.cpp)
 target_link_libraries(des_tests PRIVATE des_ui)
 target_compile_options(des_tests PRIVATE ${DES_WARNINGS})
 

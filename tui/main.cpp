@@ -8,10 +8,15 @@
 
 #include <exception>
 #include <filesystem>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include "des_ui.hpp"
+#include "CurlTransport.hpp"
+#include "Recorder.hpp"
+#include "Speech.hpp"
 #include "Terminal.hpp"
 
 using namespace des;
@@ -58,6 +63,22 @@ int main(int argc, char** argv) {
     const std::string folder = std::filesystem::path(defaultModelPath()).parent_path().string();
     state.setDefaultDirectory(folder.empty() ? std::string(".") : folder);
     state.setOpener([](const std::string& file) { return openWithDefaultApp(file); });
+
+    // v17: F2. The settings file and the environment say which model and
+    // which key; the request itself runs on a thread TuiState starts.
+    state.setLlmConfig(LlmConfig::load());
+    AskHooks hooks;
+    hooks.generate = [](const std::string& text, const JsonValue& previous, const LlmConfig& config) {
+        CurlTransport transport;
+        return generateModel(text, previous, config, transport);
+    };
+    hooks.saveKey = [](const std::string& key, std::string& error) { return saveApiKey(key, error); };
+    hooks.openMicrophone = [](std::string& why) { return openMicrophone(why); };
+    hooks.transcribe = [](const std::string& wav, const LlmConfig& config) {
+        CurlTransport transport(120);   // a minute of audio is ~2 MB to upload
+        return transcribe(wav, config, transport);
+    };
+    state.setAskHooks(std::move(hooks));
     if (!chosen) {
         // A scratch model that was never saved has no name yet. Its first ^S
         // asks for one, rather than every new model becoming untitled.des.
@@ -113,6 +134,17 @@ int main(int argc, char** argv) {
             // advanced and continued without ever reading a key, so Escape was
             // never seen -- and a model with no stopping condition could not be
             // stopped at all.
+            // A question out to the language model: look for its answer
+            // between keys, and redraw the moment it lands. The short sleep is
+            // what keeps a 60-second wait from being a 60-second busy loop.
+            if (state.askBusy()) {
+                state.pollAsk();
+                if (!terminal->keyPending()) {
+                    if (state.askBusy()) std::this_thread::sleep_for(std::chrono::milliseconds(30));
+                    continue;
+                }
+            }
+
             const bool busy = state.running() != nullptr &&
                               (state.running()->state() == RunState::Ready ||
                                state.running()->state() == RunState::Running);

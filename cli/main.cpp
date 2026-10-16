@@ -16,12 +16,17 @@
 // an interface with no caller is an interface nobody has checked.
 
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 #include "des.hpp"
+#include "CurlTransport.hpp"
+#include "ModelGenerator.hpp"
+#include "ScenarioBuilder.hpp"
 
 using namespace des;
 
@@ -54,8 +59,13 @@ int usage() {
     std::cout << "usage: des check   <model.des> [--run <name>]\n"
                  "       des run     <model.des> [until] [--run <name>]\n"
                  "       des regress [dir] [--capture] [--force]\n"
+                 "       des new      <scenario.json> [-o model.des]\n"
+                 "       des generate [--from scenario.json] [-o model.des] <description...>\n"
                  "\n"
-                 "  --run picks one of several [Run] records by its Name.\n";
+                 "  --run picks one of several [Run] records by its Name.\n"
+                 "  generate sends the description to a language model: Groq by default,\n"
+                 "  with the key in DES_LLM_API_KEY (or GROQ_API_KEY). DES_LLM_BASE_URL and\n"
+                 "  DES_LLM_MODEL point it at any OpenAI-compatible server, Ollama included.\n";
     return 2;
 }
 
@@ -87,11 +97,136 @@ int regress(int argc, char** argv) {
 
 }  // namespace
 
+// --- v17: models from a description ------------------------------------------
+
+void printList(const std::string& heading, const std::vector<std::string>& items) {
+    if (items.empty()) return;
+    std::cout << heading << "\n";
+    for (const std::string& i : items) std::cout << "  - " << i << "\n";
+}
+
+void printQuestions(const std::vector<Question>& qs) {
+    if (qs.empty()) return;
+    std::cout << "Still needed:\n";
+    for (const Question& q : qs) std::cout << "  ? " << q.text << "\n";
+}
+
+std::string scenarioPathFor(const std::string& out) {
+    const std::size_t dot = out.rfind(".des");
+    const std::string stem = (dot != std::string::npos && dot + 4 == out.size()) ? out.substr(0, dot) : out;
+    return stem + ".scenario.json";
+}
+
+bool writeText(const std::string& path, const std::string& text) {
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    f << text;
+    return static_cast<bool>(f);
+}
+
+bool readText(const std::string& path, std::string& text) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    text = ss.str();
+    return true;
+}
+
+// A finished model, said once and the same way by both verbs.
+int writeModel(const ModelDocument& doc, const std::string& out) {
+    if (!writeDocumentFile(doc, out)) { std::cout << "des: could not write " << out << "\n"; return 1; }
+    std::cout << "wrote " << out << "   (des run " << out << " to run it, or open it in des_tui)\n";
+    return 0;
+}
+
+// des new scenario.json: the form, filled in by hand or kept from `generate`,
+// becomes a model with no language model involved -- the half of the pipeline
+// that has to be right every time, usable on its own.
+int newFromScenario(int argc, char** argv) {
+    std::string in, out = "model.des";
+    for (int i = 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-o" && i + 1 < argc) out = argv[++i];
+        else if (in.empty()) in = arg;
+        else return usage();
+    }
+    if (in.empty()) return usage();
+    std::string text;
+    if (!readText(in, text)) { std::cout << "des: cannot read " << in << "\n"; return 1; }
+    const JsonParse json = parseJson(text);
+    if (!json.ok) { std::cout << in << ": " << json.error << "\n"; return 1; }
+    const ScenarioRead read = readScenario(json.value);
+    for (const ScenarioIssue& issue : read.invalid)
+        std::cout << in << ": " << (issue.path.empty() ? "" : issue.path + ": ") << issue.message << "\n";
+    if (!read.invalid.empty()) return 1;
+    std::vector<Question> questions = read.questions;
+    if (questions.empty()) questions = loadQuestions(read.scenario);
+    const BuiltScenario built = buildScenario(read.scenario);
+    printList("Assumed:", built.assumptions);
+    printQuestions(questions);
+    if (!questions.empty()) return 3;
+    return writeModel(built.document, out);
+}
+
+int generate(int argc, char** argv) {
+    std::string from, out = "model.des", description;
+    for (int i = 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--from" && i + 1 < argc) { from = argv[++i]; continue; }
+        if (arg == "-o" && i + 1 < argc)     { out = argv[++i];  continue; }
+        if (arg == "--show-prompt")          { std::cout << systemPrompt(); return 0; }
+        description += (description.empty() ? "" : " ") + arg;
+    }
+    if (description.empty()) return usage();
+
+    JsonValue previous;
+    if (!from.empty()) {
+        std::string text;
+        if (!readText(from, text)) { std::cout << "des: cannot read " << from << "\n"; return 1; }
+        const JsonParse p = parseJson(text);
+        if (!p.ok) { std::cout << from << ": " << p.error << "\n"; return 1; }
+        previous = p.value;
+        out = from.size() > 14 && from.compare(from.size() - 14, 14, ".scenario.json") == 0
+                  ? from.substr(0, from.size() - 14) + ".des" : out;
+    }
+
+    const LlmConfig config = LlmConfig::load();
+    if (config.needsKey()) {
+        std::cout << "des: no API key. Set DES_LLM_API_KEY to a Groq key (console.groq.com/keys),\n"
+                     "     or save one from des_tui (F2, then ^K),\n"
+                     "     or point DES_LLM_BASE_URL at a local server such as\n"
+                     "     http://localhost:11434/v1 (Ollama), which needs none.\n";
+        return 1;
+    }
+    // Said every time, on stderr: what leaves the machine, and where to.
+    std::cerr << "asking " << config.model << " at " << config.baseUrl
+              << (config.apiKey.empty() ? std::string() : " (key " + maskKey(config.apiKey) + ")")
+              << " ...\n";
+
+    CurlTransport transport;
+    const GenerateResult r = generateModel(description, previous, config, transport);
+    if (!r.error.empty()) { std::cout << "des: " << r.error << "\n"; return 1; }
+
+    const std::string scenarioPath = scenarioPathFor(out);
+    if (r.scenarioJson.isObject()) writeText(scenarioPath, writeJson(r.scenarioJson, 2) + "\n");
+
+    printList("Understood:", r.notes);
+    printList("Assumed:", r.assumptions);
+    printQuestions(r.questions);
+    if (!r.questions.empty()) {
+        std::cout << "\nAnswer with:\n  des generate --from " << scenarioPath << " \"...\"\n";
+        return 3;
+    }
+    return writeModel(r.document, out);
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) return usage();
     const std::string verb = argv[1];
 
-    if (verb == "regress") return regress(argc, argv);
+    if (verb == "regress")  return regress(argc, argv);
+    if (verb == "new")      return newFromScenario(argc, argv);
+    if (verb == "generate") return generate(argc, argv);
     if (verb != "check" && verb != "run") return usage();
     if (argc < 3) return usage();
 

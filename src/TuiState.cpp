@@ -1,9 +1,11 @@
 #include "TuiState.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <thread>
 #include <utility>
 #include "DocumentFormat.hpp"
 #include "RunSetup.hpp"
@@ -466,9 +468,7 @@ void TuiState::answerConfirm(char c) {
     if (m_confirmFor == ConfirmFor::OpenExisting) {
         if (c == 'y') {
             const std::string path = m_pendingPath;
-            const std::string dir = m_defaultDir;
-            *this = open(path);
-            m_defaultDir = dir;
+            replaceWith(open(path));
             return;
         }
         if (c == 'n') {
@@ -480,10 +480,22 @@ void TuiState::answerConfirm(char c) {
     }
 }
 
+// A new or reopened model replaces the whole state -- but not what belongs to
+// the SESSION. The first version kept only the models folder, so after ^N the
+// picture opener (v16.2) was gone and F2 answered "not available in this
+// build" with the saved key forgotten: everything tui/main.cpp installs at
+// start-up was dropped with the old model. Anything installed there goes here.
+void TuiState::replaceWith(TuiState next) {
+    next.m_defaultDir = std::move(m_defaultDir);
+    next.m_opener     = std::move(m_opener);
+    next.m_askHooks   = std::move(m_askHooks);
+    next.m_llm        = std::move(m_llm);
+    next.m_clip       = std::move(m_clip);
+    *this = std::move(next);
+}
+
 void TuiState::newBlankModel(const std::string& path) {
-    const std::string dir = m_defaultDir;
-    *this = fromText(std::string(), path);
-    m_defaultDir = dir;
+    replaceWith(fromText(std::string(), path));
     setStatus(path + ": a new model -- pick a module on the left, or ^T for a working one");
 }
 
@@ -1154,6 +1166,289 @@ void TuiState::requestQuit() {
     m_confirmFor = ConfirmFor::Quit;
     m_overlay = Overlay::Confirm;
     setStatus("unsaved changes -- (s)ave and quit, (d)iscard and quit, (c)ancel");
+}
+
+// --- describe a model (v17) ----------------------------------------------------
+
+// The request in flight. Shared with the worker, so abandoning it -- Esc, or
+// quitting while it waits -- just drops the UI's reference: the worker writes
+// into an object nobody reads any more, and nothing dangles.
+struct AskJob {
+    std::atomic<bool> done{false};
+    GenerateResult    result;
+};
+
+struct SttJob {
+    std::atomic<bool> done{false};
+    TranscriptResult  result;
+};
+
+void TuiState::startTalking() {
+    if (askBusy()) return;
+    m_overlay = Overlay::Ask;
+    if (m_askKeyEntry) return;
+    if (!m_askHooks.openMicrophone || !m_askHooks.transcribe) {
+        m_askLog.push_back({AskLine::Kind::Error, "Speaking into it is not available in this build -- "
+                                                  "use Win+H (Windows) or Dictation (Mac) instead."});
+        return;
+    }
+    // Transcription goes to the same server with the same key, so a missing
+    // key is asked for first, and the recording starts once it is in.
+    if (m_llm.needsKey()) {
+        m_talkAfterKey = true;
+        m_askKeyEntry = true;
+        m_askDraft.clear();
+        m_askLog.push_back({AskLine::Kind::Info,
+                            "Speech goes to " + m_llm.host() + " with your API key. Paste it below and "
+                            "press Enter; recording starts after. A free one is at console.groq.com/keys."});
+        setStatus("paste the API key and press Enter");
+        return;
+    }
+    std::string why;
+    std::unique_ptr<IRecorder> mic = m_askHooks.openMicrophone(why);
+    if (mic == nullptr || !mic->start(why)) {
+        m_askLog.push_back({AskLine::Kind::Error, why.empty() ? "No microphone could be opened." : why});
+        setStatus("no microphone");
+        return;
+    }
+    m_recorder = std::move(mic);
+    setStatus("recording -- speak, then ^T or Enter to stop; Esc throws it away");
+}
+
+void TuiState::stopTalking() {
+    if (!m_recorder) return;
+    const std::vector<std::int16_t> samples = m_recorder->stop();
+    m_recorder.reset();
+    // Under half a second is a key pressed twice, not something said; sending
+    // it would be billed as ten seconds and come back empty.
+    if (samples.size() < static_cast<std::size_t>(kSpeechSampleRate / 2)) {
+        m_askLog.push_back({AskLine::Kind::Info, "That recording was too short to send."});
+        setStatus("too short -- ^T to try again");
+        return;
+    }
+    auto job = std::make_shared<SttJob>();
+    m_sttJob = job;
+    auto transcribeFn = m_askHooks.transcribe;
+    const LlmConfig config = m_llm;
+    const std::string wav = wavFromPcm16(samples, kSpeechSampleRate);
+    std::function<void()> work = [job, transcribeFn, wav, config] {
+        job->result = transcribeFn(wav, config);
+        job->done.store(true, std::memory_order_release);
+    };
+    setStatus("turning speech into text with " + m_llm.sttModel + " ... Esc stops waiting");
+    if (m_askHooks.launch) m_askHooks.launch(std::move(work));
+    else                   std::thread(std::move(work)).detach();
+}
+
+void TuiState::openAsk() {
+    m_overlay = Overlay::Ask;
+    if (m_askLog.empty())
+        m_askLog.push_back({AskLine::Kind::Info,
+                            "Say or type what happens -- what arrives and how often, what is done to "
+                            "it and how long that takes, how many servers. ^T to speak it instead: "
+                            "press, talk, press again."});
+    setStatus(m_llm.needsKey() ? "no API key yet -- ^K to enter one (console.groq.com/keys)"
+                               : "your words go to " + m_llm.host() + " (" + m_llm.model + ")");
+}
+
+void TuiState::closeAsk() {
+    m_overlay = Overlay::None;
+    m_askKeyEntry = false;
+    m_askDraft.clear();
+    setStatus("");
+}
+
+void TuiState::typeAsk(char c) {
+    // Ignored while waiting: the box is not drawn then, and words typed into
+    // something invisible would be sent with the next Enter by surprise.
+    if (askBusy()) return;
+    // A tab or newline from a paste or from dictation is a space here: the box
+    // holds one description, and Enter is what sends it.
+    m_askDraft.push_back(c == '\t' || c == '\n' || c == '\r' ? ' ' : c);
+}
+
+void TuiState::backspaceAsk() {
+    if (!askBusy() && !m_askDraft.empty()) m_askDraft.pop_back();
+}
+
+void TuiState::pasteIntoAsk(const std::string& text) {
+    for (const char c : text) typeAsk(c);
+}
+
+void TuiState::beginKeyEntry() {
+    if (askBusy()) return;
+    m_askKeyEntry = true;
+    m_askDraft.clear();
+    setStatus("paste the API key and press Enter -- it is saved for you alone, never in a model");
+}
+
+void TuiState::escapeAsk() {
+    if (m_recorder) {
+        m_recorder->stop();
+        m_recorder.reset();
+        m_askLog.push_back({AskLine::Kind::Info, "Recording thrown away. Nothing was sent."});
+        setStatus("recording thrown away");
+        return;
+    }
+    if (m_sttJob) {
+        m_sttJob.reset();
+        m_askLog.push_back({AskLine::Kind::Info, "Stopped waiting for the transcript."});
+        setStatus("stopped waiting");
+        return;
+    }
+    if (askBusy()) {
+        m_askJob.reset();
+        m_askLog.push_back({AskLine::Kind::Info, "Stopped waiting. Nothing was changed."});
+        setStatus("stopped waiting");
+        return;
+    }
+    if (m_askKeyEntry) {
+        m_askKeyEntry = false;
+        m_askDraft.clear();
+        m_askPending.clear();
+        m_talkAfterKey = false;
+        setStatus("key left as it was");
+        return;
+    }
+    closeAsk();
+}
+
+void TuiState::commitAsk() {
+    if (askBusy()) return;
+    const std::string text = trimmed(m_askDraft);
+
+    if (m_askKeyEntry) {
+        if (text.empty()) { setStatus("paste the key first -- Esc leaves it as it was"); return; }
+        std::string error;
+        const bool saved = m_askHooks.saveKey && m_askHooks.saveKey(text, error);
+        m_llm.apiKey = text;
+        m_askKeyEntry = false;
+        m_askDraft.clear();
+        m_askLog.push_back({saved ? AskLine::Kind::Info : AskLine::Kind::Error,
+                            saved ? "Key " + maskKey(text) + " saved."
+                                  : "Key " + maskKey(text) + " will be used until you quit" +
+                                        (error.empty() ? std::string(".") : ", but not saved: " + error)});
+        if (m_talkAfterKey) {
+            m_talkAfterKey = false;
+            startTalking();
+        } else if (!m_askPending.empty()) {
+            const std::string pending = m_askPending;
+            m_askPending.clear();
+            startAsk(pending);
+        } else {
+            setStatus("key set -- now say what happens");
+        }
+        return;
+    }
+
+    if (text.empty()) {
+        // Enter on an empty line after a finished model means "done".
+        if (!m_askBuiltText.empty() && m_askBuiltText == m_buffer.text()) { closeAsk(); return; }
+        setStatus("say or type what happens first -- Esc closes");
+        return;
+    }
+    m_askDraft.clear();
+    if (m_llm.needsKey()) {
+        m_askPending = text;
+        m_askLog.push_back({AskLine::Kind::You, text});
+        m_askLog.push_back({AskLine::Kind::Info,
+                            m_llm.host() + " needs an API key. Paste yours below and press Enter; "
+                            "a free one is at console.groq.com/keys."});
+        m_askKeyEntry = true;
+        setStatus("paste the API key and press Enter");
+        return;
+    }
+    m_askLog.push_back({AskLine::Kind::You, text});
+    startAsk(text);
+}
+
+void TuiState::startAsk(const std::string& text) {
+    if (!m_askHooks.generate) {
+        m_askLog.push_back({AskLine::Kind::Error, "Describing a model is not available in this build."});
+        return;
+    }
+    // The form is only carried forward while the text is still what it built.
+    // Hand edits since then cannot be expressed in the form, so say plainly
+    // that a change from here starts over -- and ^Z still brings them back.
+    JsonValue previous;
+    if (m_askScenario.isObject()) {
+        previous = m_askScenario;
+        if (m_buffer.text() != m_askBuiltText)
+            m_askLog.push_back({AskLine::Kind::Info,
+                                "The text was edited by hand since the last answer; those edits will "
+                                "be replaced (^Z brings them back)."});
+    }
+
+    auto job = std::make_shared<AskJob>();
+    m_askJob = job;
+    auto generate = m_askHooks.generate;
+    const LlmConfig config = m_llm;
+    std::function<void()> work = [job, generate, text, previous, config] {
+        job->result = generate(text, previous, config);
+        job->done.store(true, std::memory_order_release);
+    };
+    setStatus("asking " + m_llm.model + " at " + m_llm.host() + " ... Esc stops waiting");
+    if (m_askHooks.launch) m_askHooks.launch(std::move(work));
+    else                   std::thread(std::move(work)).detach();
+}
+
+void TuiState::pollAsk() {
+    if (m_recorder && m_recorder->seconds() >= MAX_TALK_SECONDS) {
+        m_askLog.push_back({AskLine::Kind::Info, "Stopped recording at two minutes."});
+        stopTalking();
+    }
+    if (m_sttJob && m_sttJob->done.load(std::memory_order_acquire)) {
+        const std::shared_ptr<SttJob> job = std::move(m_sttJob);
+        m_sttJob.reset();
+        const TranscriptResult& t = job->result;
+        if (!t.ok) {
+            m_askLog.push_back({AskLine::Kind::Error, t.error});
+            setStatus("speech-to-text did not work -- see the box");
+        } else if (t.text.empty()) {
+            m_askLog.push_back({AskLine::Kind::Info, "Nothing was heard. ^T to try again."});
+            setStatus("nothing heard");
+        } else {
+            // Into the box, after anything already typed -- never sent. What
+            // was heard is read first, and corrected if "fifty" was "fifteen".
+            if (!m_askDraft.empty() && m_askDraft.back() != ' ') m_askDraft += ' ';
+            m_askDraft += t.text;
+            setStatus("check what was heard, fix any numbers, then Enter -- ^T adds more");
+        }
+    }
+    if (!m_askJob || !m_askJob->done.load(std::memory_order_acquire)) return;
+    const std::shared_ptr<AskJob> job = std::move(m_askJob);
+    m_askJob.reset();
+    GenerateResult& r = job->result;
+
+    if (!r.error.empty()) {
+        m_askLog.push_back({AskLine::Kind::Error, r.error});
+        setStatus("that did not work -- see the box");
+        return;
+    }
+    if (r.scenarioJson.isObject()) m_askScenario = r.scenarioJson;
+    for (const std::string& n : r.notes) m_askLog.push_back({AskLine::Kind::Understood, n});
+    if (!r.ok) {
+        for (const Question& q : r.questions) m_askLog.push_back({AskLine::Kind::Question, q.text});
+        setStatus(r.questions.size() == 1 ? "one thing is still needed -- answer in the box"
+                                          : std::to_string(r.questions.size()) +
+                                                " things are still needed -- answer in the box");
+        return;
+    }
+    for (const std::string& a : r.assumptions) m_askLog.push_back({AskLine::Kind::Assumed, a});
+
+    // ONE edit: select everything, insert the model. TextBuffer records that
+    // as a single undo step, so ^Z puts back exactly what was there.
+    m_buffer.selectAll();
+    m_buffer.insert(writeDocument(r.document));
+    m_buffer.moveToStart();
+    edited();
+    m_askBuiltText = m_buffer.text();
+    m_view = View::Model;
+    m_askLog.push_back({AskLine::Kind::Info,
+                        "Model written into the editor. ^Z undoes it, ^R runs it. Type a change "
+                        "to make (\"add a second teller\"), or press Enter to close."});
+    setStatus(hasErrors(m_diagnostics) ? "model written -- but it has errors, see the E marks"
+                                       : "model written -- ^R runs it, ^Z takes it back");
 }
 
 }  // namespace des
