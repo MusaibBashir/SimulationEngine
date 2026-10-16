@@ -44,7 +44,10 @@ def strip_comments(lines):
             else:
                 s = before
                 in_block = True
-        out.append(re.sub(r'//.*$', '', s))
+        # A // inside a string literal is not a comment: LlmConfig's
+        # "https://..." default lost its closing brace to that, and every free
+        # function after it was listed as a member.
+        out.append(re.sub(r'^((?:[^"/]|"(?:[^"\\]|\\.)*"|/(?!/))*)//.*$', r'\1', s))
     return out
 
 
