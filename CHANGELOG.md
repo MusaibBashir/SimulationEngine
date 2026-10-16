@@ -5,7 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [Unreleased] — v17, on `voice-agent` — "Describe a model out loud"
+## [17.0.0] — 2026-10-16 — "Describe a model out loud"
+
+The reasoning, and what testing on a real model taught, are in
+`V17_READLOG.md`.
 
 ### Added
 
@@ -63,8 +66,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   `tools/package.sh` and the new `tools/package_macos.sh`, then publishes them
   with this file's section as the notes. A run from the Actions tab builds
   without publishing.
-
-- **A desktop app** (`gui/`, `DES_BUILD_GUI=ON`, branch `desktop-ui`): Qt 6
+- **A desktop app** (`gui/`, `DES_BUILD_GUI=ON`): Qt 6
   Widgets with one design on Windows and macOS -- Modules, the model text with
   errors marked, the flow drawn as a graph, results with a utilisation bar per
   station, Describe with a microphone button, and Problems. The run setup
@@ -119,6 +121,10 @@ rather than by asking the model more firmly:
   as `ÔÇª`; it is three dots now.
 - `packaging/README_macos.txt` was ignored by the `*.txt` rule in
   `.gitignore`.
+- The reference manual's header reader took the `//` in `"https://..."` for a
+  comment and listed the free functions after `LlmConfig` as its members.
+- macOS: Qt 6.8 links the AGL framework, which newer Xcode SDKs no longer
+  ship; it is filtered out of the desktop app's link.
 
 ---
 

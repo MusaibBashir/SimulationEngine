@@ -7,7 +7,7 @@ the call-flow chapters. Prose is passed to reportlab as markup, so use &amp;,
 &lt; and &gt; rather than the bare characters.
 """
 
-VERSION_LINE = "v16.2 — the flow as a graph · 1740 checks · 146 types"
+VERSION_LINE = "v17 — describe a model out loud · 1943 checks · 171 types"
 
 FRONT_MATTER = (
     "A discrete-event simulation engine in the spirit of Arena's Basic Process "
@@ -73,6 +73,33 @@ TYPE_DOC = {
     "TablesFocus": "Which of the Tables tab's three panels has the keyboard: the kinds, the editor, or the list.",
     "TableIssue": "A compiler diagnostic that landed in the tables section, put on the table it is about -- so the list can mark it, the editor can show it, and the tab can count it.",
     "TableGrid": "Where the current table's grid is on screen: its top row, how many rows and columns are in view, and the first of each. Worked out once, so a click is turned back into a cell by the arithmetic that drew it.",
+
+    # -- describing a model (v17)
+    "Pattern": "How a duration varies, in the words a person uses rather than distribution names: Fixed is CONS, Random EXPO, Between UNIF, Around TRIA, Measured LOGN. A small language model picks a word far more reliably than it picks a distribution.",
+    "TimeSpec": "A duration as the form holds it: a pattern, a unit, and whichever of mean, min, max and sd the pattern needs. The unit travels with the numbers, so 'half an hour' and '30 minutes' arrive as the same thing.",
+    "ArrivalStream": "One stream of arrivals: how often, how many at a time, how many in all, and the step they go to first. Empty firstStep means the first step listed.",
+    "SharedResource": "A pool of servers more than one step draws on -- the two nurses who do both triage and discharge. Becomes a [Resource] the steps' Process rows name.",
+    "StepKind": "Whether a step queues for servers (Process) or just takes time (Delay).",
+    "Step": "One thing done to an arrival: its own servers or a shared resource, how long it takes, the queue rule, an optional balking length, and where it goes next -- another step, 'exit', or empty for the next one listed.",
+    "Branch": "A chance of going somewhere else after a step: from, to and a probability. Branches out of one step become one Decide; whatever is left over follows the step's Next.",
+    "Scenario": "The form a language model fills in, about twenty fields: time unit, run setup, arrivals, resources, steps and branches. The model never writes .des text; this is everything it is allowed to say, and ScenarioBuilder turns it into a model.",
+    "ScenarioIssue": "A field the reader could not use, by path (steps[1].time) and why. Sent back to the language model once, by name, before anything reaches the person.",
+    "Question": "A fact the form is missing, with the field it fills and the sentence asking for it. Asked of the person, because only they know how many tellers there are.",
+    "ScenarioRead": "What readScenario() made of a reply: the scenario, the malformed fields, the questions, and every adjustment it made because the form read literally could not be what was meant.",
+    "StepLoad": "A step's (or shared resource's) arrival rate from the traffic equations and the share of its capacity that would use. At or above 100% the model never reaches steady state, so it becomes a question rather than a model.",
+    "BuiltScenario": "The model ScenarioBuilder wrote, and every default it chose along the way, each said out loud as an assumption.",
+    "PreParsed": "The description with its numbers normalised -- number words to digits, rates with their gap written beside them, 'about N' marked -- and a note for each change, shown as 'Understood'.",
+    "HttpResponse": "One HTTP reply, or why there was none. ok means a response arrived at all; status is then the HTTP code.",
+    "ITransport": "One HTTPS POST, and a multipart upload for audio. An interface so the whole pipeline runs in the suite against recorded replies with no network -- the same reason the terminal is one.",
+    "LlmConfig": "Where descriptions go and how: base URL, model, key, reasoning settings, and the speech-to-text model and language. Loaded from the per-user llm.conf, then the environment over it. Qwen 3.8 27B on Groq by default; any OpenAI-compatible server works.",
+    "GenerateResult": "One round of generateModel(): the model built, or the questions still open, with the form as filled in (feed it back as previous), the assumptions, what the pre-parser worked out, and how many requests it cost. ok only when a model was built with nothing left to ask.",
+    "CurlTransport": "ITransport through the system's own curl, which ships with Windows 10/11 and every macOS. The key and body go in owner-only temporary files, never on a command line; on Windows curl starts with no console window.",
+    "TranscriptResult": "What Whisper heard, trimmed, or why it could not say. Empty text is not an error: nothing was said.",
+    "JsonValue": "A JSON value with keys kept in insertion order, so a request body is written in the order it was built and a test can compare it as text. A lookup of a missing key returns a shared null, so a chain into an answer that left something out reads as null rather than crashing.",
+    "JsonParse": "A parsed value, or the line and reason it could not be.",
+    "IRecorder": "The microphone, as an interface: start, stop and hand over the samples, how long so far, and a level for a meter. The real one is miniaudio (WASAPI, Core Audio); the suite supplies a fake, so the talk-and-transcribe flow runs without a sound card.",
+    "AskLine": "One line of the Ask panel's conversation, with its kind -- what you said, what was understood, an assumption, a question, an error -- so each is drawn its own way.",
+    "AskHooks": "How F2 reaches the outside world: generate, save a key, run work in the background, open the microphone, transcribe. Installed by tui/main.cpp; a test installs fakes, so the panel is driven with no network and no thread.",
 
     # -- runtime control (v12)
     "RunState": "Where a run has got to: Ready, Running, Paused, Finished, Cancelled or Failed. Finished and Cancelled are terminal, and advance() on either returns 0 rather than throwing -- a front end that polls past the end is normal, not wrong.",
@@ -243,6 +270,22 @@ MEMBER_DOC = {
     "Key::shifted": "An arrow or a Home/End with Shift held, which is what extends a selection. Shift rides ALONGSIDE the kind rather than doubling it, so there is one Left in every switch rather than two that can disagree.",
     "Key::function": "A function key, carrying its number. F1 opens the key map.",
     "Key::mouse": "A click or a wheel turn at a screen position. Screen coordinates, so the renderer's layout decides what was hit -- the terminal layer does not know what a palette is.",
+    "LlmConfig::fromEnvironment": "The defaults with DES_LLM_BASE_URL, DES_LLM_MODEL and DES_LLM_API_KEY (or GROQ_API_KEY) laid over them.",
+    "LlmConfig::load": "llm.conf from the user's settings folder, then the environment over it: a variable set for one session is a deliberate override of what was saved.",
+    "JsonValue::boolean": "A true or false value.",
+    "JsonValue::number": "A number. JSON has one kind, so this is a double.",
+    "JsonValue::string": "A string value.",
+    "JsonValue::array": "An empty array, to push() into.",
+    "JsonValue::object": "An empty object, to set() into. Keys keep the order they were set in.",
+    "JsonValue::push": "Appends to an array.",
+    "JsonValue::operator[]": "The member with this key, or a shared null when there is none -- so value[\"steps\"][\"x\"] on an answer that left steps out reads as null instead of crashing.",
+    "JsonValue::set": "Sets a member, replacing one with the same key in place so the order does not change.",
+    "IRecorder::start": "Starts capturing mono 16-bit samples at 16 kHz. False, with the reason -- usually a privacy setting, which the message names -- when there is no microphone or it may not be used.",
+    "IRecorder::stop": "Stops, and hands over everything captured since start().",
+    "IRecorder::seconds": "How much has been captured so far, for the clock beside the meter.",
+    "IRecorder::level": "The recent peak, 0 to 1, falling back gently so the meter does not flicker to nothing between words.",
+    "TuiState::typeAsk": "One character into the Ask panel's box. Ignored while a request or a transcription is in flight, so nothing typed then is sent unseen.",
+    "TuiState::pasteIntoAsk": "Pasted text into the Ask box, newlines turned into spaces -- the box is one description, and Enter is what sends it.",
     "TuiState::fromText": "A state around text already in memory rather than a file on disk. The tests use it so the suite does not need a file for every case, and so a test that SAVES cannot accidentally depend on what a previous run left at that path.",
     "TuiState::buffer": "The text being edited. The non-const overload is how the input layer moves the caret and extends selections; anything that CHANGES the text goes through the editing members instead, so nothing can alter it without the document and the diagnostics catching up.",
     "TuiState::insertText": "Inserts text at the caret, replacing the selection, and re-reads. What a paste and the starter model both go through.",
@@ -959,7 +1002,50 @@ CHAPTERS = [
     "cell rather than the first."),
   ]),
 
- (15, "Free Functions",
+ (15, "Describing a Model",
+  "v17: a model from words, typed or spoken, with the language model kept away from the .des text.",
+  [
+   ("text", "A small language model is good at reading a sentence and bad at arithmetic and "
+            "at a file format it has never seen. So it is given neither. The pipeline is: "
+            "<b>preParse()</b> normalises the numbers; the model fills in a <b>Scenario</b> "
+            "form in JSON mode at temperature 0; <b>readScenario()</b> checks every field, "
+            "sends a malformed one back once by name and turns a missing one into a "
+            "Question; <b>offeredLoads()</b> solves the traffic equations and an overloaded "
+            "step becomes a question too; <b>buildScenario()</b> writes every block, Next and "
+            "default, listing each default as an assumption; and the result is compiled "
+            "before anyone sees it. Whatever comes back, compiles."),
+   ("text", "An answer to a question goes back with the form so far as <i>previous</i>, and "
+            "the reply is laid over it by mergeScenarioJson() rather than replacing it: a "
+            "small model sends back only what it changed, however it is told. A bare count "
+            "for a server question is filled in by code with no call at all."),
+   ("types", ["Pattern", "TimeSpec", "ArrivalStream", "SharedResource", "StepKind", "Step",
+              "Branch", "Scenario", "ScenarioIssue", "Question", "ScenarioRead", "StepLoad",
+              "BuiltScenario", "PreParsed"]),
+   ("h3", "Reaching the provider"),
+   ("text", "Everything that leaves the machine goes through ITransport. CurlTransport is "
+            "the real one; the suite records replies and replays them. LlmConfig is read "
+            "from llm.conf in the user's own settings folder -- never beside a model, so a "
+            "key cannot be emailed with a .des file -- and saving one setting rewrites that "
+            "one line, so later defaults still apply."),
+   ("types", ["HttpResponse", "ITransport", "LlmConfig", "GenerateResult", "CurlTransport", "JsonValue",
+              "JsonParse"]),
+   ("h3", "Speaking into it"),
+   ("text", "F3, ^T in the panel, or the microphone button in the desktop app records 16 kHz "
+            "mono through IRecorder; wavFromPcm16() wraps it and transcribe() sends it to "
+            "Whisper on the same server with the same key. The transcript goes into the box "
+            "to be read and corrected first -- speech recognition hears 'fifteen' for "
+            "'fifty', and a model built on a misheard rate compiles and is wrong."),
+   ("types", ["TranscriptResult", "IRecorder", "AskLine", "AskHooks"]),
+   ("h3", "The desktop app"),
+   ("text", "gui/ is a Qt 6 Widgets front end over the same libraries -- one design on "
+            "Windows and macOS (Fusion style, one palette). Its views are re-derived from the "
+            "text after every edit, as in the terminal UI; the run setup in its toolbar "
+            "rewrites lines of the [Run] block. RunController::finalSnapshots() gives it each "
+            "replication's stations as they stood at the end, for the utilisation chart. "
+            "It is not part of this manual's API: nothing links against it."),
+  ]),
+
+ (16, "Free Functions",
   "The factories and helpers that are not members of anything.",
   [
    ("h3", "Distribution factories, from Build.hpp"),
@@ -987,6 +1073,30 @@ CHAPTERS = [
               ["whenDrained()", "the system is empty, which may be a transient gap."],
               ["anyOf(a, b, ...)", "any composed rule fires."]],
     [0.36, 0.64]),
+   ("h3", "Describing a model (v17)"),
+   ("table", [["Function", "Does"],
+              ["generateModel(words, previous, config, transport)", "One round: pre-parse, ask, "
+               "read, merge onto previous, check the load, build, compile."],
+              ["preParse(description)", "Number words to digits, rates with their gaps, "
+               "'about N' marked; a note per change."],
+              ["readScenario(json)", "The form, checked: malformed fields, questions, "
+               "adjustments. Never throws."],
+              ["mergeScenarioJson(previous, update)", "An answer laid over the form so far; "
+               "rows matched by name."],
+              ["offeredLoads(s), loadQuestions(s)", "The traffic equations, and a question "
+               "for every step at or above 100%."],
+              ["buildScenario(s)", "The .des model and every default chosen, as assumptions."],
+              ["expressionFor(t, unit)", "A duration as an expression: EXPO(2), UNIF(1, 3)."],
+              ["blockNameFor(words)", "'check in desk' to CheckInDesk."],
+              ["parseLlmConfig, withSetting, saveLlmSetting", "llm.conf read, one line "
+               "changed, written back owner-only."],
+              ["maskKey(key)", "gsk_...wxyz: enough to tell keys apart, never to use one."],
+              ["wavFromPcm16(samples, rate)", "A complete 16-bit mono WAV file."],
+              ["transcribe(wav, config, transport)", "What Whisper heard. Never throws."],
+              ["openMicrophone(whyNot)", "The default microphone, through miniaudio."],
+              ["parseJson, parseJsonObjectIn, writeJson", "JSON in and out; the second finds "
+               "the object inside a reply wrapped in prose or a fence."]],
+    [0.46, 0.54]),
    ("h3", "The platform boundary, from Terminal.hpp"),
    ("text", "The only functions that differ by operating system. Everything above them "
             "is a value a test can inspect; these are the part that cannot be."),

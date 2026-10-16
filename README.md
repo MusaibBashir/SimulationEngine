@@ -11,7 +11,7 @@ out the offered load by walking the flowchart and summing across every block tha
 shares a resource. Random number generation is built from a single `u01()`
 primitive, with pluggable engines, generator-quality tests, twelve distributions,
 and both major variance-reduction techniques. Builds clean under
-`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1740/1740 unit checks pass; a
+`-Wall -Wextra -Wpedantic` and ASan/UBSan; 1943/1943 unit checks pass; a
 deterministic run still reproduces a hand-worked table event for event.
 
 **v10: a model can be written as text.** Every duration, condition and
@@ -63,13 +63,14 @@ Downtown riders none, 87% served within 5 minutes. Array Variables
 statistics table with half-widths came with it. The Runs tab is a form now,
 and new models ask for their name.
 
-**v17 (in progress, `voice-agent` branch): describe a model out loud.** Press
+**v17: describe a model out loud.** Press
 `F2`, say what happens — *"patients arrive every 5 minutes, two nurses do
 triage in 3 to 6 minutes…"* — and a small language model (Qwen 3.8 27B on
 Groq) fills in a short form, from which this project's own code writes the
 model. The language model never writes `.des` text, so what it produces
 compiles; missing facts and overloaded servers come back as questions. See
-**Describing a model instead of writing it** below.
+**Describing a model instead of writing it** below. v17 also brings a
+**desktop app** for Windows and macOS, with the same features in a window.
 
 ```cpp
 #include "des.hpp"
@@ -695,7 +696,7 @@ release beside the terminal packages.
 
 ## Describing a model instead of writing it
 
-*v17, in progress on the `voice-agent` branch.* Say or type what happens and a
+*v17.* Say or type what happens and a
 small language model fills in a short form; this project's own code turns the
 form into the `.des` file. The language model never writes the model itself,
 so whatever it produces compiles.
@@ -880,6 +881,8 @@ The error appears in red in the panel.
 | `V14_READLOG.md` | Building a model from nothing: pick lists, the starter model, and four bugs only looking found |
 | `V15_READLOG.md` | The grid becomes a text editor, and the assert that had been one keystroke away since v11 |
 | `V16_READLOG.md` | The ride-hailing model: Match, schedules, routes, arrays, and Arena's Max Arrivals |
+| `V17_READLOG.md` | Describing a model out loud with a cheap language model, and the desktop app |
+| `DES_Engine_Reference.pdf` | The reference manual: every public type and member, and what calls what |
 | `ARENA_MAP.md` | Arena module → this engine, and where the two differ |
 | `examples/README.md` | How to use the engine: API reference, gotchas, checklist |
 
@@ -889,12 +892,14 @@ The error appears in red in the panel.
 sim/
 ├── CMakeLists.txt   README.md   CHANGELOG.md   V2_READLOG.md   V3_READLOG.md
 ├── main.cpp         five scenarios (des_demo)
-├── cli/             the des command: check, run and regress
+├── cli/             the des command: check, run, regress, generate and new
 ├── tui/             des_tui: the terminal UI, and the only platform code
+├── gui/             DES-Simulator: the Qt desktop app (DES_BUILD_GUI=ON)
+├── third_party/     miniaudio, for the microphone (public domain)
 ├── examples/models/ hand-written .des models
-├── tests/           1740 unit checks
-├── include/         50 headers
-└── src/             42 sources
+├── tests/           1943 unit checks
+├── include/         65 headers
+└── src/             56 sources
 ```
 
 Headers declare, sources define. One-line getters stay inline. Every `.cpp`
